@@ -43,6 +43,22 @@ El servidor queda en `http://localhost:5000`. Prueba con `GET /api/health`.
 
 ## Siguiente paso
 
-Este es el **paso 1** (login/roles) + **paso 2** (CRUD de catálogo) del patrón de Sistema GONZA.
-Falta: carrito/pedidos con checkout, integración de pasarela de pago, frontend en React,
-alertas por email (Resend) y dashboard de ventas.
+Ya están: login/roles, CRUD de catálogo, cobro por código de barras/QR/voz,
+carrito + checkout con Mercado Pago, chatbot (FAQ + IA de respaldo con
+Claude) y redes sociales (login social, publicación automática de ofertas).
+
+Falta: **frontend en React** con el diseño del boceto (home, panel de
+cobro con escáner/voz, chat flotante, botones para compartir), alertas
+por email (Resend) y dashboard de ventas.
+
+### Redes sociales y chatbot — qué necesitas configurar
+
+- **Chatbot**: crea una API key en console.anthropic.com y ponla en
+  `ANTHROPIC_API_KEY`. Sin ella, el chatbot sigue funcionando solo con
+  las preguntas frecuentes fijas.
+- **Login con Google**: crea credenciales OAuth en console.cloud.google.com.
+- **Login con Facebook** y **publicación automática en Facebook/Instagram**:
+  se hacen desde la misma app en developers.facebook.com. Instagram debe
+  ser una cuenta de negocio vinculada a tu página de Facebook.
+- Si no configuras estas variables, esas funciones simplemente se
+  desactivan solas (no rompen el resto del sistema).

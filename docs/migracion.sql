@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS productos (
     edicion_limitada BOOLEAN DEFAULT FALSE,
     destacado BOOLEAN DEFAULT FALSE,
     imagen_url VARCHAR(255),
+    codigo_barras VARCHAR(50) UNIQUE,
+    clave_producto VARCHAR(30) UNIQUE,
     activo BOOLEAN DEFAULT TRUE,
     creado_por INTEGER REFERENCES usuarios(id),
     fecha_creacion TIMESTAMP DEFAULT NOW()

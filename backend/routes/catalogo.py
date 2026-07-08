@@ -5,6 +5,7 @@ Lectura pública (para la tienda). Escritura solo administrador/vendedor.
 from flask import Blueprint, request, jsonify
 from models import db, Producto, Categoria, Oferta
 from auth import requiere_rol
+from social_publicar import publicar_oferta
 
 catalogo_bp = Blueprint("catalogo", __name__, url_prefix="/api")
 
@@ -47,6 +48,30 @@ def listar_productos():
 
     productos = query.all()
     return jsonify([_producto_a_dict(p) for p in productos])
+
+
+@catalogo_bp.route("/productos/buscar-codigo", methods=["GET"])
+def buscar_por_codigo():
+    """
+    Búsqueda para cobro rápido en el panel de administrador/vendedor.
+    Un solo endpoint sirve a los 3 métodos de entrada:
+      - Escáner de código de barras -> manda el EAN/UPC leído en ?codigo=
+      - Escáner de QR -> el QR del producto codifica su clave_producto, se manda igual en ?codigo=
+      - Voz -> el frontend convierte el audio a texto (Web Speech API) y normaliza
+        la clave leída (ej. "H W guión mil veinticuatro" -> "HW-1024") antes de mandarla aquí.
+    """
+    codigo = (request.args.get("codigo") or "").strip().upper()
+    if not codigo:
+        return jsonify({"error": "Falta el parámetro codigo"}), 400
+
+    producto = Producto.query.filter(
+        (Producto.codigo_barras == codigo) | (Producto.clave_producto == codigo)
+    ).filter_by(activo=True).first()
+
+    if not producto:
+        return jsonify({"error": "No se encontró ningún producto con ese código"}), 404
+
+    return jsonify(_producto_a_dict(producto))
 
 
 @catalogo_bp.route("/productos/<int:producto_id>", methods=["GET"])
@@ -97,6 +122,48 @@ def eliminar_producto(producto_id):
     return jsonify({"ok": True})
 
 
+# ---------------------------------------------------------------------------
+# Ofertas (publican automáticamente en Facebook/Instagram al crearse)
+# ---------------------------------------------------------------------------
+@catalogo_bp.route("/ofertas", methods=["GET"])
+def listar_ofertas():
+    ofertas = Oferta.query.filter_by(activa=True).all()
+    return jsonify([
+        {
+            "id": o.id, "titulo": o.titulo, "descripcion": o.descripcion,
+            "producto_id": o.producto_id, "fecha_fin": o.fecha_fin.isoformat(),
+        }
+        for o in ofertas
+    ])
+
+
+@catalogo_bp.route("/ofertas", methods=["POST"])
+@requiere_rol("administrador")
+def crear_oferta():
+    data = request.get_json() or {}
+    oferta = Oferta(
+        titulo=data["titulo"],
+        descripcion=data.get("descripcion"),
+        producto_id=data.get("producto_id"),
+        fecha_fin=data["fecha_fin"],
+    )
+    db.session.add(oferta)
+    db.session.commit()
+
+    resultado_publicacion = None
+    if oferta.producto_id:
+        producto = Producto.query.get(oferta.producto_id)
+        if producto and producto.imagen_url:
+            resultado_publicacion = publicar_oferta(
+                titulo=oferta.titulo,
+                descripcion=oferta.descripcion or "",
+                imagen_url=producto.imagen_url,
+                link_producto=f"{request.host_url}producto/{producto.id}",
+            )
+
+    return jsonify({"id": oferta.id, "redes_sociales": resultado_publicacion}), 201
+
+
 def _producto_a_dict(p: Producto) -> dict:
     return {
         "id": p.id,
@@ -110,4 +177,6 @@ def _producto_a_dict(p: Producto) -> dict:
         "edicion_limitada": p.edicion_limitada,
         "destacado": p.destacado,
         "imagen_url": p.imagen_url,
+        "codigo_barras": p.codigo_barras,
+        "clave_producto": p.clave_producto,
     }

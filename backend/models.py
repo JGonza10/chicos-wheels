@@ -56,6 +56,9 @@ class Producto(db.Model):
     destacado = db.Column(db.Boolean, default=False)            # aparece en "destacados con descuento"
     imagen_url = db.Column(db.String(255))
 
+    codigo_barras = db.Column(db.String(50), unique=True, index=True)   # EAN/UPC físico del producto
+    clave_producto = db.Column(db.String(30), unique=True, index=True)  # clave corta legible por voz, ej. "HW-1024"
+
     activo = db.Column(db.Boolean, default=True)
     creado_por = db.Column(db.Integer, db.ForeignKey("usuarios.id"))  # administrador o vendedor que lo cargó
     fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
