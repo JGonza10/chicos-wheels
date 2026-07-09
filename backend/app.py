@@ -8,6 +8,7 @@ from routes.catalogo import catalogo_bp
 from routes.carrito import carrito_bp
 from routes.pedidos import pedidos_bp
 from routes.chatbot import chatbot_bp
+from routes.dashboard import dashboard_bp
 from social_auth import social_bp, init_oauth
 
 
@@ -28,6 +29,7 @@ def create_app():
     app.register_blueprint(carrito_bp)
     app.register_blueprint(pedidos_bp)
     app.register_blueprint(chatbot_bp)
+    app.register_blueprint(dashboard_bp)
     app.register_blueprint(social_bp)
     init_oauth(app)
 

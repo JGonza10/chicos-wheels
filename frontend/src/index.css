@@ -1,0 +1,108 @@
+:root {
+  --cw-azul: #123c7a;
+  --cw-azul-claro: #1e5aa8;
+  --cw-oro: #d4a017;
+  --cw-oro-claro: #f2c230;
+  --cw-naranja: #e8622c;
+  --cw-verde: #3c8a3c;
+
+  --fondo: #f6f4ee;
+  --superficie: #ffffff;
+  --texto: #1a1a18;
+  --texto-secundario: #5b5b57;
+  --borde: #e4e1d6;
+  --radio: 10px;
+  --radio-tarjeta: 12px;
+}
+
+[data-tema="oscuro"] {
+  --fondo: #10151f;
+  --superficie: #171f2c;
+  --texto: #eef0f5;
+  --texto-secundario: #a9b0be;
+  --borde: #2a3242;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: var(--fondo);
+  color: var(--texto);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.contenedor {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.boton-primario {
+  background: var(--cw-naranja);
+  color: #fff;
+  border: none;
+  padding: 10px 18px;
+  border-radius: var(--radio);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.boton-secundario {
+  background: transparent;
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  padding: 9px 16px;
+  border-radius: var(--radio);
+  font-size: 14px;
+}
+
+.tarjeta {
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio-tarjeta);
+  padding: 14px;
+}
+
+.etiqueta-descuento {
+  background: var(--cw-verde);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+
+.etiqueta-escasez {
+  background: var(--cw-naranja);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 20px;
+}
+
+.precio-anterior {
+  color: var(--texto-secundario);
+  text-decoration: line-through;
+  font-size: 12px;
+}
+
+.precio-actual {
+  color: var(--cw-naranja);
+  font-weight: 700;
+  font-size: 16px;
+}
