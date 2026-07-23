@@ -15,11 +15,10 @@ from social_auth import social_bp, init_oauth
 def create_app():
     app = Flask(__name__)
 
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ["DATABASE_URL"].replace(
-    "postgres://", "postgresql+psycopg://", 1
-    ).replace(
-    "postgresql://", "postgresql+psycopg://", 1
-    )
+    db_url = os.environ["DATABASE_URL"]
+    db_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
+    db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    app.config["SQLALCHEMY_DATABASE_URI"] = db_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "cambia-esto-en-produccion")
 
