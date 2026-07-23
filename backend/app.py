@@ -16,7 +16,9 @@ def create_app():
     app = Flask(__name__)
 
     app.config["SQLALCHEMY_DATABASE_URI"] = os.environ["DATABASE_URL"].replace(
-        "postgres://", "postgresql://", 1
+    "postgres://", "postgresql+psycopg://", 1
+    ).replace(
+    "postgresql://", "postgresql+psycopg://", 1
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "cambia-esto-en-produccion")
