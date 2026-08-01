@@ -279,7 +279,7 @@ function render() {
   <button class="fab" data-a="nuevo" title="Registrar pieza" aria-label="Registrar pieza">+</button>
   <nav class="mob">${NAV.filter((n) => !n[0].startsWith('SEP')).map((n) =>
     `<button data-a="nav" data-v="${n[0]}" class="${ui.vista === n[0] ? 'on' : ''}"><span class="ic">${n[1]}</span>${n[2].replace('Modo ', '')}</button>`).join('')}</nav>
-  ${ui.modal ? `<div class="ov" data-a="ovcerrar">${(MOD[ui.modal] || (() => ''))()}</div>` : ''}`;
+  ${ui.modal ? `<div class="ov">${(MOD[ui.modal] || (() => ''))()}</div>` : ''}`;
   if (ui.modal === 'venta') pintarVenta();
   if (ui.modal === 'lote') pintarLote();
   if (ui.modal === 'historial') pintarChart();
@@ -988,7 +988,7 @@ document.addEventListener('click', async (e) => {
 
     /* --- navegación --- */
     case 'nav': ui.vista = el.dataset.v; ui.modal = null; ui.sel = []; ui.selMode = false; render(); window.scrollTo(0, 0); break;
-    case 'cerrar': case 'ovcerrar': cerrar(); break;
+    case 'cerrar': cerrar(); break;
     case 'ftipo': ui.fTipo = el.dataset.v; render(); break;
     case 'festatus': ui.fEstatus = el.dataset.v; render(); break;
     case 'selmode': ui.selMode = !ui.selMode; if (!ui.selMode) ui.sel = []; render();
