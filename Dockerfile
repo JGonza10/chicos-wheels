@@ -9,8 +9,9 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 COPY . .
 
 # La base de datos vive en un volumen para sobrevivir a los redespliegues.
+# (el volumen se monta en tiempo de ejecución, no aquí: Railway no soporta
+# la instrucción VOLUME de Docker, y docker-compose ya declara el suyo)
 RUN mkdir -p /app/datos
-VOLUME ["/app/datos"]
 
 ENV FLASK_ENV=production \
     PORT=3000 \
