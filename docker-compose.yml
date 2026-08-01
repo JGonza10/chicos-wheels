@@ -1,0 +1,16 @@
+services:
+  collecthub:
+    build: .
+    container_name: collecthub
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      FLASK_ENV: production
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en tu archivo .env}
+      DB_FILE: /app/datos/collecthub.db
+    volumes:
+      - collecthub-datos:/app/datos
+
+volumes:
+  collecthub-datos:

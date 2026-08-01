@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+datos/*.db
+datos/*.db-wal
+datos/*.db-shm
+respaldos/
+.env
+.DS_Store
+*.log
