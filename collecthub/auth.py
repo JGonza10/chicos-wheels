@@ -9,11 +9,18 @@ from flask import g, request
 
 from .util import ErrorApp
 
-SECRETO = os.environ.get("JWT_SECRET", "cambia-esta-llave-en-produccion")
+SECRETO = os.environ.get("JWT_SECRET", "")
 DIAS_VIGENCIA = int(os.environ.get("JWT_DIAS", "30"))
 
-if os.environ.get("FLASK_ENV") == "production" and not os.environ.get("JWT_SECRET"):
-    print("\n  ⚠  Falta JWT_SECRET. En producción es obligatorio: defínelo y reinicia.\n",
+# Obligatoria siempre, no solo cuando FLASK_ENV=="production": ese valor
+# depende de que quien despliegue lo haya puesto correctamente, y si se le
+# olvida (o cambia la forma de arrancar la app) la app seguía funcionando en
+# silencio con una llave que cualquiera puede leer en este mismo archivo del
+# repositorio público — quien la conozca puede firmar un token válido para
+# cualquier usuario. Sin la variable, la app se niega a arrancar.
+if not SECRETO:
+    print("\n  ⚠  Falta JWT_SECRET. Es obligatoria: defínela y reinicia.\n"
+          "     Genera una con: python -c \"import secrets; print(secrets.token_hex(32))\"\n",
           file=sys.stderr)
     sys.exit(1)
 
