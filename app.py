@@ -27,6 +27,6 @@ app = crear_app()
 
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 3000))
-    print(f"\n  CollectHub corriendo en http://localhost:{puerto}")
+    print(f"\n  Chicos Wheels corriendo en http://localhost:{puerto}")
     print(f"  Base de datos: {RUTA_BD}\n")
     app.run(host="0.0.0.0", port=puerto, debug=os.environ.get("FLASK_ENV") == "development")

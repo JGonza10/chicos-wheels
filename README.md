@@ -1,4 +1,4 @@
-# CollectHub
+# Chicos Wheels (CollectHub)
 
 Sistema de inventario, valuación y venta de coleccionables **Hot Wheels** y **cartas Pokémon**, con backend en Flask y frontend web sin build.
 

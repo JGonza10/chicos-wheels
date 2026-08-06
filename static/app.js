@@ -1,5 +1,5 @@
 /* ==========================================================================
-   CollectHub · cliente
+   Chicos Wheels · cliente
    Habla con la API por HTTP. La única fuente de verdad es el servidor:
    aquí solo se guarda una copia para pintar rápido, y después de cada
    cambio se vuelve a pedir el estado completo.
@@ -234,7 +234,7 @@ function movimientos() {
 function vistaAuth() {
   const esLogin = ui.authTab === 'login';
   return `<div class="auth"><div class="authbox">
-    <div class="logo">COLLECT<i>HUB</i></div>
+    <div class="logo">CHICOS<i>WHEELS</i></div>
     <div class="sub">Inventario, valuación y venta de coleccionables</div>
     <div class="pnl">
       <div class="authtabs">
@@ -299,7 +299,7 @@ function render() {
   $('#app').innerHTML = `
   <div class="shell">
     <aside class="side">
-      <div class="logo">COLLECT<i>HUB</i><small>${esc((usuario && (usuario.nombre || usuario.email)) || '')}</small></div>
+      <div class="logo">CHICOS<i>WHEELS</i><small>${esc((usuario && (usuario.nombre || usuario.email)) || '')}</small></div>
       <nav class="nav">${NAV.map((n) => (n[0].startsWith('SEP')
         ? `<div class="navsep">${n[2]}</div>`
         : `<button data-a="nav" data-v="${n[0]}" class="${ui.vista === n[0] ? 'on' : ''}"><span class="ic">${n[1]}</span>${n[2]}<span class="cnt">${CNT[n[0]] ? (CNT[n[0]]() || '') : ''}</span></button>`)).join('')}
@@ -338,7 +338,7 @@ const alerta = (t, n, d, c, v) => `<div class="pnl" style="cursor:pointer" data-
 /* ---------- Panel ---------- */
 function vPanel() {
   const s = stats();
-  const titulo = 'COLLECT<i style="color:var(--yellow);font-style:normal">HUB</i>';
+  const titulo = 'CHICOS<i style="color:var(--yellow);font-style:normal">WHEELS</i>';
   if (!db.articulos.length && !db.ventas.length) {
     return hdr(titulo, 'Inventario, valuación y venta de coleccionables') +
       vacio('🏎️', 'Tu vitrina está vacía', 'Registra tu primera pieza y el panel empieza a calcular capital, plusvalía y ganancias solo.',
@@ -657,7 +657,7 @@ function pintarQR() {
   $$('.qrbox').forEach((b) => {
     const t = b.dataset.txt; b.innerHTML = '';
     if (window.QRCode) {
-      try { new window.QRCode(b, { text: 'CollectHub · ' + t, width: 78, height: 78, colorDark: '#0A1120', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M }); return; } catch (e) { /* sin red */ }
+      try { new window.QRCode(b, { text: 'Chicos Wheels · ' + t, width: 78, height: 78, colorDark: '#0A1120', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M }); return; } catch (e) { /* sin red */ }
     }
     b.innerHTML = `<div style="width:78px;height:78px;display:grid;place-items:center;border:2px dashed #999;border-radius:6px;font-size:9px;color:#555;text-align:center;padding:4px">${esc(t)}</div>`;
   });
@@ -677,12 +677,22 @@ function vDatos() {
       <div class="fld"><label class="lbl">Una pieza se considera estancada después de (días)</label>
         <input class="in" type="number" value="${db.ajustes.diasEstancado}" data-a="set" data-k="dias_estancado"></div>
     </div>
-    <div class="pnl"><h2>Respaldo</h2>
+    <div class="pnl"><h2>Respaldo e importación</h2>
       <p style="font-size:12.5px;color:var(--muted);margin-bottom:15px">Tus datos viven en la base de datos del servidor. Descarga un respaldo antes de migrar o actualizar.</p>
       <div style="display:flex;gap:9px;flex-wrap:wrap">
         <button class="btn pri" data-a="export">Descargar respaldo</button>
         <button class="btn" data-a="csv">Inventario en CSV</button>
       </div>
+
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line)">
+        <p style="font-size:12.5px;color:var(--muted);margin-bottom:11px">Da de alta varias piezas de un jalón: descarga la plantilla, llénala y súbela de vuelta.</p>
+        <div style="display:flex;gap:9px;flex-wrap:wrap">
+          <a class="btn gh" href="/plantilla-inventario.xlsx" download>📥 Descargar plantilla (.xlsx)</a>
+          <label class="btn" for="archivo_importar" style="cursor:pointer">📤 Importar desde Excel</label>
+          <input type="file" id="archivo_importar" data-a="importar" accept=".xlsx" style="display:none">
+        </div>
+      </div>
+
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line);display:flex;gap:9px;flex-wrap:wrap">
         <button class="btn gh" data-a="demo">Cargar datos de ejemplo</button>
         <button class="btn dgr" data-a="wipe">Borrar todo</button></div>
@@ -1180,6 +1190,11 @@ document.addEventListener('change', async (e) => {
     const valor = el.type === 'number' ? num(el.value) : el.value;
     await accion(() => PATCH('/ajustes', { [el.dataset.k]: valor }), 'Ajuste guardado');
   }
+  if (a === 'importar') {
+    const archivo = el.files[0];
+    el.value = ''; // permite volver a elegir el mismo archivo después
+    if (archivo) importarInventario(archivo);
+  }
 });
 
 document.addEventListener('keydown', (e) => {
@@ -1428,9 +1443,44 @@ const csvq = (s) => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
 async function exportar() {
   try {
     const datos = await GET('/exportar');
-    bajar(`collecthub-${hoy()}.json`, JSON.stringify(datos, null, 2), 'application/json');
+    bajar(`chicos-wheels-${hoy()}.json`, JSON.stringify(datos, null, 2), 'application/json');
     toast('Respaldo descargado');
   } catch (e) { toast(e.message, true); }
+}
+
+/** Sube el .xlsx de inventario al servidor para darlo de alta en lote.
+ * No usa api()/POST porque esas siempre mandan JSON; un archivo va como
+ * multipart/form-data, y con FormData el navegador arma el boundary solo
+ * (por eso no se fija el header Content-Type a mano). */
+async function importarInventario(archivo) {
+  if (ui.ocupado) return;
+  ui.ocupado = true;
+  try {
+    const formData = new FormData();
+    formData.append('archivo', archivo);
+    const r = await fetch('/api/articulos/importar', {
+      method: 'POST',
+      headers: token ? { Authorization: 'Bearer ' + token } : {},
+      body: formData,
+    });
+    let datos = null;
+    try { datos = await r.json(); } catch (e) { /* sin cuerpo */ }
+    if (r.status === 401) { salir(true); throw new Error('Tu sesión expiró, vuelve a entrar'); }
+    if (!r.ok) throw new Error((datos && datos.error) || 'No se pudo importar el archivo');
+
+    await cargarEstado();
+    const { insertados, errores } = datos;
+    if (!errores.length) {
+      toast(`${insertados} pieza(s) importada(s) correctamente.`);
+    } else {
+      const detalle = errores.slice(0, 3).map((e) => `fila ${e.fila}: ${e.mensaje}`).join(' · ');
+      toast(`${insertados} importada(s), ${errores.length} con error — ${detalle}${errores.length > 3 ? '…' : ''}`, insertados === 0);
+    }
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    ui.ocupado = false;
+  }
 }
 function exportarCSV() {
   const c = ['id', 'tipo', 'nombre', 'numero', 'anio', 'serie', 'color', 'expansion', 'rareza', 'grado', 'cert', 'sub',

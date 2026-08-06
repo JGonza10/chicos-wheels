@@ -1,6 +1,8 @@
 """Inventario de piezas y su historial de precios."""
+import datetime
 import json
 
+import openpyxl
 from flask import Blueprint, g, jsonify, request
 
 from ..db import bd, todos, transaccion, uno
@@ -10,6 +12,15 @@ bp = Blueprint("articulos", __name__)
 
 TIPOS = ("Hot Wheels", "Pokémon")
 ESTATUS = ("Disponible", "En negociación", "Conservar")
+
+# Mismo orden que scripts/generar_plantilla.py — si cambian los campos del
+# inventario, hay que actualizar ambos.
+COLUMNAS_PLANTILLA = (
+    "tipo", "nombre", "numero", "anio", "cantidad", "precio_compra", "valor_estimado",
+    "fecha_adq", "estatus", "fuente", "ubicacion", "codigo", "serie", "color",
+    "expansion", "rareza", "grado", "cert", "sub", "estado", "notas",
+)
+MAX_FILAS_IMPORTACION = 2000
 
 
 def limpiar(b: dict, parcial: bool = False) -> dict:
@@ -77,25 +88,93 @@ def detalle(id_art):
     return jsonify(a)
 
 
+def _insertar_articulo(con, datos: dict) -> str:
+    """Inserta un artículo ya validado por limpiar() y su valuación inicial.
+    Reutilizada por crear() (un artículo) e importar() (un lote desde .xlsx)."""
+    nuevo_id = uid("PKM" if datos["tipo"] == "Pokémon" else "HW")
+    columnas = list(datos.keys())
+    con.execute(
+        f"INSERT INTO articulos (id,usuario_id,cant_inicial,{','.join(columnas)}) "
+        f"VALUES (?,?,?,{','.join('?' * len(columnas))})",
+        [nuevo_id, g.usuario_id, datos["cantidad"]] + [datos[c] for c in columnas])
+    if datos["valor_estimado"] > 0:
+        con.execute(
+            "INSERT INTO valuaciones (id,articulo_id,fecha,valor,fuente) VALUES (?,?,?,?,?)",
+            (uid("VAL"), nuevo_id, datos["fecha_adq"] or hoy(),
+             datos["valor_estimado"], "Registro inicial"))
+    return nuevo_id
+
+
 @bp.post("")
 def crear():
     datos = limpiar(request.get_json(silent=True) or {})
-    nuevo_id = uid("PKM" if datos["tipo"] == "Pokémon" else "HW")
-    columnas = list(datos.keys())
-
     with transaccion() as con:
-        con.execute(
-            f"INSERT INTO articulos (id,usuario_id,cant_inicial,{','.join(columnas)}) "
-            f"VALUES (?,?,?,{','.join('?' * len(columnas))})",
-            [nuevo_id, g.usuario_id, datos["cantidad"]] + [datos[c] for c in columnas])
-        # La primera valuación es el punto de partida de la gráfica de tendencia.
-        if datos["valor_estimado"] > 0:
-            con.execute(
-                "INSERT INTO valuaciones (id,articulo_id,fecha,valor,fuente) VALUES (?,?,?,?,?)",
-                (uid("VAL"), nuevo_id, datos["fecha_adq"] or hoy(),
-                 datos["valor_estimado"], "Registro inicial"))
-
+        nuevo_id = _insertar_articulo(con, datos)
     return jsonify(uno("SELECT * FROM v_articulos WHERE id=?", (nuevo_id,))), 201
+
+
+def _valor_celda(v):
+    """openpyxl entrega fechas como datetime; el resto de los campos, tal cual
+    la celda los tenga. Todo se vuelve texto/número simple antes de limpiar()."""
+    if isinstance(v, (datetime.date, datetime.datetime)):
+        return v.strftime("%Y-%m-%d")
+    return v
+
+
+@bp.post("/importar")
+def importar():
+    """Carga masiva desde el .xlsx de scripts/generar_plantilla.py. Cada fila
+    se valida con la MISMA función que usa el alta manual (limpiar()); una
+    fila con error no tumba las demás, se reporta y se sigue con el resto."""
+    archivo = request.files.get("archivo")
+    if not archivo or not archivo.filename:
+        raise ErrorApp("Adjunta el archivo .xlsx de la plantilla")
+    if not archivo.filename.lower().endswith(".xlsx"):
+        raise ErrorApp("El archivo debe ser .xlsx (usa la plantilla que se descarga aquí mismo)")
+
+    try:
+        libro = openpyxl.load_workbook(archivo, data_only=True, read_only=True)
+    except Exception:
+        raise ErrorApp("No se pudo leer el archivo. ¿Es un .xlsx válido y no está dañado?")
+
+    hoja = libro["Inventario"] if "Inventario" in libro.sheetnames else libro.worksheets[0]
+    filas = hoja.iter_rows(values_only=True)
+    try:
+        encabezado = [str(c).strip().lower() if c is not None else "" for c in next(filas)]
+    except StopIteration:
+        raise ErrorApp("El archivo está vacío")
+
+    columnas_usadas = {nombre: i for i, nombre in enumerate(encabezado) if nombre in COLUMNAS_PLANTILLA}
+    if "tipo" not in columnas_usadas or "nombre" not in columnas_usadas:
+        raise ErrorApp("Faltan columnas obligatorias (tipo, nombre). ¿Es la plantilla original?")
+
+    insertados, errores, n_fila = 0, [], 1
+    with transaccion() as con:
+        for cruda in filas:
+            n_fila += 1
+            if n_fila - 1 > MAX_FILAS_IMPORTACION:
+                errores.append({"fila": n_fila, "mensaje": f"Se alcanzó el máximo de {MAX_FILAS_IMPORTACION} filas por archivo; el resto no se procesó."})
+                break
+            if cruda is None or all(c is None for c in cruda):
+                continue  # fila en blanco, se ignora sin marcarla como error
+            fila_dict = {nombre: _valor_celda(cruda[i]) for nombre, i in columnas_usadas.items()
+                         if i < len(cruda) and cruda[i] is not None}
+            if not fila_dict.get("nombre"):
+                continue  # fila vacía salvo alguna celda suelta
+            try:
+                datos = limpiar(fila_dict)
+                _insertar_articulo(con, datos)
+                insertados += 1
+            except ErrorApp as e:
+                errores.append({"fila": n_fila, "mensaje": e.mensaje})
+            except Exception:
+                # No debe pasar (limpiar() ya valida todo), pero si pasa, que
+                # se reporte esa fila y siga con las demás en vez de tirar
+                # el lote entero (con transaccion() haría rollback de todo
+                # si el error se dejara escapar del with).
+                errores.append({"fila": n_fila, "mensaje": "No se pudo guardar esta fila."})
+
+    return jsonify(insertados=insertados, errores=errores), 201
 
 
 @bp.patch("/<id_art>")
