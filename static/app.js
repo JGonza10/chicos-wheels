@@ -27,6 +27,38 @@ const CHECKS = {
   'Pokémon': ['Textura y relieve correctos al tacto', 'Tipografía y bordes sin pixelado', 'Prueba de luz: capa negra interior', 'Reverso con centrado y color correctos', 'Certificado de graduación verificado'],
 };
 
+/* ---------- Tema (las 4 paletas de Nexus, ver Proyectos/nexus-temas.css) ---------- */
+const TEMAS = [
+  { id: 'nexus', nombre: 'Nexus', descripcion: 'Oro y cian sobre negro azulado. El tema de fábrica.',
+    bg: '#05080E', muestra: ['#05080E', '#FFC94A', '#8FE9FF', '#B49CFF', '#D62B34'] },
+  { id: 'gonza', nombre: 'Gonza Systems', descripcion: 'Cian y violeta, con dorado cálido en los enlaces.',
+    bg: '#040B16', muestra: ['#040B16', '#5FD3FF', '#A98BFF', '#FFC46B', '#F0555C'] },
+  { id: 'claro', nombre: 'Taller', descripcion: 'Gris azulado muy suave para trabajar de día (nunca blanco puro).',
+    bg: '#EBEFF4', muestra: ['#EBEFF4', '#0A5FC0', '#6B37C9', '#B0288C', '#C1272D'] },
+  { id: 'grafito', nombre: 'Grafito', descripcion: 'Gris neutro, sin brillos. Para sesiones largas.',
+    bg: '#121417', muestra: ['#121417', '#E7EAEE', '#7FB2D9', '#C9A66B', '#E0645F'] },
+  // 'clasico' (azul y dorado sobre marino, el original de Chicos Wheels) se
+  // desactivó a petición: los colores todavía no son definitivos. Cuando se
+  // decidan, actualiza los valores aquí y en styles.css (#ch[data-tema="clasico"],
+  // hoy comentado) y descomenta esta entrada para que reaparezca en Apariencia.
+  // { id: 'clasico', nombre: 'Clásico', descripcion: 'Azul y dorado sobre marino — el estilo original de Chicos Wheels.',
+  //   bg: '#0A1120', muestra: ['#0A1120', '#FFD84D', '#38D6F0', '#A78BFA', '#FF4B4B'] },
+];
+const TEMA_KEY = 'collecthub_tema';
+const IDS_TEMAS = TEMAS.map((t) => t.id);
+
+function aplicarTema(id) {
+  const t = IDS_TEMAS.includes(id) ? id : 'nexus';
+  document.getElementById('ch').setAttribute('data-tema', t);
+  localStorage.setItem(TEMA_KEY, t);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', TEMAS.find((x) => x.id === t).bg);
+}
+function temaGuardado() {
+  const g = localStorage.getItem(TEMA_KEY);
+  return IDS_TEMAS.includes(g) ? g : 'nexus';
+}
+
 /* ---------- Capa de API ---------- */
 const TOKEN_KEY = 'collecthub_token';
 let token = localStorage.getItem(TOKEN_KEY) || '';
@@ -634,8 +666,9 @@ function pintarQR() {
 /* ---------- Datos ---------- */
 function vDatos() {
   const s = stats();
+  const temaActual = temaGuardado();
   return hdr('Datos', 'Respaldo y ajustes', '') + `
-  <div class="g2">
+  <div class="g3">
     <div class="pnl"><h2>Ajustes</h2>
       <div class="fld"><label class="lbl">Moneda</label>
         <select class="sel" data-a="set" data-k="moneda">${['MXN', 'USD', 'EUR', 'COP', 'ARS', 'CLP', 'PEN'].map((m) => `<option ${db.ajustes.moneda === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div>
@@ -656,6 +689,14 @@ function vDatos() {
       <div class="mn" style="font-size:11.5px;color:var(--muted);margin-top:16px;line-height:1.8">
         ${db.articulos.length} artículos · ${db.ventas.length} ventas · ${db.apartados.length} apartados<br>
         ${db.intercambios.length} intercambios · ${db.compradores.length} clientes · ${s.piezas} piezas físicas</div>
+    </div>
+    <div class="pnl"><h2>Apariencia</h2>
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Elige la paleta de colores. Se guarda en este dispositivo.</p>
+      <div class="themes">${TEMAS.map((t) => `
+        <button class="tcard ${temaActual === t.id ? 'on' : ''}" data-a="tema" data-t="${t.id}">
+          <h5>${t.nombre}</h5><p>${t.descripcion}</p>
+          <div class="sw">${t.muestra.map((c) => `<i style="background:${c}"></i>`).join('')}</div>
+        </button>`).join('')}</div>
     </div>
   </div>`;
 }
@@ -985,6 +1026,7 @@ document.addEventListener('click', async (e) => {
     case 'authtab': ui.authTab = el.dataset.v; ui.authErr = ''; render(); break;
     case 'auth': await autenticar(); break;
     case 'salir': if (confirm('¿Cerrar sesión en este dispositivo?')) salir(); break;
+    case 'tema': aplicarTema(el.dataset.t); render(); break;
 
     /* --- navegación --- */
     case 'nav': ui.vista = el.dataset.v; ui.modal = null; ui.sel = []; ui.selMode = false; render(); window.scrollTo(0, 0); break;
@@ -1405,6 +1447,7 @@ function exportarVentasCSV() {
 
 /* ==================== Arranque ==================== */
 (async function iniciar() {
+  aplicarTema(temaGuardado());
   if (!token) { render(); return; }
   try {
     const r = await GET('/auth/yo');
