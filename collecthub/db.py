@@ -81,12 +81,6 @@ def todos(sql, params=()):
     return [dict(f) for f in bd().execute(sql, params).fetchall()]
 
 
-def ejecutar(sql, params=()):
-    cur = bd().execute(sql, params)
-    bd().commit()
-    return cur
-
-
 def vencer_apartados() -> int:
     """Marca como Vencido todo apartado cuya fecha límite ya pasó."""
     cur = bd().execute(
