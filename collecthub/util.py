@@ -51,20 +51,6 @@ def fecha(v) -> str:
     return v if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(v or "")) else hoy()
 
 
-def neto(precio, costo_unit, cantidad, com_fija, com_pct, ret_pct, envio, otros) -> float:
-    """
-    Ganancia neta. Existe también como columna generada en la base de datos;
-    esta copia sirve para previsualizar antes de guardar. Si alguna vez
-    difieren, la base de datos es la que manda.
-    """
-    return (num(precio)
-            - num(costo_unit) * num(cantidad)
-            - num(com_fija)
-            - num(precio) * num(com_pct)
-            - num(precio) * num(ret_pct)
-            - num(envio) - num(otros))
-
-
 def precio_objetivo(deseado, costo_total, plataforma, envio=0, otros=0) -> float:
     """¿A cuánto publico para que me queden X limpios?"""
     divisor = 1 - num(plataforma["com_pct"]) - num(plataforma["ret_pct"])
