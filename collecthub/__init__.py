@@ -56,7 +56,7 @@ def crear_app() -> Flask:
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "script-src 'self' https://cdnjs.cloudflare.com; "
-            "img-src 'self' data: https:; "
+            "img-src 'self' data: blob: https:; "
             "connect-src 'self'; "
             "frame-ancestors 'none'"
         )
@@ -67,6 +67,10 @@ def crear_app() -> Flask:
     # (donde importa más), y uno amplio para el resto de la API.
     intentos_auth = defaultdict(lambda: {"n": 0, "desde": 0.0})
     peticiones_api = defaultdict(lambda: {"n": 0, "desde": 0.0})
+    # Cada llamada a /identificar cuesta dinero real (API de Claude): límite
+    # propio y más estricto para que un bug o abuso no se traduzca en un
+    # cobro sorpresa, aparte del límite general de la API.
+    peticiones_ia = defaultdict(lambda: {"n": 0, "desde": 0.0})
 
     def _excedido(registro, ip, ventana_seg, tope):
         reg = registro[ip]
@@ -96,6 +100,13 @@ def crear_app() -> Flask:
                 _limpiar_viejos(intentos_auth, 900)
             if _excedido(intentos_auth, ip, 900, 10):
                 return jsonify(error="Demasiados intentos. Espera 15 minutos."), 429
+
+        if request.path == "/api/articulos/identificar" and request.method == "POST":
+            if len(peticiones_ia) > 5000:
+                _limpiar_viejos(peticiones_ia, 3600)
+            if _excedido(peticiones_ia, ip, 3600, 20):
+                return jsonify(error="Ya identificaste varias fotos seguidas. Espera un rato "
+                                     "o llena el formulario a mano mientras tanto."), 429
 
         if len(peticiones_api) > 5000:
             _limpiar_viejos(peticiones_api, 300)

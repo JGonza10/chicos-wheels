@@ -6,10 +6,14 @@ el dinero, el stock y el aislamiento entre cuentas.
 
     python -m unittest discover -s tests -v
 """
+import io
 import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from PIL import Image
 
 # La base de prueba debe definirse ANTES de importar la app.
 _TMP = Path(tempfile.gettempdir()) / f"ch-test-{os.getpid()}.db"
@@ -35,6 +39,8 @@ class PruebasAPI(unittest.TestCase):
     def tearDownClass(cls):
         for sufijo in ("", "-wal", "-shm"):
             Path(str(_TMP) + sufijo).unlink(missing_ok=True)
+        import shutil
+        shutil.rmtree(_TMP.parent / "fotos", ignore_errors=True)
 
     # --- ayudantes ---
     def pedir(self, metodo, ruta, cuerpo=None, token="propio"):
@@ -252,6 +258,75 @@ class PruebasAPI(unittest.TestCase):
     def test_22_apartado_vencido_se_marca_solo(self):
         _, est = self.pedir("GET", "/api/estado", token=self.token2)
         self.assertTrue(any(a["estatus"] == "Vencido" for a in est["apartados"]))
+
+    # ---------------- Foto → IA ----------------
+    # identificar_foto()/buscar_precio_pokemon() se mockean: las pruebas no
+    # deben depender de red ni gastar la API real de Claude.
+
+    @staticmethod
+    def _imagen():
+        buf = io.BytesIO()
+        Image.new("RGB", (10, 10), (255, 0, 0)).save(buf, format="JPEG")
+        buf.seek(0)
+        return buf
+
+    def test_23_identificar_exige_sesion(self):
+        r = self.c.post("/api/articulos/identificar",
+                        data={"foto": (self._imagen(), "foto.jpg")}, content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 401)
+
+    def test_24_identificar_rechaza_archivo_que_no_es_imagen(self):
+        r = self.c.post("/api/articulos/identificar",
+                        data={"foto": (io.BytesIO(b"no es una imagen"), "foto.jpg")},
+                        headers={"Authorization": f"Bearer {self.token}"}, content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 400)
+
+    def test_25_identificar_regresa_la_sugerencia(self):
+        falsa = {"tipo": "Hot Wheels", "confianza": 0.82, "nombre": "Datsun 240Z", "numero": "",
+                "serie": "", "color": "Rojo", "expansion": "", "rareza": "", "grado": "", "cert": "",
+                "notas": "Auto rojo con base metálica"}
+        with patch("collecthub.rutas.articulos.identificar_foto", return_value=falsa):
+            r = self.c.post("/api/articulos/identificar",
+                            data={"foto": (self._imagen(), "foto.jpg")},
+                            headers={"Authorization": f"Bearer {self.token}"}, content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json()["nombre"], "Datsun 240Z")
+
+    def test_26_identificar_pokemon_agrega_precio_de_mercado(self):
+        falsa = {"tipo": "Pokémon", "confianza": 0.91, "nombre": "Charizard ex", "numero": "",
+                "serie": "", "color": "", "expansion": "Obsidian Flames", "rareza": "",
+                "grado": "", "cert": "", "notas": ""}
+        precio = {"expansion": "Obsidian Flames", "numero": "125", "rareza": "Ultra Rare", "valor_estimado": 45.5}
+        with patch("collecthub.rutas.articulos.identificar_foto", return_value=falsa), \
+             patch("collecthub.rutas.articulos.buscar_precio_pokemon", return_value=precio):
+            r = self.c.post("/api/articulos/identificar",
+                            data={"foto": (self._imagen(), "foto.jpg")},
+                            headers={"Authorization": f"Bearer {self.token}"}, content_type="multipart/form-data")
+        d = r.get_json()
+        self.assertEqual(d["rareza"], "Ultra Rare")
+        self.assertEqual(d["valor_estimado"], 45.5)
+
+    def test_27_foto_guardada_queda_aislada_entre_cuentas(self):
+        _, art = self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": "Prueba de foto"})
+        r = self.c.post(f"/api/articulos/{art['id']}/foto",
+                        data={"foto": (self._imagen(), "foto.jpg")},
+                        headers={"Authorization": f"Bearer {self.token}"}, content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 200)
+        archivo = r.get_json()["foto"][len("local:"):]
+
+        r = self.c.get(f"/api/articulos/foto/{archivo}", headers={"Authorization": f"Bearer {self.token}"})
+        self.assertEqual(r.status_code, 200, "el dueño sí debe poder ver su propia foto")
+
+        r = self.c.get(f"/api/articulos/foto/{archivo}", headers={"Authorization": f"Bearer {self.token2}"})
+        self.assertEqual(r.status_code, 404, "otra cuenta no debe poder ver esta foto ni adivinando el nombre")
+
+        r = self.c.get(f"/api/articulos/foto/{archivo}")
+        self.assertEqual(r.status_code, 401, "sin sesión, tampoco")
+
+    def test_28_foto_rechaza_nombre_de_archivo_invalido(self):
+        r = self.c.get("/api/articulos/foto/..%2f..%2fetc%2fpasswd",
+                       headers={"Authorization": f"Bearer {self.token}"})
+        self.assertIn(r.status_code, (400, 404))
 
 
 if __name__ == "__main__":

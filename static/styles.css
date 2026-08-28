@@ -6,9 +6,9 @@
    desde Datos → Apariencia:
      nexus   → oro + cian sobre negro azulado (por defecto)
      gonza   → cian + violeta, con dorado cálido en los enlaces
-     claro   → gris azulado muy suave, para trabajar de día (nunca blanco puro)
+     champs  → oro + marino sobre gris muy suave, para trabajar de día (nunca blanco puro)
      grafito → gris neutro sin brillos, para sesiones largas
-   Se elige poniendo  <div id="ch" data-tema="nexus|gonza|claro|grafito">
+   Se elige poniendo  <div id="ch" data-tema="nexus|gonza|champs|grafito">
    (ver app.js → aplicarTema/TEMAS). Todo queda con el mismo namespace bajo
    #ch que ya tenía este archivo, para no chocar con nada fuera de la app.
    ========================================================================== */
@@ -68,28 +68,33 @@
   --scan:.03;
 }
 
-/* ── TEMA: CLARO / "Taller" — gris azulado muy suave, nunca blanco puro ──── */
-#ch[data-tema="claro"]{
-  --bg:#EBEFF4;      --bg2:#E2E7EE;
-  --panel:#F7F9FC;   --panel2:#EEF2F7;  --raise:#E5EAF1;
-  --line:rgba(10,95,192,.18);    --line2:rgba(107,55,201,.16);
-  --blue:#1C7ED6;    --blue2:#0F5FA8;   --cyan:#6B37C9;
-  --red:#C1272D;     --yellow:#0A5FC0;  --green:#0E7A57;
-  --purple:#B0288C;  --orange:#C2540C;
-  --text:#0F1C2B;    --muted:#42566E;   --muted2:#75899E;
+/* ── TEMA: CLARO / "Champs" — oro + marino sobre gris muy suave, nunca blanco puro ── */
+/* Identidad "Champs": oro (--yellow) + marino (--blue) como acentos
+   principales, con un guiño a medallas — plata en --purple, bronce en
+   --orange. --red/--green se dejan en sus tonos semánticos (alerta/éxito). */
+#ch[data-tema="champs"]{
+  --bg:#EEF1F6;      --bg2:#E5E9F0;
+  --panel:#F8F9FB;   --panel2:#EFF1F5;  --raise:#E6E9EF;
+  --line:rgba(10,31,68,.20);     --line2:rgba(140,140,150,.22);
+  --blue:#0A1F44;    --blue2:#071630;   --cyan:#3D5A80;
+  --red:#C1272D;     --yellow:#B8860B;  --green:#0E7A57;
+  --purple:#8A8F98;  --orange:#A0522D;
+  --text:#0A1F44;    --muted:#4A5A72;   --muted2:#78879C;
 
-  --tint-blue:#DCEAFA;
-  --tint-yellow:#DCE9F8;
+  --tint-blue:#DCE6F4;
+  --tint-yellow:#F5E7C6;
   --tint-red:#F6DEDF;
   --tint-green:#DCEFE8;
-  --tint-orange:#F5E1D3;
+  --tint-orange:#EEDFD2;
 
   --campo:#F0F3F8;
-  --panel-fondo:#F7F9FC;
-  --side-fondo:linear-gradient(180deg,#11150D,#05080E);  /* la barra lateral se
-     queda oscura en los 4 temas: es la firma de la marca, igual que en Nexus */
-  --hover-fila:rgba(15,28,43,.03);
-  --grad:linear-gradient(180deg,#0A5FC0 0%,#084A99 100%);
+  --panel-fondo:#F8F9FB;
+  --side-fondo:linear-gradient(180deg,#0A1F44,#050D1F);  /* la barra lateral
+     navy: firma de marca coherente con Champs (en los otros temas se queda
+     oscura igual, aquí además hace juego con el acento marino) */
+  --hover-fila:rgba(10,31,68,.035);
+  --grad:linear-gradient(180deg,#FFD700 0%,#B8860B 100%);  /* aquí sí se usa
+     el dorado brillante: es decorativo (barras, no texto) */
   --scan:0;
 }
 
@@ -157,7 +162,7 @@
   background-attachment:fixed;-webkit-font-smoothing:antialiased}
 
 /* Barrido de líneas de escaneo, la firma HUD de Nexus. La intensidad la da
-   --scan (0 en claro/grafito, apagándola por completo ahí). */
+   --scan (0 en champs/grafito, apagándola por completo ahí). */
 #ch::before{
   content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
   background:repeating-linear-gradient(0deg, rgba(143,233,255,var(--scan)) 0 1px, transparent 1px 3px);

@@ -33,8 +33,8 @@ const TEMAS = [
     bg: '#05080E', muestra: ['#05080E', '#FFC94A', '#8FE9FF', '#B49CFF', '#D62B34'] },
   { id: 'gonza', nombre: 'Gonza Systems', descripcion: 'Cian y violeta, con dorado cálido en los enlaces.',
     bg: '#040B16', muestra: ['#040B16', '#5FD3FF', '#A98BFF', '#FFC46B', '#F0555C'] },
-  { id: 'claro', nombre: 'Taller', descripcion: 'Gris azulado muy suave para trabajar de día (nunca blanco puro).',
-    bg: '#EBEFF4', muestra: ['#EBEFF4', '#0A5FC0', '#6B37C9', '#B0288C', '#C1272D'] },
+  { id: 'champs', nombre: 'Champs', descripcion: 'Oro y marino sobre fondo claro, con guiño a medallas.',
+    bg: '#EEF1F6', muestra: ['#EEF1F6', '#B8860B', '#0A1F44', '#A0522D', '#C1272D'] },
   { id: 'grafito', nombre: 'Grafito', descripcion: 'Gris neutro, sin brillos. Para sesiones largas.',
     bg: '#121417', muestra: ['#121417', '#E7EAEE', '#7FB2D9', '#C9A66B', '#E0645F'] },
   // 'clasico' (azul y dorado sobre marino, el original de Chicos Wheels) se
@@ -87,6 +87,7 @@ let ui = {
   vista: 'panel', q: '', fTipo: 'todos', fEstatus: 'todos', orden: 'reciente',
   modal: null, ctx: null, formTipo: 'Hot Wheels', sel: [], selMode: false,
   qTipo: 'Compra', stream: null, authTab: 'login', authErr: '', ocupado: false,
+  fotoPendiente: null, avisoIA: '', identificando: false,
 };
 let tT = null;
 
@@ -157,6 +158,36 @@ const cli = (id) => db.compradores.find((c) => c.id === id);
 const tono = (t) => (t === 'Pokémon' ? 'var(--yellow)' : 'var(--blue)');
 const emoji = (t) => (t === 'Pokémon' ? '🃏' : '🏎️');
 const libre = (a) => num(a.libre);
+
+/** Fotos con URL externa se pintan directo; las locales ('local:archivo.jpg')
+ * no pueden ir en <img src> porque servirlas exige el header Authorization
+ * — se pintan como placeholder y pintarFotosLocales() las llena después. */
+function imgFoto(a, attrs, estiloFallback) {
+  if (!a.foto) return `<span class="gh"${estiloFallback ? ` style="${estiloFallback}"` : ''}>${emoji(a.tipo)}</span>`;
+  // Sin comillas dentro del span: va anidado en el atributo onerror (comillas dobles),
+  // que a su vez va dentro de un string JS de comillas simples — nada de comillas aquí.
+  const fallbackSinComillas = `<span class=gh${estiloFallback ? ` style=${estiloFallback.replace(/"/g, '')}` : ''}>${emoji(a.tipo)}</span>`;
+  const comunes = `alt="" ${attrs || ''} onerror="this.parentNode.innerHTML='${fallbackSinComillas}'"`;
+  if (a.foto.startsWith('local:')) {
+    return `<img data-foto-local="${esc(a.foto.slice(6))}" data-tipo="${esc(a.tipo)}" ${comunes}>`;
+  }
+  return `<img src="${esc(a.foto)}" ${comunes}>`;
+}
+let fotosBlobActivas = [];
+function pintarFotosLocales() {
+  fotosBlobActivas.forEach((u) => URL.revokeObjectURL(u));
+  fotosBlobActivas = [];
+  $$('[data-foto-local]').forEach(async (img) => {
+    try {
+      const r = await fetch('/api/articulos/foto/' + img.dataset.fotoLocal,
+        { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+      if (!r.ok) throw new Error();
+      const url = URL.createObjectURL(await r.blob());
+      fotosBlobActivas.push(url);
+      img.src = url;
+    } catch (e) { img.outerHTML = `<span class="gh">${emoji(img.dataset.tipo)}</span>`; }
+  });
+}
 
 /** Vista previa del neto antes de guardar. Al guardar, manda la base de datos. */
 function netoPreview({ precio, costo_unit, cantidad, com_fija, com_pct, ret_pct, envio, otros }) {
@@ -316,12 +347,14 @@ function render() {
   if (ui.modal === 'lote') pintarLote();
   if (ui.modal === 'historial') pintarChart();
   if (ui.vista === 'etiquetas') pintarQR();
+  pintarFotosLocales();
 }
 
 function hdr(t, s, extra) {
   return `<div class="hdr"><div><h1>${t}<span>${s}</span></h1></div><div class="sp"></div>
   ${extra === undefined ? `<div class="srch"><input class="in" placeholder="Nombre, número, ubicación, código…" value="${esc(ui.q)}" data-a="q"></div>
   <button class="btn gh sm" data-a="escanear" title="Escanear código de barras">⌗ Escanear</button>
+  <button class="btn gh sm" data-a="fotoia" title="Registrar con foto, la IA sugiere los datos">📷 Con foto</button>
   <button class="btn pri" data-a="nuevo">+ Registrar pieza</button>` : extra}
   <div class="emb"><b class="hw">🏎</b><b class="pk">🃏</b></div></div>`;
 }
@@ -466,7 +499,7 @@ function ficha(a) {
   return `<div class="pc ${ago ? 'sold' : ''} ${ui.sel.includes(a.id) ? 'sel2' : ''}" style="--tone:${t}" data-a="ver" data-id="${a.id}">
     <div class="strip"></div>${ago ? '<div class="rb">Vendida</div>' : (a.apartadas ? '<div class="rb ap">Apartada</div>' : '')}
     ${a.grail ? '<div class="crown" title="Pieza grial">👑</div>' : ''}
-    <div class="ph">${a.foto ? `<img src="${esc(a.foto)}" alt="" loading="lazy" onerror="this.parentNode.innerHTML='<span class=gh>${emoji(a.tipo)}</span>'">` : `<span class="gh">${emoji(a.tipo)}</span>`}</div>
+    <div class="ph">${imgFoto(a, 'loading="lazy"')}</div>
     <div class="bd">
       <div class="eb">${esc([a.numero, a.anio, det].filter(Boolean).join(' · ') || a.tipo)}</div>
       <div class="nm">${esc(a.nombre)}</div>
@@ -495,7 +528,7 @@ function vBazar() {
   ${l.length ? `<div class="rack" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">
     ${l.map((a) => `<div class="pc" style="--tone:${tono(a.tipo)}" data-a="bazarvender" data-id="${a.id}">
       <div class="strip"></div>
-      <div class="ph" style="height:88px">${a.foto ? `<img src="${esc(a.foto)}" alt="">` : `<span class="gh">${emoji(a.tipo)}</span>`}</div>
+      <div class="ph" style="height:88px">${imgFoto(a)}</div>
       <div class="bd" style="padding:11px">
         <div class="nm" style="font-size:13px;margin-bottom:6px">${esc(a.nombre)}</div>
         <div class="row"><span class="mu">${libre(a)} disp.</span>
@@ -727,6 +760,7 @@ const selP = (id, extra) => `<select class="sel" id="${id}" ${extra || ''}>${db.
 MOD.pieza = function () {
   const a = ui.ctx || {}, t = ui.formTipo, ed = !!a.id;
   return shell(ed ? 'Editar pieza' : '¿Qué vas a registrar hoy?', ed ? a.id : '', `
+  ${ui.avisoIA || ''}
   ${ed ? '' : `<div class="seg" style="margin-bottom:18px">
     <button data-a="tipo" data-t="Hot Wheels" class="${t === 'Hot Wheels' ? 'on' : ''}">🏎️ Hot Wheels</button>
     <button data-a="tipo" data-t="Pokémon" class="${t === 'Pokémon' ? 'on y' : ''}">🃏 Pokémon</button></div>`}
@@ -751,7 +785,10 @@ MOD.pieza = function () {
   <div class="g2">${f('Dónde la conseguiste', sel('f_fuente', a.fuente, FUENTES))}${f('Ubicación física', inp('f_ubic', a.ubicacion, 'text', 'Caja A · Vitrina 2 · Carpeta azul'))}</div>
   ${f('Código de barras o SKU', `<div style="display:flex;gap:8px">${inp('f_codigo', a.codigo, 'text', 'Escanéalo o tecléalo')}
     <button class="btn" data-a="escanear" data-target="f_codigo" style="flex:0 0 auto">⌗</button></div>`)}
-  ${f('Foto (URL)', inp('f_foto', a.foto, 'url', 'https://…'))}
+  ${ui.fotoPendiente
+    ? f('Foto', `<div style="display:flex;align-items:center;gap:10px"><img src="${previewUrlFoto}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--line)" alt="">
+        <span style="font-size:12.5px;color:var(--muted)">Se guarda la foto que acabas de tomar.</span></div>`)
+    : f('Foto (URL)', inp('f_foto', a.foto, 'url', 'https://…'))}
   <div class="fld"><label class="lbl">Verificación de autenticidad</label>
     ${(CHECKS[t] || []).map((c, i) => `<label class="chk"><input type="checkbox" data-chk="${i}" ${(a.checks || []).includes(i) ? 'checked' : ''}><span>${esc(c)}</span></label>`).join('')}</div>
   ${f('Notas', `<textarea class="ta" id="f_notas" rows="2" placeholder="Defectos, procedencia, con quién la cambiaste…">${esc(a.notas || '')}</textarea>`)}
@@ -774,7 +811,7 @@ MOD.ver = function () {
   return shell(a.nombre, a.id, `
   <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:18px">
     <div style="width:128px;height:128px;border-radius:12px;background:#101B2C;flex:0 0 auto;display:grid;place-items:center;overflow:hidden;border:1px solid var(--line)">
-      ${a.foto ? `<img src="${esc(a.foto)}" style="width:100%;height:100%;object-fit:cover" alt="">` : `<span style="font-size:44px;opacity:.3">${emoji(a.tipo)}</span>`}</div>
+      ${imgFoto(a, 'style="width:100%;height:100%;object-fit:cover"', 'font-size:44px;opacity:.3')}</div>
     <div style="flex:1;min-width:210px">
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
         <span class="tag ${s.c}">${s.t}</span><span class="tag" style="color:${t};border-color:${t}">${esc(a.tipo)}</span>
@@ -1023,9 +1060,33 @@ MOD.escaner = function () {
   `, `<button class="btn gh" data-a="cerrar">Cerrar</button>`, '520px');
 };
 
+MOD.foto = function () {
+  return shell('Con foto', 'La IA sugiere, tú confirmas', `
+  ${!previewUrlFoto ? `
+    <label class="btn pri" for="fi_foto" style="display:block;text-align:center;cursor:pointer;padding:28px 16px">📷 Tomar o elegir foto</label>
+    <input type="file" id="fi_foto" data-a="fotoelegida" accept="image/*" capture="environment" style="display:none">
+    <div class="note">Sirve con el auto suelto, en su blíster, o una carta Pokémon suelta o en funda/slab. Si se alcanza a leer texto (nombre, SKU, set), la IA acierta bastante más.</div>
+  ` : `
+    <div style="text-align:center;margin-bottom:14px">
+      <img src="${previewUrlFoto}" style="max-width:100%;max-height:240px;border-radius:12px;border:1px solid var(--line)" alt="Foto elegida">
+    </div>
+    ${ui.identificando
+      ? `<div class="note"><div class="spin" style="display:inline-block;margin-right:8px;vertical-align:middle;width:16px;height:16px"></div>Identificando con IA…</div>`
+      : `<div style="display:flex;gap:9px;flex-wrap:wrap;justify-content:center">
+           <button class="btn gh" data-a="fotoretomar">Elegir otra</button>
+           <button class="btn pri" data-a="fotoidentificar">✨ Identificar con IA</button>
+         </div>`}
+  `}
+  `, `<button class="btn gh" data-a="cerrar">Cancelar</button>`, '480px');
+};
+
 /* ==================== Acciones ==================== */
 function abrir(m, ctx) { ui.modal = m; ui.ctx = ctx || null; render(); }
-function cerrar() { pararCam(); ui.modal = null; ui.ctx = null; ui.apLiq = null; render(); }
+function cerrar() {
+  pararCam(); limpiarFotoSeleccionada();
+  ui.modal = null; ui.ctx = null; ui.apLiq = null; ui.fotoPendiente = null; ui.avisoIA = ''; ui.identificando = false;
+  render();
+}
 
 document.addEventListener('click', async (e) => {
   if (e.target.classList && e.target.classList.contains('ov')) { cerrar(); return; }
@@ -1050,6 +1111,9 @@ document.addEventListener('click', async (e) => {
 
     /* --- alta y edición --- */
     case 'nuevo': ui.formTipo = 'Hot Wheels'; abrir('pieza', null); break;
+    case 'fotoia': limpiarFotoSeleccionada(); abrir('foto', null); break;
+    case 'fotoretomar': limpiarFotoSeleccionada(); render(); break;
+    case 'fotoidentificar': await identificarFoto(); break;
     case 'tipo': ui.ctx = snapPieza(); ui.formTipo = el.dataset.t; render(); break;
     case 'editpieza': ui.formTipo = art(id).tipo; abrir('pieza', art(id)); break;
     case 'qtipo': ui.qTipo = el.dataset.t; render(); break;
@@ -1195,6 +1259,11 @@ document.addEventListener('change', async (e) => {
     el.value = ''; // permite volver a elegir el mismo archivo después
     if (archivo) importarInventario(archivo);
   }
+  if (a === 'fotoelegida') {
+    const archivo = el.files[0];
+    el.value = '';
+    if (archivo) await prepararFoto(archivo);
+  }
 });
 
 document.addEventListener('keydown', (e) => {
@@ -1246,7 +1315,7 @@ function leerPieza() {
     fuente: $('#f_fuente').value,
     ubicacion: $('#f_ubic').value.trim(),
     codigo: $('#f_codigo').value.trim(),
-    foto: $('#f_foto').value.trim(),
+    foto: $('#f_foto') ? $('#f_foto').value.trim() : '',
     notas: $('#f_notas').value.trim(),
     grail: $('#f_grail').checked,
     checks: $$('[data-chk]').filter((c) => c.checked).map((c) => num(c.dataset.chk)),
@@ -1256,8 +1325,13 @@ async function savePieza() {
   const datos = leerPieza();
   if (!datos.nombre) { toast('Ponle nombre a la pieza', true); $('#f_nombre').focus(); return; }
   const ed = ui.ctx && ui.ctx.id;
+  const fotoPendiente = ui.fotoPendiente; // cerrar() la limpia, hay que guardarla antes
   try {
-    await accion(() => (ed ? PATCH('/articulos/' + ed, datos) : POST('/articulos', datos)));
+    const r = await accion(() => (ed ? PATCH('/articulos/' + ed, datos) : POST('/articulos', datos)));
+    if (fotoPendiente) {
+      try { await subirFotoArticulo(r.id, fotoPendiente); await cargarEstado(); }
+      catch (e) { toast('Se guardó la pieza, pero la foto no se pudo adjuntar: ' + e.message, true); }
+    }
     cerrar();
     const int = db.compradores.filter((c) => c.interes === datos.tipo || c.interes === 'Ambas').map((c) => c.nombre);
     toast(int.length ? `Guardada. Avísale a ${int.slice(0, 2).join(' y ')}` : 'Pieza registrada');
@@ -1433,6 +1507,94 @@ function aplicarCodigo(code) {
   else { ui.q = code; ui.vista = 'inventario'; render(); toast(`Sin coincidencias para ${code}`); }
 }
 
+/* ==================== Foto → IA ====================
+ * Redimensionar en el navegador (vía <canvas>) antes de subir: baja el peso
+ * (más rápido, más barato del lado de la API) y de paso corrige la
+ * orientación EXIF, porque drawImage() ya pinta los píxeles como el
+ * navegador los muestra, no como venían crudos del sensor. */
+let fotoSeleccionada = null;
+let previewUrlFoto = null;
+
+function limpiarFotoSeleccionada() {
+  if (previewUrlFoto) URL.revokeObjectURL(previewUrlFoto);
+  previewUrlFoto = null; fotoSeleccionada = null;
+}
+
+function redimensionarImagen(archivo, ladoMax) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(archivo);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (Math.max(w, h) > ladoMax) {
+        const escala = ladoMax / Math.max(w, h);
+        w = Math.round(w * escala); h = Math.round(h * escala);
+      }
+      const lienzo = document.createElement('canvas');
+      lienzo.width = w; lienzo.height = h;
+      lienzo.getContext('2d').drawImage(img, 0, 0, w, h);
+      lienzo.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('No se pudo procesar la imagen'))),
+        'image/jpeg', 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Ese archivo no es una imagen válida')); };
+    img.src = url;
+  });
+}
+
+async function prepararFoto(archivo) {
+  if (!archivo.type.startsWith('image/')) { toast('Elige un archivo de imagen', true); return; }
+  try {
+    limpiarFotoSeleccionada();
+    fotoSeleccionada = await redimensionarImagen(archivo, 1280);
+    previewUrlFoto = URL.createObjectURL(fotoSeleccionada);
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
+function avisoIA(s) {
+  const alta = num(s.confianza) >= 0.7;
+  const notas = (s.notas || '').trim();
+  return `<div class="note ${alta ? 'g' : 'w'}"><b>${alta ? 'Alta confianza' : 'Revisa estos datos'}</b> — así los interpretó la IA${notas ? ': ' + esc(notas) : ''}<br>Corrige lo que haga falta antes de guardar.</div>`;
+}
+
+/** Sube un archivo por multipart a mano, sin pasar por api()/POST (esas
+ * siempre mandan JSON) — mismo patrón que importarInventario(). */
+async function subirArchivo(ruta, campo, blob, nombre) {
+  const fd = new FormData();
+  fd.append(campo, blob, nombre);
+  const r = await fetch('/api' + ruta, {
+    method: 'POST',
+    headers: token ? { Authorization: 'Bearer ' + token } : {},
+    body: fd,
+  });
+  let datos = null;
+  try { datos = await r.json(); } catch (e) { /* sin cuerpo */ }
+  if (r.status === 401) { salir(true); throw new Error('Tu sesión expiró, vuelve a entrar'); }
+  if (!r.ok) throw new Error((datos && datos.error) || 'No se pudo completar la operación');
+  return datos;
+}
+
+async function identificarFoto() {
+  if (!fotoSeleccionada || ui.identificando) return;
+  ui.identificando = true; render();
+  try {
+    const sugerencia = await subirArchivo('/articulos/identificar', 'foto', fotoSeleccionada, 'foto.jpg');
+    ui.formTipo = sugerencia.tipo === 'Pokémon' ? 'Pokémon' : 'Hot Wheels';
+    ui.avisoIA = avisoIA(sugerencia);
+    ui.fotoPendiente = fotoSeleccionada;
+    ui.identificando = false;
+    abrir('pieza', sugerencia);
+  } catch (e) {
+    ui.identificando = false; render();
+    toast(e.message, true);
+  }
+}
+
+async function subirFotoArticulo(id, blob) {
+  return subirArchivo(`/articulos/${id}/foto`, 'foto', blob, 'foto.jpg');
+}
+
 /* ==================== Exportar ==================== */
 function bajar(n, c, m) {
   const b = new Blob([c], { type: m }), u = URL.createObjectURL(b);
@@ -1498,6 +1660,9 @@ function exportarVentasCSV() {
 /* ==================== Arranque ==================== */
 (async function iniciar() {
   aplicarTema(temaGuardado());
+  // El registro vive aquí (JS externo) y no en index.html porque el CSP no
+  // permite <script> inline — script-src solo admite 'self' y el CDN de qrcodejs.
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   if (!token) { render(); return; }
   try {
     const r = await GET('/auth/yo');

@@ -1,17 +1,33 @@
 """Inventario de piezas y su historial de precios."""
 import datetime
 import json
+import re
+import secrets
 
 import openpyxl
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, request, send_from_directory
 
-from ..db import bd, todos, transaccion, uno
+from ..db import RUTA_BD, bd, todos, transaccion, uno
 from ..util import ErrorApp, entero, fecha, hoy, num, texto, uid
+from ..vision import buscar_precio_pokemon, identificar_foto, procesar_imagen
 
 bp = Blueprint("articulos", __name__)
 
 TIPOS = ("Hot Wheels", "Pokémon")
 ESTATUS = ("Disponible", "En negociación", "Conservar")
+
+# Fotos junto a la base de datos: mismo volumen persistente, sin
+# infraestructura nueva. Nombre de archivo aleatorio (nunca a partir de lo
+# que mande el cliente) validado por este mismo regex al servirlo, así
+# que no hace falta llevar registro aparte de qué archivos son válidos.
+CARPETA_FOTOS = RUTA_BD.parent / "fotos"
+NOMBRE_FOTO_VALIDO = re.compile(r"^[0-9a-f]{40}\.jpg$")
+
+
+def _carpeta_fotos_usuario():
+    carpeta = CARPETA_FOTOS / g.usuario_id
+    carpeta.mkdir(parents=True, exist_ok=True)
+    return carpeta
 
 # Mismo orden que scripts/generar_plantilla.py — si cambian los campos del
 # inventario, hay que actualizar ambos.
@@ -235,3 +251,70 @@ def borrar_valuacion(id_art, id_val):
     bd().execute("DELETE FROM valuaciones WHERE id=? AND articulo_id=?", (id_val, id_art))
     bd().commit()
     return jsonify(ok=True)
+
+
+# ---------- Foto → sugerencia con IA ----------
+
+@bp.post("/identificar")
+def identificar():
+    """Sube una foto y regresa una sugerencia de campos, sin tocar la base
+    de datos todavía — el frontend la usa para precargar el formulario de
+    alta y el usuario confirma o corrige antes de guardar."""
+    archivo = request.files.get("foto")
+    if not archivo or not archivo.filename:
+        raise ErrorApp("Adjunta o toma una foto")
+    crudo = archivo.read()
+    if not crudo:
+        raise ErrorApp("La foto llegó vacía")
+
+    jpeg = procesar_imagen(crudo)
+    sugerencia = identificar_foto(jpeg)
+
+    if sugerencia.get("tipo") == "Pokémon" and sugerencia.get("nombre"):
+        precio = buscar_precio_pokemon(
+            sugerencia["nombre"], sugerencia.get("expansion", ""), sugerencia.get("numero", ""))
+        if precio:
+            sugerencia["expansion"] = precio["expansion"] or sugerencia["expansion"]
+            sugerencia["numero"] = precio["numero"] or sugerencia["numero"]
+            sugerencia["rareza"] = precio["rareza"] or sugerencia["rareza"]
+            if precio["valor_estimado"] is not None:
+                sugerencia["valor_estimado"] = precio["valor_estimado"]
+
+    return jsonify(sugerencia)
+
+
+@bp.post("/<id_art>/foto")
+def subir_foto(id_art):
+    """Guarda la foto (ya identificada o no) como la imagen del artículo.
+    Separado de identificar() a propósito: si el usuario cancela antes de
+    guardar la pieza, nunca se escribió nada a disco."""
+    actual = mio(id_art)
+    archivo = request.files.get("foto")
+    if not archivo or not archivo.filename:
+        raise ErrorApp("Adjunta una foto")
+
+    jpeg = procesar_imagen(archivo.read())
+    nombre_archivo = secrets.token_hex(20) + ".jpg"
+    (_carpeta_fotos_usuario() / nombre_archivo).write_bytes(jpeg)
+
+    anterior = actual.get("foto") or ""
+    if anterior.startswith("local:") and NOMBRE_FOTO_VALIDO.match(anterior[len("local:"):]):
+        (CARPETA_FOTOS / g.usuario_id / anterior[len("local:"):]).unlink(missing_ok=True)
+
+    bd().execute("UPDATE articulos SET foto=?, actualizado_en=datetime('now') WHERE id=? AND usuario_id=?",
+                 (f"local:{nombre_archivo}", id_art, g.usuario_id))
+    bd().commit()
+    return jsonify(uno("SELECT * FROM v_articulos WHERE id=?", (id_art,)))
+
+
+@bp.get("/foto/<archivo>")
+def ver_foto(archivo):
+    """Sirve una foto local. La carpeta se arma con g.usuario_id (nunca con
+    nada que mande el cliente), así que un usuario no puede ver fotos de
+    otro aunque adivine el nombre de archivo de alguien más."""
+    if not NOMBRE_FOTO_VALIDO.match(archivo):
+        raise ErrorApp("Nombre de archivo inválido", 400)
+    carpeta = CARPETA_FOTOS / g.usuario_id
+    if not (carpeta / archivo).is_file():
+        raise ErrorApp("Esa foto no existe", 404)
+    return send_from_directory(carpeta, archivo, mimetype="image/jpeg")

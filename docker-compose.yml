@@ -9,6 +9,10 @@ services:
       FLASK_ENV: production
       JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en tu archivo .env}
       DB_FILE: /app/datos/collecthub.db
+      # Opcionales: identificación de piezas por foto. Sin ANTHROPIC_API_KEY
+      # esa función responde con un error claro, el resto de la app sigue igual.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      POKEMONTCG_API_KEY: ${POKEMONTCG_API_KEY:-}
     volumes:
       - collecthub-datos:/app/datos
 

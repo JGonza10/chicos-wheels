@@ -1,0 +1,16 @@
+{
+  "name": "Chicos Wheels",
+  "short_name": "ChicosWheels",
+  "description": "Inventario, valuación y venta de coleccionables Hot Wheels y cartas Pokémon.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#05080E",
+  "theme_color": "#2E9BF0",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
