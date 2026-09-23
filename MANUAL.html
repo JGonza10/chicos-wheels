@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual de Chicos Wheels (CollectHub)</title>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; max-width: 860px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; color: #24292f; line-height: 1.6; background: #fff; }
+  h1 { color: #0078d7; font-size: 1.9rem; margin-bottom: .2rem; }
+  h2 { color: #0078d7; font-size: 1.35rem; margin-top: 2rem; border-bottom: 1px solid #e1e4e8; padding-bottom: .3rem; }
+  h3 { font-size: 1.1rem; margin-top: 1.4rem; }
+  h4 { font-size: 1rem; margin-top: 1.2rem; }
+  .subtitulo { color: #6b7280; font-style: italic; margin-top: 0; }
+  code { background: #f3f4f6; padding: .1rem .35rem; border-radius: 4px; font-size: .9em; color: #0078d7; }
+  pre { background: #f3f4f6; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: .85rem; }
+  pre code { background: none; padding: 0; color: inherit; }
+  blockquote { border-left: 3px solid #0078d7; margin-left: 0; padding-left: 1rem; color: #6b7280; font-style: italic; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  th, td { border: 1px solid #d1d5db; padding: .5rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #0078d7; color: #fff; }
+  tr:nth-child(even) { background: #f9fafb; }
+  hr { border: none; border-top: 1px solid #d1d5db; margin: 1.5rem 0; }
+  .imprimir { margin: 1.5rem 0; }
+  .imprimir button { background: #0078d7; color: #fff; border: none; padding: .6rem 1.2rem; border-radius: 6px; font-size: .95rem; cursor: pointer; }
+  @media print { .imprimir { display: none; } body { max-width: none; } }
+</style>
+</head>
+<body>
+<div class="imprimir"><button onclick="window.print()">🖨️ Imprimir / Guardar como PDF</button></div>
+<h1>Manual de Chicos Wheels (CollectHub)</h1>
+<p class="subtitulo">Manual de usuario del sistema de inventario y venta de coleccionables. Refleja el estado del código al 2026-09-08. Regenera los formatos imprimibles con `python generar_manual.py`.</p>
+<h2>1. Qué es</h2>
+<p>Sistema de inventario, valuación y venta de coleccionables (Hot Wheels y cartas Pokémon), pensado para uno o dos usuarios (negocio pequeño/personal). Corre en <code>http://localhost:3000</code> de esta máquina de forma permanente (arrancado por Nexus).</p>
+<h2>2. Cómo entrar</h2>
+<p>Login con usuario y contraseña propios (sesión con token, 10 intentos por 15 minutos antes de bloquear). Cada cuenta solo ve su propio inventario y sus propias fotos — ni siquiera adivinando la ruta de una foto se puede ver la de otra cuenta.</p>
+<h2>3. Identificar una pieza por foto</h2>
+<p>Sube o toma una foto de la pieza:</p>
+<ul><li>Se valida que sea una imagen real (no solo por su extensión), se le quita la información de ubicación/cámara oculta y se reduce de tamaño antes de usarla.</li><li>Una IA (Claude) sugiere qué pieza es — es solo una sugerencia, no modifica tu inventario sola.</li><li>Para cartas Pokémon, además cruza contra una base de datos de precios real y solo te da un precio si encuentra una coincidencia clara (con 0 o varias coincidencias, prefiere no adivinar).</li></ul>
+<h2>4. Inventario y movimientos</h2>
+<ul><li>Alta de artículos con valuación, categoría y foto.</li><li>Ventas, lotes (varias piezas juntas), apartados e intercambios — cada uno con su propio registro.</li><li>La ganancia neta la calcula la base de datos misma (no la pantalla ni el servidor) para que no se pueda falsear editando el código.</li></ul>
+<h2>5. Catálogos de apoyo</h2>
+<p>Compradores, plataformas de venta, lista de deseos (wishlist), y ajustes generales del sistema — todo en su propia sección.</p>
+<h2>6. Métricas y respaldo</h2>
+<ul><li>Pantalla de estado con métricas del inventario.</li><li>Exportar datos, y una plantilla de Excel para importar inventario en lote.</li><li>Respaldo en caliente de la base de datos (seguro con el sistema corriendo — copiar el archivo a mano mientras funciona puede corromperlo).</li></ul>
+<h2>7. En el celular</h2>
+<p>Es una PWA instalable: &quot;Agregar a pantalla de inicio&quot; desde el navegador del celular. Funciona sin conexión para lo ya cargado (los datos en vivo siempre necesitan conexión).</p>
+<h2>8. Instalación y arranque</h2>
+<pre><code>python -m venv .venv &amp;&amp; .venv\Scripts\activate
+pip install -r requirements.txt
+python app.py                    # desarrollo, http://localhost:3000</code></pre>
+<p>Producción (recomendado, ya en uso en esta máquina):</p>
+<pre><code>docker compose up -d --build</code></pre>
+<p><code>JWT_SECRET</code> es obligatoria en producción — el sistema se niega a arrancar sin ella.</p>
+<h2>9. Lo que todavía no hace</h2>
+<ul><li>No hay build de frontend con librerías modernas — el frontend es HTML/CSS/JS plano a propósito, se edita directo.</li><li>Pensado para uno o dos usuarios, no para una operación con muchos cajeros a la vez (ver el sistema de Abarrotes para eso).</li></ul>
+</body>
+</html>

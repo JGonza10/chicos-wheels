@@ -1,7 +1,7 @@
 """Datos de ejemplo para explorar la app sin capturar nada."""
 from datetime import date, timedelta
 
-from .db import transaccion, uno
+from .db import transaccion
 from .util import uid
 
 

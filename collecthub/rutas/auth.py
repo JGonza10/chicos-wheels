@@ -5,7 +5,7 @@ from flask import Blueprint, g, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..auth import firmar, requiere_sesion
-from ..db import bd, transaccion, uno
+from ..db import transaccion, uno
 from ..util import ErrorApp, texto, uid
 
 bp = Blueprint("auth", __name__)

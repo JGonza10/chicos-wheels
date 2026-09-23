@@ -4,7 +4,7 @@ from datetime import datetime
 
 from flask import Blueprint, Response, g, jsonify, request
 
-from ..db import bd, todos, transaccion, uno, vencer_apartados
+from ..db import todos, transaccion, uno, vencer_apartados
 from ..seed import sembrar
 from ..util import ErrorApp, precio_objetivo
 

@@ -29,7 +29,7 @@ gunicorn "collecthub:crear_app()" -b 0.0.0.0:3000 -w 1 --threads 8
 
 Variables de entorno: copiar `.env.example` a `.env`. `JWT_SECRET` es obligatoria cuando `FLASK_ENV=production` (la app se niega a arrancar sin ella); `docker-compose.yml` la exige igual vía `${JWT_SECRET:?...}`.
 
-`iniciar_ChicosWheels_silencioso.vbs` + `run_forever_ChicosWheels.ps1` arrancan la app como proceso de fondo supervisado en Windows (mismo patrón usado en otros proyectos de la carpeta padre, orquestado por el hub local "Nexus") — no son parte de la lógica de la app, solo su forma de arranque en esta máquina.
+En esta máquina la app no arranca sola: se prende a pedido desde el hub local "Nexus" (`python app.py`, proyecto `P2`). Los supervisores/arranque silencioso de Windows se eliminaron el 2026-09-15.
 
 ## Arquitectura
 
@@ -48,4 +48,4 @@ Variables de entorno: copiar `.env.example` a `.env`. `JWT_SECRET` es obligatori
 - Cualquier vista nueva en `articulos`/`movimientos`/`catalogos`/`estado` queda protegida automáticamente por el bucle de `crear_app()` — no agregues `requiere_sesion` a mano ahí, y no rompas el prefijo de endpoint del que depende ese bucle.
 - Cálculos de dinero/ganancia que deban ser invulnerables a manipulación van en SQL (`GENERATED ALWAYS`), no en Python ni en JS — sigue el patrón existente en `schema.sql`.
 - Cambios en `Content-Security-Policy` (`collecthub/__init__.py`): `'unsafe-inline'` en `style-src` es necesario porque `app.js` arma vistas con estilos inline — no lo quites sin revisar el frontend completo. `img-src` incluye `blob:` a propósito, para las fotos `local:` que el frontend trae por `fetch` y muestra como object URL.
-- **En esta máquina ya corre una instancia supervisada de esta app en el puerto 3000** (`run_forever_ChicosWheels.ps1`, arrancada por el hub Nexus) — antes de levantar `python app.py` para probar algo, revisa si el puerto 3000 ya está ocupado (`netstat -ano | grep :3000`) y usa `PORT=<otro>` para no pisarla ni terminar ese proceso sin avisar. Ambas comparten el mismo `datos/collecthub.db` por defecto si no defines `DB_FILE` distinto — cualquier prueba manual (usuarios, artículos) queda en la base real, bórrala después.
+- **Puede haber una instancia de esta app en el puerto 3000 si se prendió desde Nexus** — antes de levantar `python app.py` para probar algo, revisa si el puerto 3000 ya está ocupado (`netstat -ano | grep :3000`) y usa `PORT=<otro>` para no pisarla ni terminar ese proceso sin avisar. Ambas comparten el mismo `datos/collecthub.db` por defecto si no defines `DB_FILE` distinto — cualquier prueba manual (usuarios, artículos) queda en la base real, bórrala después.
