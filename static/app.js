@@ -92,9 +92,8 @@ let ui = {
   qTipo: 'Compra', stream: null, authTab: 'login', authErr: '', ocupado: false,
   fotoPendiente: null, avisoIA: '', identificando: false,
   modoInv: (() => { try { return localStorage.getItem('cw_modoInv') === 'lista' ? 'lista' : 'fichas'; } catch (e) { return 'fichas'; } })(),
-  colOrd: '', colDir: 1, mm: null, encTab: 'activos', encFecha: null, encCostos: true, enc: null, pubDesc: 0, cargaN: 15, ubLlegada: '', balTab: 'carga', corteFecha: '',
+  colOrd: '', colDir: 1, mm: null, encTab: 'activos', encFecha: null, encCostos: true, enc: null, pubDesc: 0, ubLlegada: '',
   margenMin: (() => { try { const v = localStorage.getItem('cw_margenMin'); return v === null ? 10 : Math.max(0, num(v)); } catch (e) { return 10; } })(),
-  carga: (() => { try { return JSON.parse(localStorage.getItem('cw_carga') || '[]'); } catch (e) { return []; } })(), entTab: 'pendientes', entDesde: '', entHasta: '',
   rep: (() => {
     const base = { titulo: 'Reporte de inventario', secciones: ['resumen', 'inventario'], tipo: 'todos', estatus: 'todos',
       orden: 'nombre', orientacion: 'vertical', desde: '', hasta: '', solo_con_valor: false };
@@ -352,12 +351,12 @@ function salir(silencioso) {
 /* ==================== Render ==================== */
 const NAV = [['panel', '◧', 'Panel'], ['inventario', '▦', 'Inventario'],
   ['SEP1', '', 'Movimientos'], ['ventas', '⇄', 'Ventas'], ['encargos', '🛍', 'Pedidos'], ['apartados', '⏳', 'Apartados previos'], ['intercambios', '⇌', 'Intercambios'],
-  ['SEP2', '', 'Catálogos'], ['balderas', '📍', 'Balderas'], ['entregas', '📦', 'Entregas'], ['compradores', '☺', 'Compradores'], ['wishlist', '★', 'Faltantes'],
+  ['SEP2', '', 'Catálogos'], ['compradores', '☺', 'Compradores'], ['wishlist', '★', 'Faltantes'],
   ['etiquetas', '▩', 'Etiquetas QR'], ['datos', '⛃', 'Datos']];
 const CNT = {
   inventario: () => db.articulos.length, ventas: () => db.ventas.length,
   apartados: () => db.apartados.filter((x) => x.estatus === 'Vigente').length,
-  encargos: () => encActivos().length, balderas: () => (db.pedidos || []).filter((p) => !p.atendido).length, entregas: () => porEntregar().length, intercambios: () => db.intercambios.length, compradores: () => db.compradores.length,
+  encargos: () => encActivos().length,  intercambios: () => db.intercambios.length, compradores: () => db.compradores.length,
   wishlist: () => db.wishlist.length,
 };
 
@@ -366,7 +365,7 @@ function render() {
   if (!db) { $('#app').innerHTML = '<div class="cargando"><div><div class="spin"></div>Cargando tu colección…</div></div>'; return; }
   /* Modo bazar deshabilitado (2026-09-24): vBazar sigue definida, solo sin acceso desde el menú */
   const V = { panel: vPanel, inventario: vInv, ventas: vVentas, apartados: vApart,
-    intercambios: vTrade, entregas: vEntregas, balderas: vBalderas, encargos: vEncargos, compradores: vComp, wishlist: vWish, etiquetas: vQR, datos: vDatos }[ui.vista] || vPanel;
+    intercambios: vTrade, encargos: vEncargos, compradores: vComp, wishlist: vWish, etiquetas: vQR, datos: vDatos }[ui.vista] || vPanel;
   $('#app').innerHTML = `
   <div class="shell">
     <aside class="side">
@@ -551,9 +550,6 @@ function pedidosPara(a) {
 }
 const esPorRecibir = (a) => num(a.cantidad) > 0 && String(a.ubicacion || '').trim().toLowerCase() === 'por recibir';
 const porRecibir = () => db.articulos.filter(esPorRecibir);
-/** Lunes de la semana de una fecha AAAA-MM-DD (para comparar semanas completas). */
-function lunesDe(f) { const d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toISOString().slice(0, 10); }
-function sumarDias(f, n) { const d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
 /** Ganancia y retorno por fuente de compra (de dónde salen las piezas que mejor se venden). */
 function rendimientoFuentes() {
   const por = {};
@@ -565,7 +561,6 @@ function rendimientoFuentes() {
   });
   return Object.values(por).filter((o) => o.costo > 0).map((o) => Object.assign(o, { roi: o.neto / o.costo })).sort((a, b) => b.roi - a.roi);
 }
-function guardarCarga() { try { localStorage.setItem('cw_carga', JSON.stringify(ui.carga)); } catch (e) { /* sin almacenamiento */ } }
 
 /* ---------- Encargos: pedidos de clientes para entregar en Balderas ---------- */
 const FORMAS_PAGO = ['Efectivo', 'Depósito', 'Transferencia'];
@@ -586,12 +581,13 @@ function vEncargos() {
     `<button class="btn pri" data-a="nuevoenc">+ Nuevo pedido</button>`) + `
   ${act.length ? `<div class="pnl" style="margin-bottom:14px;padding:14px 16px">
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-      <b style="font-size:13px">Hoja de entrega para imprimir</b>
+      <b style="font-size:13px">Hoja de entrega (imprimir o Excel)</b>
       <select class="sel" data-a="encfecha" style="width:auto;padding:7px 32px 7px 12px;font-size:12.5px">
         <option value="">Todos los pendientes</option>
         ${fechas.map((f) => `<option value="${f}" ${fechaSel === f ? 'selected' : ''}>${esc(fmt(f))}</option>`).join('')}</select>
       <label class="chk" style="margin:0;padding:6px 10px"><input type="checkbox" data-a="enccostos" ${ui.encCostos ? 'checked' : ''}><span>Incluir costos y ganancia</span></label>
-      <button class="btn pri sm" data-a="hojaent">🖨 Generar PDF</button></div>
+      <button class="btn pri sm" data-a="hojaent">🖨 PDF</button>
+      <button class="btn sm" data-a="hojaexcel" title="La misma hoja como lista de Excel, con filtros y totales">📊 Excel</button></div>
     <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:0">
       ${kpi('Clientes', new Set(sel.map((e) => e.comprador_id)).size, `${sel.length} encargo${sel.length === 1 ? '' : 's'}`, 'var(--blue)')}
       ${kpi('Piezas a llevar', S((e) => e.piezas), 'en total', 'var(--purple)')}
@@ -695,131 +691,6 @@ async function saveEnc() {
     await accion(() => (e.id ? PUT('/encargos/' + e.id, cuerpo) : POST('/encargos', cuerpo)), e.id ? 'Encargo actualizado' : 'Encargo registrado');
     ui.enc = null; cerrar();
   } catch (x) { /* error ya reportado */ }
-}
-
-/* ---------- Balderas: lista de carga y corte del día ---------- */
-function vBalderas() {
-  const tabs = [['carga', '🎒 Lista de carga'], ['corte', '🧾 Corte del día']];
-  return hdr('Balderas', 'Lo que llevas y lo que cerraste', ui.balTab === 'carga'
-    ? '<button class="btn gh sm" data-a="imprimir">🖨 Imprimir</button>' : '') + `
-  <div class="chips noprint">${tabs.map((t) => `<button class="chip ${ui.balTab === t[0] ? 'on' : ''}" data-a="baltab" data-v="${t[0]}">${t[1]}</button>`).join('')}</div>
-  ${ui.balTab === 'corte' ? vCorte() : vCarga()}`;
-}
-function vCarga() {
-  const l = db.articulos.filter((a) => libre(a) > 0 && a.estatus !== 'Conservar' && !esPorRecibir(a)).sort((a, b) => a.nombre.localeCompare(b.nombre));
-  const llevar = l.filter((a) => ui.carga.includes(a.id));
-  const total = suma(llevar, (a) => num(a.valor_estimado) * libre(a));
-  return `<div class="solo-print" style="font-size:18px;font-weight:700;margin-bottom:8px">Lista de carga — Balderas · ${hoy()}</div>
-  <div class="pnl noprint" style="margin-bottom:14px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:13px 16px">
-    <span style="font-size:13px"><b>${llevar.length}</b> de ${l.length} piezas para llevar · valor de lista <b class="mn">${money(total)}</b></span>
-    <span style="flex:1"></span>
-    <button class="btn sm" data-a="sugerircarga" title="Prioriza lo que te pidieron, lo que lleva tiempo guardado y lo de mejor margen">✨ Sugerir</button>
-    <input class="in" type="number" min="1" max="200" value="${ui.cargaN}" data-a="cargan" style="width:62px;padding:5px 8px" title="Cuántas piezas sugerir">
-    <button class="btn sm gh" data-a="cargatodo">Marcar todas</button>
-    <button class="btn sm gh" data-a="cargaquitar">Quitar todas</button>
-    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)">Margen mínimo %
-      <input class="in" type="number" min="0" data-a="margenmin" value="${ui.margenMin}" style="width:70px;padding:5px 8px"></label></div>
-  ${l.length ? `<div class="pnl wrap impr" style="padding:0"><table class="tbl hoja-t" style="min-width:0"><thead><tr>
-    <th class="noprint" style="width:34px">Llevar</th><th>Pieza</th><th>Núm.</th><th>Ubicación</th><th class="num">Disp.</th><th class="num">Precio</th><th class="num" title="Menor precio con el que aún ganas tu margen mínimo">Piso</th><th class="solo-print">Vendida</th></tr></thead><tbody>
-    ${l.map((a) => `<tr class="${ui.carga.includes(a.id) ? '' : (ui.carga.length ? 'np' : '')}">
-      <td class="noprint"><input type="checkbox" data-a="cargachk" data-id="${a.id}" ${ui.carga.includes(a.id) ? 'checked' : ''}></td>
-      <td><b>${esc(a.nombre)}</b></td><td class="mn">${esc(a.numero || '')}</td><td>${esc(a.ubicacion || '—')}</td>
-      <td class="num">${libre(a)}</td><td class="num"><b>${money(a.valor_estimado)}</b></td><td class="num" style="color:var(--muted)">${money(precioMinimo(a))}</td>
-      <td class="solo-print">☐</td></tr>`).join('')}
-    </tbody></table></div>
-    <div class="note noprint">Marca lo que vas a llevar y usa Imprimir: la hoja sale solo con esas piezas. El <b>piso</b> es lo menos que puedes aceptar y aún ganar tu margen mínimo (después de comisiones del canal); ajústalo arriba.</div>`
-    : vacio('🎒', 'No hay piezas disponibles', 'Registra piezas o quita el estatus "Conservar" de las que quieras vender.')}`;
-}
-function vCorte() {
-  const d = ui.corteFecha || hoy();
-  const vs = db.ventas.filter((v) => v.fecha === d);
-  const anticipos = db.apartados.filter((x) => x.fecha === d);
-  const entreg = db.ventas.filter((v) => v.fecha_entrega === d);
-  const pend = porEntregar().length;
-  const porCanal = {};
-  vs.forEach((v) => { const k = v.plataforma_snap || plat(v.id_plataforma).nombre; porCanal[k] = (porCanal[k] || 0) + num(v.precio); });
-  const cobrado = suma(vs, (v) => v.precio), anticipo = suma(anticipos, (x) => x.anticipo);
-  const lun = lunesDe(d), lunAnt = sumarDias(lun, -7), domAnt = sumarDias(lun, -1), dom = sumarDias(lun, 6);
-  const sem = db.ventas.filter((v) => v.fecha >= lun && v.fecha <= dom), semAnt = db.ventas.filter((v) => v.fecha >= lunAnt && v.fecha <= domAnt);
-  const netoS = suma(sem, (v) => v.neto), netoA = suma(semAnt, (v) => v.neto);
-  const cmp = netoA ? (netoS - netoA) / Math.abs(netoA) : null;
-  return `<div class="chips"><label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)">Día
-    <input class="in" type="date" data-a="cortefecha" value="${d}" style="width:auto;padding:6px 8px"></label>
-    ${d !== hoy() ? '<button class="chip" data-a="cortehoy">Hoy</button>' : ''}</div>
-  <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
-    ${kpi('Ventas', vs.length, `${suma(vs, (v) => v.cantidad)} piezas`, 'var(--blue)')}
-    ${kpi('Cobrado', money(cobrado), 'antes de costos', 'var(--yellow)')}
-    ${kpi('Ganancia neta', money(suma(vs, (v) => v.neto)), 'ya con costo y comisiones', 'var(--green)')}
-    ${kpi('Anticipos', money(anticipo), `${anticipos.length} apartado${anticipos.length === 1 ? '' : 's'} nuevos`, 'var(--purple)')}
-  </div>
-  <div class="pnl" style="margin-top:16px;display:flex;gap:24px;flex-wrap:wrap;align-items:center">
-    <div><div class="lbl" style="margin-bottom:2px">Semana ${lun.slice(5)} al ${dom.slice(5)}</div>
-      <b class="mn" style="font-size:20px">${money(netoS)}</b> <span style="font-size:12.5px;color:var(--muted)">netos · ${sem.length} ventas · ${money(suma(sem, (v) => v.precio))} cobrados</span></div>
-    <div style="font-size:12.5px;color:var(--muted)">Semana anterior <b class="mn" style="color:var(--text)">${money(netoA)}</b>
-      ${cmp === null ? '' : `<span class="${cmp >= 0 ? 'pos' : 'neg'}" style="margin-left:6px">${cmp >= 0 ? '▲' : '▼'} ${pct(Math.abs(cmp))}</span>`}</div></div>
-  <div class="g2" style="margin-top:16px">
-    <div class="pnl"><h2>Ventas del día</h2>
-      ${vs.length ? `<div class="feed">${vs.map((v) => `<div class="fi"><span class="dot" style="background:var(--green)"></span>
-        <span class="tx"><b>${esc(v.nombre_snap)}</b><span>${v.cantidad > 1 ? '×' + v.cantidad + ' · ' : ''}${esc(v.plataforma_snap || '')} · ${cli(v.id_comprador) ? esc(cli(v.id_comprador).nombre) : 'sin cliente'}</span></span>
-        <span class="am pos">${money(v.precio)}</span></div>`).join('')}</div>` : '<p style="color:var(--muted);font-size:13px">Sin ventas en este día.</p>'}
-    </div>
-    <div class="pnl"><h2>Cierre</h2>
-      ${Object.keys(porCanal).length ? Object.entries(porCanal).map(([k, v]) => bar(k, money(v), v / Math.max(1, cobrado) * 100, 'var(--yellow)')).join('') : ''}
-      <div style="font-size:12.5px;color:var(--muted);line-height:1.9;margin-top:8px">
-        Entregadas ese día <b class="mn" style="color:var(--text)">${entreg.length}</b><br>
-        Por entregar en total <b class="mn" style="color:${pend ? 'var(--yellow)' : 'var(--text)'}">${pend}</b>
-        ${pend ? '<button class="btn sm gh" data-a="nav" data-v="entregas" style="margin-left:8px">Ver</button>' : ''}<br>
-        Dinero que debe entrar hoy <b class="mn" style="color:var(--text)">${money(cobrado + anticipo)}</b></div>
-    </div>
-  </div>`;
-}
-
-/* ---------- Entregas: pendientes y entregadas, agrupadas por fecha ---------- */
-/** Ventas con envío por cerrar y apartados vigentes (la pieza se entrega al liquidar). */
-function porEntregar() {
-  return db.ventas.filter((v) => v.estatus_envio === 'Pendiente' || v.estatus_envio === 'Enviado')
-    .concat(db.apartados.filter((x) => x.estatus === 'Vigente'));
-}
-function vEntregas() {
-  const hoyS = hoy();
-  const filas = [];
-  db.ventas.forEach((v) => { if (v.estatus_envio !== 'Sin envío') filas.push({
-    id: v.id, f: v.fecha, tipo: 'Venta', nombre: v.nombre_snap, cant: v.cantidad,
-    quien: cli(v.id_comprador) ? cli(v.id_comprador).nombre : '—', canal: v.plataforma_snap || plat(v.id_plataforma).nombre,
-    guia: v.guia, est: v.estatus_envio, hecho: v.estatus_envio === 'Entregado', fent: v.fecha_entrega || '', fventa: v.fecha }); });
-  db.apartados.forEach((x) => { if (x.estatus === 'Vigente' || x.estatus === 'Vencido') filas.push({
-    id: x.id, f: x.fecha_limite || x.fecha, tipo: 'Apartado', nombre: x.nombre_snap, cant: x.cantidad,
-    quien: cli(x.id_comprador) ? cli(x.id_comprador).nombre : (x.cliente_snap || '—'), canal: 'Anticipo ' + money(x.anticipo) + ' · entrega en ' + (x.lugar_entrega || 'Balderas'),
-    guia: '', fent: '', est: x.estatus === 'Vencido' ? 'Vencido' : 'Por liquidar', hecho: false, aviso: x.estatus === 'Vencido' || (x.fecha_limite && x.fecha_limite < hoyS) }); });
-  filas.forEach((r) => { if (r.hecho) r.f = r.fent || r.fventa; });
-  const enRango = (r) => (!ui.entDesde || r.f >= ui.entDesde) && (!ui.entHasta || r.f <= ui.entHasta);
-  const pend = filas.filter((r) => !r.hecho).filter(enRango).sort((a, b) => a.f.localeCompare(b.f));
-  const hechas = filas.filter((r) => r.hecho).filter(enRango).sort((a, b) => b.f.localeCompare(a.f));
-  const lista = ui.entTab === 'entregadas' ? hechas : ui.entTab === 'todas' ? pend.concat(hechas) : pend;
-  const tabs = [['pendientes', `Por entregar (${pend.length})`], ['entregadas', `Entregadas (${hechas.length})`], ['todas', 'Todas']];
-  const grupos = [];
-  lista.forEach((r) => { const g = grupos.length && grupos[grupos.length - 1].f === r.f ? grupos[grupos.length - 1] : (grupos.push({ f: r.f, r: [] }), grupos[grupos.length - 1]); g.r.push(r); });
-  const fmt = (f) => { const d = new Date(f + 'T12:00:00'); return isNaN(d) ? f : d.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); };
-  return hdr('Entregas', `${pend.length} por entregar · ${hechas.length} entregadas`, '') + `
-  <div class="chips">
-    ${tabs.map((t) => `<button class="chip ${ui.entTab === t[0] ? 'on' : ''}" data-a="enttab" data-v="${t[0]}">${t[1]}</button>`).join('')}
-    <span style="width:1px;height:22px;background:var(--line2)"></span>
-    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)">Desde <input class="in" type="date" data-a="entfecha" data-k="entDesde" value="${esc(ui.entDesde)}" style="width:auto;padding:6px 8px"></label>
-    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)">Hasta <input class="in" type="date" data-a="entfecha" data-k="entHasta" value="${esc(ui.entHasta)}" style="width:auto;padding:6px 8px"></label>
-    ${ui.entDesde || ui.entHasta ? '<button class="chip" data-a="entlimpiar">Quitar fechas</button>' : ''}</div>
-  ${grupos.length ? grupos.map((g) => `
-    <div class="sec" style="margin-top:16px"><h2 style="text-transform:capitalize">${esc(fmt(g.f))}</h2><span class="ln"></span>
-      <span class="mn" style="font-size:12px;color:var(--muted)">${g.r.length} ${g.r.length === 1 ? 'pieza' : 'piezas'}</span></div>
-    <div class="pnl wrap" style="padding:6px"><table class="tbl"><tbody>
-      ${g.r.map((r) => `<tr><td><b>${esc(r.nombre)}</b><div style="font-size:11px;color:var(--muted)">${r.cant > 1 ? '×' + r.cant + ' · ' : ''}<span class="tag ${r.tipo === 'Venta' ? 'b' : 'y'}">${r.tipo}</span> ${esc(r.canal)}${r.hecho ? ' · vendida ' + esc(r.fventa) : ''}</div></td>
-        <td>${esc(r.quien)}</td><td class="mn" style="font-size:12px">${r.guia ? 'Guía ' + esc(r.guia) : ''}</td>
-        <td>${r.tipo === 'Venta' ? `<button class="btn sm gh" data-a="recibo" data-id="${r.id}" title="Recibo en PDF">🧾</button> ` : ''}${r.hecho ? `<input class="in" type="date" title="Fecha de entrega" data-a="fentrega" data-id="${r.id}" value="${esc(r.fent || r.fventa)}" style="width:auto;padding:4px 8px;font-size:12px">` : ''}</td>
-        <td class="num">${r.tipo === 'Venta'
-          ? `<select class="sel" data-a="envio" data-id="${r.id}" style="width:auto;padding:5px 28px 5px 9px;font-size:11.5px">${['Sin envío', 'Pendiente', 'Enviado', 'Entregado'].map((e) => `<option ${r.est === e ? 'selected' : ''}>${e}</option>`).join('')}</select>`
-          : `<span class="${r.aviso ? 'neg' : 'mu'}">${r.est}${r.aviso ? ' · vencido' : ''}</span>`}</td></tr>`).join('')}
-    </tbody></table></div>`).join('')
-    : vacio('📦', ui.entTab === 'entregadas' ? 'Aún no hay entregas cerradas' : 'Nada por entregar', 'Las ventas con envío y los apartados vigentes aparecen aquí, ordenados por fecha. Cambia el estatus de envío desde esta pantalla.')}
-  <div class="note">Por entregar se ordena por fecha de venta (o límite del apartado). Al marcar "Entregado" se guarda la fecha de hoy; puedes corregirla en la fila.</div>`;
 }
 
 /* ---------- Inventario ---------- */
@@ -1659,11 +1530,6 @@ document.addEventListener('click', async (e) => {
       guardarRep(); render(); break; }
     case 'reportepdf': await reportePDF(); break;
     case 'recibo': await bajarPDF(`/ventas/${id}/recibo`, `recibo-${id}.pdf`, 'GET'); break;
-    case 'entlimpiar': ui.entDesde = ''; ui.entHasta = ''; render(); break;
-    case 'baltab': ui.balTab = el.dataset.v; render(); break;
-    case 'cortehoy': ui.corteFecha = ''; render(); break;
-    case 'cargatodo': ui.carga = db.articulos.filter((a) => libre(a) > 0 && a.estatus !== 'Conservar' && !esPorRecibir(a)).map((a) => a.id); guardarCarga(); render(); break;
-    case 'cargaquitar': ui.carga = []; guardarCarga(); render(); break;
     case 'publote': abrir('publote', ui.sel.map(art).filter(Boolean)); break;
     case 'fotofb': await bajarPDF(`/articulos/${id}/foto-publicar`, `${id}-facebook.jpg`, 'GET'); break;
     case 'nuevoped': abrir('pedido', null); break;
@@ -1673,7 +1539,6 @@ document.addEventListener('click', async (e) => {
     case 'mattel': await traerMattel(); break;
     case 'yallego': await yaLlego(id); break;
     case 'yallegotodas': await yaLlego(null); break;
-    case 'sugerircarga': sugerirCarga(); break;
     case 'compramattel': ui.mm = { texto: '', filas: [], cargando: false }; abrir('mattelmulti', null); break;
     case 'mmtraer': await mmTraer(); break;
     case 'mmguardar': await mmGuardar(); break;
@@ -1697,8 +1562,8 @@ document.addEventListener('click', async (e) => {
       cerrar(); toast(r.debe > 0 ? `Entregado. Te debe ${money(r.debe)}` : 'Entregado y registrado como venta'); break; }
     case 'enccancelar': if (confirm('¿Cancelar este encargo? Las piezas quedan libres otra vez.')) await accion(() => PATCH('/encargos/' + id, { estatus: 'Cancelado' }), 'Encargo cancelado'); break;
     case 'encborrar': await accion(() => DEL('/encargos/' + id), 'Encargo borrado'); break;
+    case 'hojaexcel': await bajarPDF('/encargos/hoja-entrega-excel', `pedidos-${hoy()}.xlsx`, 'POST', { fecha: ui.encFecha === null ? ([...new Set(encActivos().map((e) => e.fecha_entrega).filter(Boolean))].sort().find((f) => f >= hoy()) || '') : ui.encFecha, incluir_costos: ui.encCostos }); break;
     case 'hojaent': await bajarPDF('/encargos/hoja-entrega', `hoja-entrega-${hoy()}.pdf`, 'POST', { fecha: ui.encFecha === null ? ([...new Set(encActivos().map((e) => e.fecha_entrega).filter(Boolean))].sort().find((f) => f >= hoy()) || '') : ui.encFecha, incluir_costos: ui.encCostos }); break;
-    case 'enttab': ui.entTab = el.dataset.v; render(); break;
     case 'ftipo': ui.fTipo = el.dataset.v; render(); break;
     case 'modoinv': ui.modoInv = el.dataset.v; try { localStorage.setItem('cw_modoInv', ui.modoInv); } catch (e) { /* sin almacenamiento */ } render(); break;
     case 'ordcol': ui.colDir = ui.colOrd === el.dataset.v ? -ui.colDir : 1; ui.colOrd = el.dataset.v; render(); break;
@@ -1854,12 +1719,7 @@ document.addEventListener('change', async (e) => {
   if (a === 'encchg') { snapEnc(); render(); }
   if (a === 'encfecha') { ui.encFecha = el.value; render(); }
   if (a === 'enccostos') { ui.encCostos = el.checked; }
-  if (a === 'cargachk') { ui.carga = el.checked ? ui.carga.concat(id0(el)) : ui.carga.filter((x) => x !== id0(el)); guardarCarga(); render(); }
-  if (a === 'margenmin') { ui.margenMin = Math.max(0, num(el.value)); try { localStorage.setItem('cw_margenMin', ui.margenMin); } catch (e) { /* sin almacenamiento */ } render(); }
-  if (a === 'cargan') { ui.cargaN = Math.max(1, num(el.value) || 15); }
   if (a === 'pubdesc') { ui.pubDesc = Math.max(0, Math.min(90, num(el.value))); render(); }
-  if (a === 'cortefecha') { ui.corteFecha = el.value; render(); }
-  if (a === 'entfecha') { ui[el.dataset.k] = el.value; render(); }
   if (a === 'recalc') pintarVenta();
   if (a === 'recalcLote') pintarLote();
   if (a === 'envio') await accion(() => PATCH('/ventas/' + el.dataset.id, { estatus_envio: el.value }), 'Estatus de envío actualizado');
@@ -2073,18 +1933,6 @@ async function yaLlego(id) {
     await accion(async () => { for (const a of l) await PATCH('/articulos/' + a.id, { ubicacion: ub }); },
       l.length === 1 ? 'Pieza recibida' : `${l.length} piezas recibidas`);
   } catch (e) { /* error ya reportado */ }
-}
-/** Elige qué llevar a Balderas: primero lo que te pidieron, luego lo estancado y lo de mejor margen. */
-function sugerirCarga() {
-  const pos = db.articulos.filter((a) => libre(a) > 0 && a.estatus !== 'Conservar' && !esPorRecibir(a));
-  const pts = (a) => {
-    const roi = num(a.precio_compra) ? (num(a.valor_estimado) - num(a.precio_compra)) / num(a.precio_compra) : 0;
-    const viejo = a.fecha_adq && dias(a.fecha_adq) > db.ajustes.diasEstancado / 2;
-    return (pedidosPara(a).length ? 1000 : 0) + (viejo ? 200 : 0) + Math.max(-50, Math.min(150, roi * 100)) + (a.grail ? -5000 : 0);
-  };
-  ui.carga = pos.sort((a, b) => pts(b) - pts(a)).slice(0, Math.max(1, ui.cargaN)).map((a) => a.id);
-  guardarCarga(); render();
-  toast(`Se marcaron ${ui.carga.length} piezas`);
 }
 async function savePedido() {
   const cuerpo = { comprador_id: $('#pe_comp').value || null, descripcion: $('#pe_desc').value.trim(), tope: num($('#pe_tope').value) };

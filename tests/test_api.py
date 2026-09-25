@@ -588,6 +588,39 @@ class PruebasAPI(unittest.TestCase):
         self.assertEqual(len(set(ids)), 3000)
         self.assertRegex(ids[0], r"^HW-[0-9A-Z]{11}$")
 
+    def test_42_hoja_de_entrega_en_excel(self):
+        import openpyxl
+        h = {"Authorization": f"Bearer {self.token}"}
+        self.assertEqual(self.c.post("/api/encargos/hoja-entrega-excel", headers=h, json={"fecha": "2032-01-01"}).status_code, 400)
+        a1, a2 = self._pieza("Excel A", 5, 30, 90), self._pieza("Excel B", 2, 15, 45)
+        for cliente, cant in (("Ana Excel", 2), ("Beto Excel", 3)):
+            r = self.c.post("/api/encargos", headers=h, json={
+                "cliente_nuevo": cliente, "fecha_entrega": "2032-02-07", "anticipo": 30, "forma_anticipo": "Depósito",
+                "items": [{"articulo_id": a1["id"], "cantidad": cant}, {"articulo_id": a2["id"], "cantidad": 1}]})
+            self.assertEqual(r.status_code, 201, r.get_json())
+        r = self.c.post("/api/encargos/hoja-entrega-excel", headers=h, json={"fecha": "2032-02-07"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("spreadsheetml", r.mimetype)
+        wb = openpyxl.load_workbook(io.BytesIO(r.data))
+        self.assertEqual(wb.sheetnames, ["Pedidos", "Por cliente", "Empacar"])
+        ws = wb["Pedidos"]
+        filas = [f for f in ws.iter_rows(min_row=2, values_only=True) if f[1]]
+        self.assertEqual(len(filas), 4, "una fila por pieza: 2 clientes x 2 piezas")
+        cab = [c.value for c in ws[1]]
+        self.assertIn("Costo total", cab)
+        # el anticipo del pedido va solo en su primera fila (así no se duplica al sumar)
+        col_ant = cab.index("Anticipo (del pedido)")
+        self.assertEqual(sum(1 for f in filas if f[col_ant]), 2)
+        self.assertEqual(wb["Empacar"]["D2"].value + wb["Empacar"]["D3"].value, 7)
+        # sin costos no aparecen ni costo ni ganancia
+        r = self.c.post("/api/encargos/hoja-entrega-excel", headers=h, json={"fecha": "2032-02-07", "incluir_costos": False})
+        cab = [c.value for c in openpyxl.load_workbook(io.BytesIO(r.data))["Pedidos"][1]]
+        self.assertNotIn("Costo total", cab)
+        self.assertNotIn("Ganancia", cab)
+        self.assertEqual(self.c.post("/api/encargos/hoja-entrega-excel", json={}).status_code, 401)
+        self.assertEqual(self.c.post("/api/encargos/hoja-entrega-excel", headers={"Authorization": f"Bearer {self.token2}"},
+                                     json={"fecha": "2032-02-07"}).status_code, 400, "otra cuenta no ve estos pedidos")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

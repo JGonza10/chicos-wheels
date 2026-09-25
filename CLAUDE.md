@@ -102,3 +102,7 @@ El usuario aclaró que la app es **solo inventario + control de entregas**: comp
 - **Cobro rápido** 💵/🏦 (entrega y cobra el resto), **💬 mensaje de WhatsApp** al cliente, columna **"Apartada para"** en el inventario (`reservas(a)`).
 - **🛒 Compra Mattel** (varios links a la vez) registra las piezas como "Por recibir".
 - **Corregido**: `util.uid()` podía repetir ids creados en el mismo milisegundo (fallaba de forma intermitente "cargar datos de ejemplo" con 409 y podía romper importaciones masivas). Ahora lleva contador por proceso (prueba 41).
+
+- **Hoja de entrega en Excel** (`collecthub/hoja_excel.py`, `POST /api/encargos/hoja-entrega-excel`, botón 📊): hojas Pedidos (una fila por pieza, fórmulas, filtros; anticipo/resta solo en la primera fila de cada pedido para no duplicar sumas), Por cliente (Cobrado efectivo/depósito + Diferencia) y Empacar. Los totales son fórmulas: Excel/Sheets los calculan al abrir (algunos visores de celular no). Prueba 42.
+
+- **Quitados del menú (2026-09-25, a pedido):** *Balderas* (lista de carga y corte del día) y *Entregas*: quedaron resueltos con **Pedidos**. Se borró su código de `app.js`. El "piso" de regateo (`precioMinimo`) sigue en la ficha de la pieza con margen fijo de 10% (`ui.margenMin`; ya no hay pantalla para cambiarlo). Si se necesita el corte del día o la lista de carga, están en el historial de git (commit `db16ad4`).

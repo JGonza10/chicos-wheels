@@ -31,9 +31,9 @@ La app existe para un ciclo simple: **comprar → recibir → publicar en Facebo
 4. **Apartar.** Cuando un cliente quiere algo: **Pedidos → + Nuevo pedido** (o **Apartar** en la ficha de la pieza). Elige al cliente o escribe uno nuevo, agrega **una o varias piezas**, deja la fecha (por defecto el **próximo sábado**) y, si dejó dinero, el anticipo y cómo lo pagó. Las piezas quedan reservadas: no se pueden ofrecer a otro.
 5. **Estatus de cada pedido:** **Apartado** (reservado, con o sin anticipo) → **En proceso** (ya empacado para el sábado) → **Liquidado** (entregado y pagado). En el Inventario cada pieza reservada dice **para quién y para cuándo**.
 6. **Confirmar con el cliente.** El botón **💬** abre WhatsApp con el mensaje del pedido (piezas, total, anticipo, lo que resta y "nos vemos el sábado en Balderas").
-7. **Llevar el catálogo.** En **Pedidos** elige el sábado y **🖨 Generar PDF**: trae qué empacar (por ubicación), el detalle por cliente con costo y precio por pieza y total, y el **cruce final** de piezas contra dinero por cobrar (efectivo o depósito). Se imprime y se lleva.
+7. **Llevar el catálogo.** En **Pedidos** elige el sábado y **🖨 Generar PDF**: trae qué empacar (por ubicación), el detalle por cliente con costo y precio por pieza y total, y el **cruce final** de piezas contra dinero por cobrar (efectivo o depósito). Se imprime y se lleva. Si prefieres una **lista tipo hoja de cálculo**, el botón **📊 Excel** baja el mismo reporte en `.xlsx`: una fila por pieza (con filtros y totales), una hoja "Por cliente" con columnas para anotar lo cobrado en efectivo y depósito y la diferencia, y una hoja "Empacar" con las piezas juntas por ubicación.
 8. **Entregar y cobrar.** En Balderas, por cada cliente: **💵** (entregado y cobrado en efectivo) o **🏦** (por depósito) de un toque, o **Entregar…** si hubo descuento o cobró otra cantidad. Cada pieza se vuelve una venta y sale del inventario.
-9. **Cerrar el día.** **Balderas → Corte del día** muestra ventas, cobrado, ganancia, anticipos y compara la semana con la anterior.
+9. **Ver cómo va el negocio.** El **Panel** muestra los pedidos por entregar, lo que falta cobrar, los movimientos por mes y de dónde salen tus mejores piezas.
 
 Entre semana también se puede: en el pedido se cambia la fecha de entrega a otro día (por ejemplo, alrededores de Coyoacán).
 
@@ -42,7 +42,7 @@ Entre semana también se puede: en el pedido se cambia la fecha de entrega a otr
 - Alta de artículos con valuación, categoría y foto. Vista de **fichas** o de **lista** (como hoja de cálculo, con columnas ordenables y totales).
 - Ventas, lotes, intercambios, **pedidos** (varias piezas por cliente) y los **apartados previos** de una sola pieza (esa pantalla solo aparece si ya tenías apartados).
 - La ganancia neta la calcula la base de datos misma (no la pantalla ni el servidor) para que no se pueda falsear editando el código.
-- **Precio mínimo ("piso")**: lo menos que puedes aceptar y aún ganar tu margen mínimo; aparece en la ficha y en la lista de carga de Balderas.
+- **Precio mínimo ("piso")**: lo menos que puedes aceptar y aún ganar tu margen mínimo; aparece en la ficha de la pieza.
 - **Lista de espera de clientes**: si alguien pide algo que no tienes, anótalo en Compradores; al abrir una pieza parecida verás su pedido.
 - **Respaldo automático diario** de la base de datos (últimos 14 días, en la carpeta `datos/respaldos`).
 

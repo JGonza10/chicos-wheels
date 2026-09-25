@@ -463,6 +463,16 @@ def hoja_entrega():
         "Content-Disposition": f'attachment; filename="hoja-entrega-{hoy()}.pdf"', "Cache-Control": "no-store"})
 
 
+@bp.post("/encargos/hoja-entrega-excel")
+def hoja_entrega_excel():
+    """La misma hoja de entrega como lista de hoja de cálculo (.xlsx)."""
+    from flask import Response
+    from ..hoja_excel import generar_hoja_excel
+    datos = generar_hoja_excel(g.usuario_id, request.get_json(silent=True) or {})
+    return Response(datos, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={
+        "Content-Disposition": f'attachment; filename="pedidos-{hoy()}.xlsx"', "Cache-Control": "no-store"})
+
+
 @bp.put("/encargos/<id_enc>")
 def reemplazar_encargo(id_enc):
     _encargo_activo(id_enc)
