@@ -311,10 +311,10 @@ function salir(silencioso) {
 }
 
 /* ==================== Render ==================== */
-const NAV = [['panel', '◧', 'Panel'], ['inventario', '▦', 'Inventario'], ['bazar', '⚡', 'Modo bazar'],
+const NAV = [['panel', '◧', 'Panel'], ['inventario', '▦', 'Inventario'],
   ['SEP1', '', 'Movimientos'], ['ventas', '⇄', 'Ventas'], ['apartados', '⏳', 'Apartados'], ['intercambios', '⇌', 'Intercambios'],
   ['SEP2', '', 'Catálogos'], ['compradores', '☺', 'Compradores'], ['wishlist', '★', 'Faltantes'],
-  ['plataformas', '◈', 'Plataformas'], ['etiquetas', '▩', 'Etiquetas QR'], ['datos', '⛃', 'Datos']];
+  ['etiquetas', '▩', 'Etiquetas QR'], ['datos', '⛃', 'Datos']];
 const CNT = {
   inventario: () => db.articulos.length, ventas: () => db.ventas.length,
   apartados: () => db.apartados.filter((x) => x.estatus === 'Vigente').length,
@@ -325,8 +325,9 @@ const CNT = {
 function render() {
   if (!token) { $('#app').innerHTML = vistaAuth(); return; }
   if (!db) { $('#app').innerHTML = '<div class="cargando"><div><div class="spin"></div>Cargando tu colección…</div></div>'; return; }
-  const V = { panel: vPanel, inventario: vInv, bazar: vBazar, ventas: vVentas, apartados: vApart,
-    intercambios: vTrade, compradores: vComp, wishlist: vWish, plataformas: vPlat, etiquetas: vQR, datos: vDatos }[ui.vista] || vPanel;
+  /* Modo bazar deshabilitado (2026-09-24): vBazar sigue definida, solo sin acceso desde el menú */
+  const V = { panel: vPanel, inventario: vInv, ventas: vVentas, apartados: vApart,
+    intercambios: vTrade, compradores: vComp, wishlist: vWish, etiquetas: vQR, datos: vDatos }[ui.vista] || vPanel;
   $('#app').innerHTML = `
   <div class="shell">
     <aside class="side">
@@ -474,7 +475,10 @@ function vInv() {
   <div class="chips">
     ${tipos.map((t) => `<button class="chip ${ui.fTipo === t[0] ? 'on' : ''}" data-a="ftipo" data-v="${t[0]}">${t[1]}</button>`).join('')}
     <span style="width:1px;height:22px;background:var(--line2)"></span>
-    ${est.map((c) => `<button class="chip ${ui.fEstatus === c[0] ? 'on' : ''}" data-a="festatus" data-v="${c[0]}">${c[1]}</button>`).join('')}
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)">Estatus
+      <select class="sel" data-a="festatus_sel" style="width:auto;padding:7px 32px 7px 12px;font-size:12.5px">
+        ${est.map((c) => `<option value="${c[0]}" ${ui.fEstatus === c[0] ? 'selected' : ''}>${c[1]}</option>`).join('')}
+      </select></label>
     <span style="width:1px;height:22px;background:var(--line2)"></span>
     <button class="chip ${ui.selMode ? 'on' : ''}" data-a="selmode">☑ Seleccionar varias</button>
     <select class="sel" data-a="orden" style="width:auto;margin-left:auto;padding:7px 32px 7px 12px;font-size:12.5px">
@@ -1247,6 +1251,7 @@ document.addEventListener('change', async (e) => {
   const el = e.target.closest('[data-a]'); if (!el) return;
   const a = el.dataset.a;
   if (a === 'orden') { ui.orden = el.value; render(); }
+  if (a === 'festatus_sel') { ui.fEstatus = el.value; render(); }
   if (a === 'recalc') pintarVenta();
   if (a === 'recalcLote') pintarLote();
   if (a === 'envio') await accion(() => PATCH('/ventas/' + el.dataset.id, { estatus_envio: el.value }), 'Estatus de envío actualizado');
