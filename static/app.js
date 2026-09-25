@@ -92,7 +92,7 @@ let ui = {
   qTipo: 'Compra', stream: null, authTab: 'login', authErr: '', ocupado: false,
   fotoPendiente: null, avisoIA: '', identificando: false,
   modoInv: (() => { try { return localStorage.getItem('cw_modoInv') === 'lista' ? 'lista' : 'fichas'; } catch (e) { return 'fichas'; } })(),
-  colOrd: '', colDir: 1, encTab: 'activos', encFecha: '', encCostos: true, enc: null, pubDesc: 0, cargaN: 15, ubLlegada: '', balTab: 'carga', corteFecha: '',
+  colOrd: '', colDir: 1, mm: null, encTab: 'activos', encFecha: null, encCostos: true, enc: null, pubDesc: 0, cargaN: 15, ubLlegada: '', balTab: 'carga', corteFecha: '',
   margenMin: (() => { try { const v = localStorage.getItem('cw_margenMin'); return v === null ? 10 : Math.max(0, num(v)); } catch (e) { return 10; } })(),
   carga: (() => { try { return JSON.parse(localStorage.getItem('cw_carga') || '[]'); } catch (e) { return []; } })(), entTab: 'pendientes', entDesde: '', entHasta: '',
   rep: (() => {
@@ -246,10 +246,35 @@ function stats() {
     saldoMes: suma(db.ventas.filter((v) => (v.fecha || '').slice(0, 7) === hoy().slice(0, 7)), (v) => v.neto),
   };
 }
+/* ---------- Ritmo del negocio: entregas los sábados en Balderas ---------- */
+/** Etiquetas que ve el usuario (en la base siguen Pendiente/Empacado/Entregado). */
+const ETQ_ENC = { Pendiente: 'Apartado', Empacado: 'En proceso', Entregado: 'Liquidado', Cancelado: 'Cancelado' };
+const encDebe = (e) => (e.estatus === 'Entregado' ? Math.max(0, num(e.total_final != null ? e.total_final : e.total) - num(e.anticipo) - num(e.cobrado_entrega)) : 0);
+const etqEnc = (e) => (e.estatus === 'Entregado' && encDebe(e) > 0.005 ? `Entregado · debe ${money(encDebe(e))}` : ETQ_ENC[e.estatus] || e.estatus);
+const claseEnc = (e) => (e.estatus === 'Entregado' ? (encDebe(e) > 0.005 ? 'y' : 'g') : e.estatus === 'Empacado' ? 'b' : e.estatus === 'Cancelado' ? 'r' : 'y');
+/** Sábado de entrega: hoy si es sábado; si no, el que sigue. `extra` = sábados adicionales. */
+function proximoSabado(extra) {
+  const d = new Date(hoy() + 'T12:00:00');
+  d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7) + 7 * (extra || 0));
+  return d.toISOString().slice(0, 10);
+}
+const fmtDia = (f, largo) => { if (!f) return 'Sin fecha de entrega'; const d = new Date(f + 'T12:00:00'); return isNaN(d) ? f : d.toLocaleDateString('es-MX', largo ? { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' } : { weekday: 'short', day: 'numeric', month: 'short' }); };
+/** Quién tiene reservada una pieza y para cuándo (encargos activos y apartados vigentes). */
+function reservas(a) {
+  const r = [];
+  (db.encargos || []).filter((e) => e.estatus === 'Pendiente' || e.estatus === 'Empacado').forEach((e) => {
+    e.items.filter((i) => i.articulo_id === a.id).forEach((i) => r.push({ cliente: (cli(e.comprador_id) || {}).nombre || 'Cliente', fecha: e.fecha_entrega, cant: i.cantidad, est: ETQ_ENC[e.estatus] }));
+  });
+  db.apartados.filter((x) => x.articulo_id === a.id && x.estatus === 'Vigente').forEach((x) => r.push({ cliente: (cli(x.id_comprador) || {}).nombre || x.cliente_snap || 'Cliente', fecha: x.fecha_limite, cant: x.cantidad, est: 'Apartado' }));
+  return r;
+}
+const reservasTxt = (a) => reservas(a).map((x) => `${x.cliente}${x.cant > 1 ? ' ×' + x.cant : ''} · ${x.est}${x.fecha ? ' · ' + fmtDia(x.fecha) : ''}`).join('; ');
+
+/* ---------- Estatus de la pieza ---------- */
 function semaforo(a) {
   if (a.estatus === 'Conservar') return { c: 'p', t: 'Conservar', col: 'var(--purple)' };
   if (!num(a.cantidad)) return { c: 'r', t: 'Agotado', col: 'var(--red)' };
-  if (a.apartadas > 0) return { c: 'y', t: 'Apartado', col: 'var(--yellow)' };
+  if (a.apartadas > 0) { const r = reservas(a); return { c: r.some((x) => x.est === 'En proceso') ? 'b' : 'y', t: r.some((x) => x.est === 'En proceso') ? 'En proceso' : 'Apartado', col: r.some((x) => x.est === 'En proceso') ? 'var(--blue)' : 'var(--yellow)' }; }
   if (a.estatus === 'En negociación') return { c: 'y', t: 'En negociación', col: 'var(--yellow)' };
   return { c: 'g', t: 'Disponible', col: 'var(--green)' };
 }
@@ -326,7 +351,7 @@ function salir(silencioso) {
 
 /* ==================== Render ==================== */
 const NAV = [['panel', '◧', 'Panel'], ['inventario', '▦', 'Inventario'],
-  ['SEP1', '', 'Movimientos'], ['ventas', '⇄', 'Ventas'], ['encargos', '🛍', 'Encargos'], ['apartados', '⏳', 'Apartados'], ['intercambios', '⇌', 'Intercambios'],
+  ['SEP1', '', 'Movimientos'], ['ventas', '⇄', 'Ventas'], ['encargos', '🛍', 'Pedidos'], ['apartados', '⏳', 'Apartados previos'], ['intercambios', '⇌', 'Intercambios'],
   ['SEP2', '', 'Catálogos'], ['balderas', '📍', 'Balderas'], ['entregas', '📦', 'Entregas'], ['compradores', '☺', 'Compradores'], ['wishlist', '★', 'Faltantes'],
   ['etiquetas', '▩', 'Etiquetas QR'], ['datos', '⛃', 'Datos']];
 const CNT = {
@@ -346,7 +371,7 @@ function render() {
   <div class="shell">
     <aside class="side">
       <div class="logo">CHICOS<i>WHEELS</i><small>${esc((usuario && (usuario.nombre || usuario.email)) || '')}</small></div>
-      <nav class="nav">${NAV.map((n) => (n[0].startsWith('SEP')
+      <nav class="nav">${NAV.filter((n) => n[0] !== 'apartados' || db.apartados.length).map((n) => (n[0].startsWith('SEP')
         ? `<div class="navsep">${n[2]}</div>`
         : `<button data-a="nav" data-v="${n[0]}" class="${ui.vista === n[0] ? 'on' : ''}"><span class="ic">${n[1]}</span>${n[2]}<span class="cnt">${CNT[n[0]] ? (CNT[n[0]]() || '') : ''}</span></button>`)).join('')}
         <div class="salir"><button data-a="salir"><span class="ic">⏻</span>Cerrar sesión</button></div>
@@ -355,7 +380,7 @@ function render() {
     <main class="main">${V()}</main>
   </div>
   <button class="fab" data-a="nuevo" title="Registrar pieza" aria-label="Registrar pieza">+</button>
-  <nav class="mob">${NAV.filter((n) => !n[0].startsWith('SEP')).map((n) =>
+  <nav class="mob">${NAV.filter((n) => !n[0].startsWith('SEP') && (n[0] !== 'apartados' || db.apartados.length)).map((n) =>
     `<button data-a="nav" data-v="${n[0]}" class="${ui.vista === n[0] ? 'on' : ''}"><span class="ic">${n[1]}</span>${n[2].replace('Modo ', '')}</button>`).join('')}</nav>
   ${ui.modal ? `<div class="ov">${(MOD[ui.modal] || (() => ''))()}</div>` : ''}`;
   if (ui.modal === 'venta') pintarVenta();
@@ -370,6 +395,7 @@ function hdr(t, s, extra) {
   ${extra === undefined ? `<div class="srch"><input class="in" placeholder="Nombre, número, ubicación, código…" value="${esc(ui.q)}" data-a="q"></div>
   <button class="btn gh sm" data-a="escanear" title="Escanear código de barras">⌗ Escanear</button>
   <button class="btn gh sm" data-a="fotoia" title="Registrar con foto, la IA sugiere los datos">📷 Con foto</button>
+  <button class="btn gh sm" data-a="compramattel" title="Pega los links de lo que compraste en Mattel y se registran todos juntos">🛒 Compra Mattel</button>
   <button class="btn pri" data-a="nuevo">+ Registrar pieza</button>` : extra}
   <div class="emb"><b class="hw">🏎</b><b class="pk">🃏</b></div></div>`;
 }
@@ -465,8 +491,9 @@ function vPanel() {
         : `<p style="color:var(--muted);font-size:13px">Aún no hay movimientos.</p>`}
     </div>
   </div>
-  ${(() => { const ea = encActivos(); return ea.length ? `<div class="pnl" style="margin-top:16px;cursor:pointer" data-a="nav" data-v="encargos"><h2>Encargos por entregar (${ea.length})</h2>
-    <div style="font-size:13px;color:var(--muted)">${suma(ea, (e) => e.piezas)} piezas para ${new Set(ea.map((e) => e.comprador_id)).size} cliente(s) · por cobrar <b class="mn" style="color:var(--text)">${money(suma(ea, (e) => e.resta))}</b> · ganancia esperada <b class="mn pos">${money(suma(ea, (e) => e.ganancia))}</b></div></div>` : ''; })()}
+  ${(() => { const ea = encActivos(); return ea.length ? `<div class="pnl" style="margin-top:16px;cursor:pointer" data-a="nav" data-v="encargos"><h2>Pedidos por entregar (${ea.length})</h2>
+    <div style="font-size:13px;color:var(--muted)">${suma(ea, (e) => e.piezas)} piezas para ${new Set(ea.map((e) => e.comprador_id)).size} cliente(s) · por cobrar <b class="mn" style="color:var(--text)">${money(suma(ea, (e) => e.resta))}</b> · ganancia esperada <b class="mn pos">${money(suma(ea, (e) => e.ganancia))}</b></div>
+    <div style="font-size:12.5px;margin-top:8px">🗓 Próximo sábado <b>${esc(fmtDia(proximoSabado()))}</b>: ${ea.filter((e) => e.fecha_entrega === proximoSabado()).length} pedido(s), ${ea.filter((e) => e.estatus === 'Empacado').length} ya en proceso.</div></div>` : ''; })()}
   ${(() => { const pr = porRecibir(); return pr.length ? `<div class="pnl" style="margin-top:16px;border-color:var(--yellow)"><h2>Por recibir (${pr.length})</h2>
     <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Piezas que compraste y aún no llegan. Cuando lleguen, escribe dónde las guardas y márcalas.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><input class="in" id="ub_llegada" placeholder="Ubicación, ej. Caja A" value="${esc(ui.ubLlegada)}" style="max-width:240px">
@@ -547,21 +574,22 @@ function vEncargos() {
   const act = encActivos(), hechos = (db.encargos || []).filter((e) => e.estatus === 'Entregado');
   const lista = ui.encTab === 'entregados' ? hechos : ui.encTab === 'todos' ? (db.encargos || []) : act;
   const fechas = [...new Set(act.map((e) => e.fecha_entrega).filter(Boolean))].sort();
-  const sel = act.filter((e) => !ui.encFecha || e.fecha_entrega === ui.encFecha);
+  const fechaSel = ui.encFecha === null ? (fechas.find((f) => f >= hoy()) || '') : ui.encFecha;
+  const sel = act.filter((e) => !fechaSel || e.fecha_entrega === fechaSel);
   const S = (f) => suma(sel, f);
   const grupos = {};
   lista.forEach((e) => { const k = e.fecha_entrega || ''; (grupos[k] = grupos[k] || []).push(e); });
   const claves = Object.keys(grupos).sort((a, b) => (a || '9999').localeCompare(b || '9999'));
-  const tabs = [['activos', `Por entregar (${act.length})`], ['entregados', `Entregados (${hechos.length})`], ['todos', 'Todos']];
-  const fmt = (f) => { if (!f) return 'Sin fecha de entrega'; const d = new Date(f + 'T12:00:00'); return isNaN(d) ? f : d.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); };
-  return hdr('Encargos', 'Lo que te piden, empacado para entregar en Balderas',
-    `<button class="btn pri" data-a="nuevoenc">+ Nuevo encargo</button>`) + `
+  const tabs = [['activos', `Por entregar (${act.length})`], ['entregados', `Liquidados (${hechos.length})`], ['todos', 'Todos']];
+  const fmt = (f) => fmtDia(f, true) + (f && new Date(f + 'T12:00:00').getDay() !== 6 ? ' (entre semana)' : '');
+  return hdr('Pedidos', 'Apartado → En proceso → Liquidado · entregas los sábados en Balderas',
+    `<button class="btn pri" data-a="nuevoenc">+ Nuevo pedido</button>`) + `
   ${act.length ? `<div class="pnl" style="margin-bottom:14px;padding:14px 16px">
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <b style="font-size:13px">Hoja de entrega para imprimir</b>
       <select class="sel" data-a="encfecha" style="width:auto;padding:7px 32px 7px 12px;font-size:12.5px">
         <option value="">Todos los pendientes</option>
-        ${fechas.map((f) => `<option value="${f}" ${ui.encFecha === f ? 'selected' : ''}>${esc(fmt(f))}</option>`).join('')}</select>
+        ${fechas.map((f) => `<option value="${f}" ${fechaSel === f ? 'selected' : ''}>${esc(fmt(f))}</option>`).join('')}</select>
       <label class="chk" style="margin:0;padding:6px 10px"><input type="checkbox" data-a="enccostos" ${ui.encCostos ? 'checked' : ''}><span>Incluir costos y ganancia</span></label>
       <button class="btn pri sm" data-a="hojaent">🖨 Generar PDF</button></div>
     <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:0">
@@ -584,21 +612,24 @@ function vEncargos() {
         <td class="num">${money(e.costo)}</td><td class="num"><b>${money(e.estatus === 'Entregado' && e.total_final != null ? e.total_final : e.total)}</b></td>
         <td class="num">${e.anticipo ? money(e.anticipo) + `<div class="mu" style="font-size:10.5px">${esc(e.forma_anticipo)}</div>` : '—'}</td>
         <td class="num ${e.resta ? '' : 'pos'}">${e.estatus === 'Entregado' ? `<span class="mu">cobrado ${money(e.cobrado_entrega)}</span>` : money(e.resta)}</td>
-        <td><span class="tag ${e.estatus === 'Entregado' ? 'g' : e.estatus === 'Empacado' ? 'b' : e.estatus === 'Cancelado' ? 'r' : 'y'}">${e.estatus}</span></td>
+        <td><span class="tag ${claseEnc(e)}">${esc(etqEnc(e))}</span></td>
         <td style="text-align:right;white-space:nowrap">${act1 ? `
-          <button class="btn sm gh" data-a="encempacar" data-id="${e.id}" data-v="${e.estatus === 'Empacado' ? 'Pendiente' : 'Empacado'}">${e.estatus === 'Empacado' ? 'Desempacar' : '📦 Empacado'}</button>
+          <button class="btn sm gh" data-a="encempacar" data-id="${e.id}" data-v="${e.estatus === 'Empacado' ? 'Pendiente' : 'Empacado'}" title="${e.estatus === 'Empacado' ? 'Regresar a Apartado' : 'Ya está empacado y listo para llevar'}">${e.estatus === 'Empacado' ? '↩ Apartado' : '📦 En proceso'}</button>
+          <button class="btn sm grn" data-a="encrapido" data-id="${e.id}" data-v="Efectivo" title="Entregado y cobrado el resto en efectivo">💵</button>
+          <button class="btn sm grn" data-a="encrapido" data-id="${e.id}" data-v="Depósito" title="Entregado y cobrado el resto por depósito">🏦</button>
+          <button class="btn sm gh" data-a="encwa" data-id="${e.id}" title="Mensaje de WhatsApp al cliente">💬</button>
           <button class="btn sm gh" data-a="editenc" data-id="${e.id}">Editar</button>
-          <button class="btn sm grn" data-a="encentregar" data-id="${e.id}">Entregar</button>
+          <button class="btn sm gh" data-a="encentregar" data-id="${e.id}" title="Entregar con otro monto o forma de pago">Entregar…</button>
           <button class="btn sm gh" data-a="enccancelar" data-id="${e.id}" title="Cancelar y liberar las piezas">✕</button>`
           : (e.estatus === 'Cancelado' ? `<button class="btn sm gh" data-a="encborrar" data-id="${e.id}">Borrar</button>` : '')}</td></tr>`; }).join('')}
     </tbody></table></div>`).join('')
     : vacio('🛍', 'Aún no hay encargos', 'Cuando un cliente te pida una o varias piezas, regístralo aquí: se reservan, se empacan y al entregar en Balderas se vuelven ventas.',
       '<button class="btn pri" data-a="nuevoenc">Nuevo encargo</button>')}
-  <div class="note">Al registrar un encargo las piezas quedan reservadas (no se pueden ofrecer a otro). Al pulsar <b>Entregar</b> se convierten en ventas y se descuentan del inventario.</div>`;
+  <div class="note"><b>Cómo se lee:</b> <b>Apartado</b> = reservado para un cliente (con o sin anticipo) · <b>En proceso</b> = ya empacado para el sábado · <b>Liquidado</b> = entregado y pagado. 💵 / 🏦 entregan y cobran lo que resta de un toque; <b>Entregar…</b> permite otro monto. Al entregar se convierten en ventas y salen del inventario.</div>`;
 }
 /** Estado del formulario de encargo: se lee del DOM antes de cada re-pintado. */
 function encNuevo() {
-  return { id: '', comprador_id: '', cliente_nuevo: '', tel_nuevo: '', fecha_entrega: '', anticipo: '', forma_anticipo: 'Depósito', notas: '', items: [{ articulo_id: '', cantidad: 1, precio_unit: '' }] };
+  return { id: '', comprador_id: '', cliente_nuevo: '', tel_nuevo: '', fecha_entrega: proximoSabado(), anticipo: '', forma_anticipo: 'Depósito', notas: '', items: [{ articulo_id: '', cantidad: 1, precio_unit: '' }] };
 }
 function snapEnc() {
   const e = ui.enc; if (!e || !$('#en_comp')) return;
@@ -612,6 +643,45 @@ function snapEnc() {
     if (id !== prev.articulo_id) precio = id && art(id) ? String(art(id).valor_estimado) : '';   // pieza nueva: precio de lista
     return { articulo_id: id, cantidad: cant, precio_unit: precio };
   });
+}
+/** Mensaje listo para confirmar el pedido con el cliente por WhatsApp (o copiarlo si no hay teléfono). */
+function mensajeCliente(e) {
+  const c = cli(e.comprador_id) || {};
+  const lineas = e.items.map((i) => `• ${i.cantidad}× ${i.nombre_snap} — ${money(i.cantidad * i.precio_unit)}`);
+  const txt = [`Hola ${c.nombre || ''} 👋 Te confirmo tu pedido:`, '', ...lineas, '',
+    `Total: ${money(e.total)}${e.anticipo ? ` · Anticipo: ${money(e.anticipo)} · Resta: ${money(e.resta)}` : ''}`,
+    `📍 Entrega en Balderas${e.fecha_entrega ? ' el ' + fmtDia(e.fecha_entrega, true) : ''}. ¡Nos vemos!`].join('\n');
+  const dig = String(c.tel || '').replace(/\D/g, '');
+  if (dig.length >= 10) { window.open(`https://wa.me/${dig.length === 10 ? '52' + dig : dig}?text=${encodeURIComponent(txt)}`, '_blank', 'noopener'); return; }
+  const t = document.createElement('textarea'); t.value = txt; document.body.appendChild(t); t.select();
+  try { document.execCommand('copy'); toast('Mensaje copiado (el cliente no tiene teléfono guardado)'); } catch (x) { toast('No se pudo copiar', true); }
+  t.remove();
+}
+async function mmTraer() {
+  const urls = ($('#mm_txt').value || '').split(/\s+/).map((x) => x.trim()).filter(Boolean);
+  ui.mm.texto = $('#mm_txt').value;
+  if (!urls.length) { toast('Pega al menos un link', true); return; }
+  ui.mm.filas = []; ui.mm.cargando = true; render();
+  for (const url of urls) {
+    try { const d = await POST('/articulos/desde-mattel', { url }); ui.mm.filas.push({ ok: true, url, cantidad: 1, ...d }); }
+    catch (e) { ui.mm.filas.push({ ok: false, url, error: e.message }); }
+  }
+  ui.mm.cargando = false; render();
+}
+async function mmGuardar() {
+  document.querySelectorAll('.mm_cant').forEach((el) => { ui.mm.filas[num(el.dataset.i)].cantidad = Math.max(1, num(el.value) || 1); });
+  document.querySelectorAll('.mm_pre').forEach((el) => { ui.mm.filas[num(el.dataset.i)].precio_mxn = num(el.value); });
+  const l = ui.mm.filas.filter((r) => r.ok);
+  try {
+    await accion(async () => {
+      for (const r of l) {
+        await POST('/articulos', { tipo: /pok[eé]mon/i.test(r.nombre) ? 'Pokémon' : 'Hot Wheels', nombre: r.nombre, cantidad: r.cantidad,
+          precio_compra: r.precio_mxn, valor_estimado: r.precio_mxn, fecha_adq: hoy(), fuente: 'Mattel Creations', ubicacion: 'Por recibir',
+          foto: r.imagen || '', notas: `Mattel: ${r.url}\nPrecio en Mattel: US$${r.precio_usd} (TC ${r.tipo_cambio})` });
+      }
+    }, `${l.length} pieza(s) registradas como Por recibir`);
+    ui.mm = null; cerrar();
+  } catch (e) { /* error ya reportado */ }
 }
 async function saveEnc() {
   snapEnc();
@@ -719,7 +789,7 @@ function vEntregas() {
     guia: v.guia, est: v.estatus_envio, hecho: v.estatus_envio === 'Entregado', fent: v.fecha_entrega || '', fventa: v.fecha }); });
   db.apartados.forEach((x) => { if (x.estatus === 'Vigente' || x.estatus === 'Vencido') filas.push({
     id: x.id, f: x.fecha_limite || x.fecha, tipo: 'Apartado', nombre: x.nombre_snap, cant: x.cantidad,
-    quien: cli(x.id_comprador) ? cli(x.id_comprador).nombre : '—', canal: 'Anticipo ' + money(x.anticipo) + ' · entrega en ' + (x.lugar_entrega || 'Balderas'),
+    quien: cli(x.id_comprador) ? cli(x.id_comprador).nombre : (x.cliente_snap || '—'), canal: 'Anticipo ' + money(x.anticipo) + ' · entrega en ' + (x.lugar_entrega || 'Balderas'),
     guia: '', fent: '', est: x.estatus === 'Vencido' ? 'Vencido' : 'Por liquidar', hecho: false, aviso: x.estatus === 'Vencido' || (x.fecha_limite && x.fecha_limite < hoyS) }); });
   filas.forEach((r) => { if (r.hecho) r.f = r.fent || r.fventa; });
   const enRango = (r) => (!ui.entDesde || r.f >= ui.entDesde) && (!ui.entHasta || r.f <= ui.entHasta);
@@ -793,6 +863,7 @@ const COLS_INV = [
   { k: 'valor', t: 'Valor', num: 1, v: (a) => num(a.valor_estimado) },
   { k: 'dif', t: 'Dif.', num: 1, v: (a) => num(a.valor_estimado) - num(a.precio_compra) },
   { k: 'fecha', t: 'Adquirida', txt: 1, v: (a) => a.fecha_adq || '' },
+  { k: 'reserva', t: 'Apartada para', txt: 1, v: (a) => reservasTxt(a) },
 ];
 function tablaInv(l) {
   const flecha = (c) => (ui.colOrd === c.k ? (ui.colDir > 0 ? ' ▲' : ' ▼') : '');
@@ -808,10 +879,10 @@ function tablaInv(l) {
       <td><span class="dt" style="background:${s.col}"></span>${s.t}</td><td>${esc(a.ubicacion || '—')}</td>
       <td class="num">${money(a.precio_compra)}</td><td class="num"><b>${money(a.valor_estimado)}</b></td>
       <td class="num ${dif >= 0 ? 'pos' : 'neg'}">${dif >= 0 ? '+' : ''}${money(dif)}</td>
-      <td class="mn">${esc(a.fecha_adq || '')}</td></tr>`; }).join('')}
+      <td class="mn">${esc(a.fecha_adq || '')}</td><td style="font-size:12px">${esc(reservasTxt(a))}</td></tr>`; }).join('')}
     </tbody><tfoot><tr><td class="rn"></td><td colspan="9"><b>Total (${l.length} filas)</b></td>
       <td class="num">${money(suma(l, (a) => num(a.precio_compra) * num(a.cantidad)))}</td>
-      <td class="num">${money(suma(l, (a) => num(a.valor_estimado) * num(a.cantidad)))}</td><td></td><td></td></tr></tfoot></table></div>`;
+      <td class="num">${money(suma(l, (a) => num(a.valor_estimado) * num(a.cantidad)))}</td><td></td><td></td><td></td></tr></tfoot></table></div>`;
 }
 function vInv() {
   const l = filtrar();
@@ -859,6 +930,7 @@ function ficha(a) {
       <div class="nm">${esc(a.nombre)}</div>
       <div class="row"><span><span class="dt" style="background:${s.col}"></span><span class="mu">${s.t}${num(a.cantidad) > 1 ? ' ×' + a.cantidad : ''}</span></span>
         <b class="mn" style="color:${t}">${money(a.valor_estimado)}</b></div>
+      ${a.apartadas ? `<div class="mu" style="margin-top:5px;font-size:11px;color:var(--yellow)">${esc(reservasTxt(a))}</div>` : ''}
       <div class="row" style="margin-top:6px"><span class="mu">${esc(a.ubicacion || 'Sin ubicar')}</span>
         <span class="mu mn ${dif >= 0 ? 'pos' : 'neg'}">${dif >= 0 ? '+' : ''}${money(dif)}</span></div>
       ${tr ? chispa(tr.pts, tr.delta >= 0 ? 'var(--green)' : 'var(--red)') : ''}
@@ -931,7 +1003,7 @@ function vApart() {
         ? Math.round((new Date(x.fecha_limite) - new Date(hoy())) / 864e5) : null;
       const est = { Vigente: 'g', Liquidado: 'b', Vencido: 'r', Cancelado: '' }[x.estatus] || '';
       return `<tr><td><b>${esc(x.nombre_snap)}</b><div style="font-size:11px;color:var(--muted)">×${x.cantidad}${x.notas ? ' · ' + esc(x.notas) : ''}</div></td>
-      <td>${esc(cli(x.id_comprador) ? cli(x.id_comprador).nombre : '—')}</td>
+      <td><b>${esc(cli(x.id_comprador) ? cli(x.id_comprador).nombre : (x.cliente_snap || '—'))}</b></td>
       <td style="font-size:12.5px">${esc(x.lugar_entrega || 'Balderas')}</td>
       <td class="num">${money(x.precio_acordado)}</td><td class="num" style="color:var(--yellow)">${money(x.anticipo)}</td>
       <td class="num"><b>${money(resta)}</b></td>
@@ -1224,7 +1296,7 @@ MOD.ver = function () {
       .filter((d) => d[1] !== '' && d[1] != null).map((d) => `<div><div class="lbl" style="margin-bottom:2px">${d[0]}</div><div style="font-size:13px">${esc(d[1])}</div></div>`).join('')}
   </div>
   ${a.notas ? `<div class="note">${esc(a.notas)}</div>` : ''}
-  ${ap.length ? `<div class="note w"><b>Apartada:</b> ${ap.map((x) => `${cli(x.id_comprador) ? esc(cli(x.id_comprador).nombre) : 'un cliente'} dejó ${money(x.anticipo)}, resta ${money(num(x.precio_acordado) - num(x.anticipo))} hasta el ${x.fecha_limite || '—'} · entrega en ${esc(x.lugar_entrega || 'Balderas')}`).join('; ')}.</div>` : ''}
+  ${ap.length ? `<div class="note w"><b>Apartada:</b> ${ap.map((x) => `${cli(x.id_comprador) ? esc(cli(x.id_comprador).nombre) : esc(x.cliente_snap || 'un cliente')} dejó ${money(x.anticipo)}, resta ${money(num(x.precio_acordado) - num(x.anticipo))} hasta el ${x.fecha_limite || '—'} · entrega en ${esc(x.lugar_entrega || 'Balderas')}`).join('; ')}.</div>` : ''}
   ${libre(a) ? `<div class="note"><b>Piso para regatear:</b> ${money(precioMinimo(a))} (con margen mínimo de ${ui.margenMin}%). Por debajo de eso ya no ganas lo que quieres.</div>` : ''}
   ${pedidosPara(a).length ? `<div class="note w"><b>Te la pidieron:</b> ${pedidosPara(a).map((p) => `${cli(p.comprador_id) ? esc(cli(p.comprador_id).nombre) : 'un cliente'} (“${esc(p.descripcion)}”)`).join('; ')}. Avísale antes de publicarla.</div>` : ''}
   ${inte.length && libre(a) ? `<div class="note g"><b>Avísale primero a:</b> ${inte.slice(0, 4).map((c) => esc(c.nombre)).join(', ')} — coleccionan justo esto.</div>` : ''}
@@ -1317,7 +1389,9 @@ MOD.apartado = function () {
   const disp = db.articulos.filter((x) => libre(x) > 0);
   return shell('Apartar con anticipo', a ? a.nombre : '', `
   ${a ? '' : f('Pieza', `<select class="sel" id="ap_art">${disp.map((x) => `<option value="${x.id}">${esc(x.nombre)} · ${libre(x)} disp.</option>`).join('') || '<option value="">Sin piezas disponibles</option>'}</select>`)}
-  <div class="g2">${f('Cliente', selC('ap_comp', ''))}${f('Cantidad', `<input class="in" id="ap_cant" type="number" min="1" value="1" max="${a ? libre(a) : 99}">`)}</div>
+  ${f('Cliente que aparta', `<select class="sel" id="ap_comp" data-a="apcliente"><option value="">— Cliente nuevo —</option>${db.compradores.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('')}</select>`)}
+  <div id="ap_nuevo" class="g2">${f('Nombre del cliente', `<input class="in" id="ap_nombre" placeholder="Ej. Luis (Facebook)">`)}${f('Teléfono o contacto', `<input class="in" id="ap_tel" placeholder="Opcional">`)}</div>
+  ${f('Cantidad', `<input class="in" id="ap_cant" type="number" min="1" value="1" max="${a ? libre(a) : 99}">`)}
   <div class="g3">
     ${f('Precio acordado', inp('ap_precio', a ? a.valor_estimado : '', 'number', '0.00'))}
     ${f('Anticipo recibido', inp('ap_ant', '', 'number', '0.00'))}
@@ -1432,11 +1506,13 @@ MOD.encargo = function () {
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
   const filas = e.items.map((i) => { const a = i.articulo_id ? art(i.articulo_id) : null; return { i, a, costo: a ? num(a.precio_compra) : 0, sub: num(i.precio_unit) * num(i.cantidad) }; });
   const total = suma(filas, (r) => r.sub), costo = suma(filas, (r) => r.costo * num(r.i.cantidad)), ant = num(e.anticipo);
-  return shell(e.id ? 'Editar encargo' : 'Nuevo encargo', 'Una o varias piezas para un cliente', `
+  return shell(e.id ? 'Editar pedido' : 'Nuevo pedido', 'Una o varias piezas para un cliente', `
   ${f('Cliente', `<select class="sel" id="en_comp" data-a="encchg"><option value="">— Cliente nuevo —</option>${db.compradores.map((c) => `<option value="${c.id}" ${e.comprador_id === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}</select>`)}
   ${e.comprador_id ? '' : `<div class="g2">${f('Nombre del cliente nuevo', `<input class="in" id="en_nuevo" value="${esc(e.cliente_nuevo)}" placeholder="Ej. Luis (Facebook)">`)}
     ${f('Teléfono o contacto', `<input class="in" id="en_tel" value="${esc(e.tel_nuevo)}" placeholder="Opcional">`)}</div>`}
-  ${f('Fecha de entrega en Balderas', `<input class="in" type="date" id="en_fecha" data-a="encchg" value="${esc(e.fecha_entrega)}">`)}
+  ${f('Fecha de entrega en Balderas', `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input class="in" type="date" id="en_fecha" data-a="encchg" value="${esc(e.fecha_entrega)}" style="max-width:180px">
+    <button class="chip ${e.fecha_entrega === proximoSabado() ? 'on' : ''}" data-a="encsab" data-v="${proximoSabado()}">Este sábado ${esc(fmtDia(proximoSabado()))}</button>
+    <button class="chip ${e.fecha_entrega === proximoSabado(1) ? 'on' : ''}" data-a="encsab" data-v="${proximoSabado(1)}">Sábado siguiente ${esc(fmtDia(proximoSabado(1)))}</button></div>`, 'Casi siempre es sábado en Balderas; si es entre semana, elige otra fecha.')}
   <div class="fld"><label class="lbl">Piezas del encargo</label>
     ${filas.map((r, n) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 60px 92px 30px;gap:6px;margin-bottom:6px;align-items:center">
       <select class="sel en_art" data-a="encchg"><option value="">Elige una pieza…</option>${opciones.map((a) => `<option value="${a.id}" ${r.i.articulo_id === a.id ? 'selected' : ''}>${esc(a.nombre)} · ${libre(a) + (propias[a.id] || 0)} disp.</option>`).join('')}</select>
@@ -1453,7 +1529,7 @@ MOD.encargo = function () {
   <div class="g2" style="margin-top:12px">${f('Anticipo recibido (opcional)', `<input class="in" type="number" step="0.01" id="en_ant" data-a="encchg" value="${esc(e.anticipo)}" placeholder="0.00">`)}
     ${f('Cómo lo pagó', `<select class="sel" id="en_forma" data-a="encchg">${FORMAS_PAGO.map((x) => `<option ${e.forma_anticipo === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`)}</div>
   ${f('Notas', `<textarea class="ta" id="en_notas" rows="2" data-a="encchg" placeholder="Ej. Empacar en bolsa, le da pena el precio…">${esc(e.notas)}</textarea>`)}
-  `, `<button class="btn gh" data-a="cerrar">Cancelar</button><button class="btn pri" data-a="saveenc">${e.id ? 'Guardar cambios' : 'Registrar encargo'}</button>`, '640px');
+  `, `<button class="btn gh" data-a="cerrar">Cancelar</button><button class="btn pri" data-a="saveenc">${e.id ? 'Guardar cambios' : 'Registrar pedido'}</button>`, '640px');
 };
 MOD.encentregar = function () {
   const e = ui.ctx; if (!e) return '';
@@ -1467,6 +1543,20 @@ MOD.encentregar = function () {
     ${f('Forma de pago', `<select class="sel" id="ee_forma">${FORMAS_PAGO.map((x) => `<option>${x}</option>`).join('')}</select>`)}</div>
   <div class="note">Se crean las ventas de cada pieza, se descuentan del inventario y el encargo queda como entregado. Si cobras menos de lo que resta, se avisa cuánto te debe.</div>
   `, `<button class="btn gh" data-a="cerrar">Cancelar</button><button class="btn pri" data-a="saveentrega" data-id="${e.id}">Confirmar entrega</button>`, '520px');
+};
+MOD.mattelmulti = function () {
+  const m = ui.mm || { texto: '', filas: [] };
+  const ok = m.filas.filter((r) => r.ok);
+  return shell('Compra de Mattel', 'Pega los links de lo que compraste, uno por renglón', `
+  <textarea class="ta" id="mm_txt" rows="4" placeholder="https://creations.mattel.com/products/…&#10;https://creations.mattel.com/products/…">${esc(m.texto)}</textarea>
+  <div style="margin:10px 0"><button class="btn pri sm" data-a="mmtraer">${m.cargando ? 'Consultando…' : 'Traer datos'}</button></div>
+  ${m.filas.length ? `<div class="pnl wrap" style="padding:6px"><table class="tbl"><thead><tr><th>Pieza</th><th class="num">Cant.</th><th class="num">Costo c/u (MXN)</th></tr></thead><tbody>
+    ${m.filas.map((r, i) => r.ok ? `<tr><td><b>${esc(r.nombre)}</b>${r.disponible ? '' : '<div style="font-size:11px;color:var(--yellow)">hoy aparece agotada en Mattel (ya la compraste, solo se registra)</div>'}</td>
+      <td class="num"><input class="in mm_cant" type="number" min="1" value="${r.cantidad}" data-i="${i}" style="width:64px;padding:4px 8px"></td>
+      <td class="num"><input class="in mm_pre" type="number" step="0.01" value="${r.precio_mxn}" data-i="${i}" style="width:100px;padding:4px 8px"></td></tr>`
+      : `<tr><td colspan="3" style="color:var(--red);font-size:12.5px">${esc(r.url)} — ${esc(r.error)}</td></tr>`).join('')}</tbody></table></div>
+    <div class="note">Se registran como <b>Por recibir</b> con fuente Mattel Creations y el precio ya convertido a pesos. Cuando lleguen, márcalas desde el Panel.</div>` : ''}
+  `, `<button class="btn gh" data-a="cerrar">Cerrar</button>${ok.length ? `<button class="btn pri" data-a="mmguardar">Registrar ${ok.length} pieza${ok.length === 1 ? '' : 's'}</button>` : ''}`, '640px');
 };
 MOD.publote = function () {
   const l = ui.ctx || [];
@@ -1584,11 +1674,21 @@ document.addEventListener('click', async (e) => {
     case 'yallego': await yaLlego(id); break;
     case 'yallegotodas': await yaLlego(null); break;
     case 'sugerircarga': sugerirCarga(); break;
+    case 'compramattel': ui.mm = { texto: '', filas: [], cargando: false }; abrir('mattelmulti', null); break;
+    case 'mmtraer': await mmTraer(); break;
+    case 'mmguardar': await mmGuardar(); break;
     case 'nuevoenc': ui.enc = encNuevo(); abrir('encargo', null); break;
     case 'editenc': { const e = db.encargos.find((x) => x.id === id); ui.enc = { id, comprador_id: e.comprador_id || '', cliente_nuevo: '', tel_nuevo: '', fecha_entrega: e.fecha_entrega || '', anticipo: e.anticipo || '', forma_anticipo: e.forma_anticipo || 'Depósito', notas: e.notas || '', items: e.items.map((i) => ({ articulo_id: i.articulo_id, cantidad: i.cantidad, precio_unit: String(i.precio_unit) })) }; abrir('encargo', null); break; }
     case 'encadd': snapEnc(); ui.enc.items.push({ articulo_id: '', cantidad: 1, precio_unit: '' }); render(); break;
     case 'encrm': snapEnc(); ui.enc.items.splice(num(el.dataset.i), 1); render(); break;
     case 'saveenc': await saveEnc(); break;
+    case 'encsab': snapEnc(); ui.enc.fecha_entrega = el.dataset.v; render(); break;
+    case 'encrapido': {
+      const e = db.encargos.find((x) => x.id === id), c = cli(e.comprador_id) || {};
+      if (!confirm(`¿Entregar a ${c.nombre || 'el cliente'} y cobrar ${money(e.resta)} por ${el.dataset.v.toLowerCase()}?`)) break;
+      const r = await accion(() => POST(`/encargos/${id}/entregar`, { cobrado: e.resta, forma: el.dataset.v }));
+      toast(r.debe > 0 ? `Entregado. Te debe ${money(r.debe)}` : `Liquidado · ${money(e.resta)} en ${el.dataset.v.toLowerCase()}`); break; }
+    case 'encwa': mensajeCliente(db.encargos.find((x) => x.id === id)); break;
     case 'enctab': ui.encTab = el.dataset.v; render(); break;
     case 'encempacar': await accion(() => PATCH('/encargos/' + id, { estatus: el.dataset.v }), el.dataset.v === 'Empacado' ? 'Marcado como empacado' : 'Desempacado'); break;
     case 'encentregar': abrir('encentregar', db.encargos.find((x) => x.id === id)); break;
@@ -1597,7 +1697,7 @@ document.addEventListener('click', async (e) => {
       cerrar(); toast(r.debe > 0 ? `Entregado. Te debe ${money(r.debe)}` : 'Entregado y registrado como venta'); break; }
     case 'enccancelar': if (confirm('¿Cancelar este encargo? Las piezas quedan libres otra vez.')) await accion(() => PATCH('/encargos/' + id, { estatus: 'Cancelado' }), 'Encargo cancelado'); break;
     case 'encborrar': await accion(() => DEL('/encargos/' + id), 'Encargo borrado'); break;
-    case 'hojaent': await bajarPDF('/encargos/hoja-entrega', `hoja-entrega-${hoy()}.pdf`, 'POST', { fecha: ui.encFecha, incluir_costos: ui.encCostos }); break;
+    case 'hojaent': await bajarPDF('/encargos/hoja-entrega', `hoja-entrega-${hoy()}.pdf`, 'POST', { fecha: ui.encFecha === null ? ([...new Set(encActivos().map((e) => e.fecha_entrega).filter(Boolean))].sort().find((f) => f >= hoy()) || '') : ui.encFecha, incluir_costos: ui.encCostos }); break;
     case 'enttab': ui.entTab = el.dataset.v; render(); break;
     case 'ftipo': ui.fTipo = el.dataset.v; render(); break;
     case 'modoinv': ui.modoInv = el.dataset.v; try { localStorage.setItem('cw_modoInv', ui.modoInv); } catch (e) { /* sin almacenamiento */ } render(); break;
@@ -1652,8 +1752,8 @@ document.addEventListener('click', async (e) => {
     case 'savelote': await saveLote(); break;
 
     /* --- apartados --- */
-    case 'apartar': abrir('apartado', art(id)); break;
-    case 'nuevoapartado': abrir('apartado', null); break;
+    case 'apartar': ui.enc = encNuevo(); ui.enc.items[0].articulo_id = id; ui.enc.items[0].precio_unit = String((art(id) || {}).valor_estimado || ''); abrir('encargo', null); break;
+    case 'nuevoapartado': ui.enc = encNuevo(); abrir('encargo', null); break;
     case 'saveapartado': await saveApartado(); break;
     case 'liquidar': { const x = db.apartados.find((y) => y.id === id); ui.apLiq = x; abrir('venta', art(x.id_articulo)); break; }
     case 'cancelapartado':
@@ -1750,6 +1850,7 @@ document.addEventListener('change', async (e) => {
   if (a === 'mesesgraf_in') { ui.mesesGraf = Math.max(1, Math.min(36, num(el.value) || 6)); try { localStorage.setItem('cw_mesesGraf', ui.mesesGraf); } catch (e) { /* sin almacenamiento */ } render(); }
   if (a === 'repcfg') { ui.rep[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; guardarRep(); }
   if (a === 'fentrega' && el.value) await accion(() => PATCH('/ventas/' + el.dataset.id, { estatus_envio: 'Entregado', fecha_entrega: el.value }), 'Fecha de entrega guardada');
+  if (a === 'apcliente') { $('#ap_nuevo').style.display = el.value ? 'none' : ''; }
   if (a === 'encchg') { snapEnc(); render(); }
   if (a === 'encfecha') { ui.encFecha = el.value; render(); }
   if (a === 'enccostos') { ui.encCostos = el.checked; }
@@ -1881,8 +1982,10 @@ async function saveVal(id) {
 async function saveApartado() {
   const a = ui.ctx || art($('#ap_art') ? $('#ap_art').value : '');
   if (!a) { toast('Elige una pieza', true); return; }
+  if (!$('#ap_comp').value && !($('#ap_nombre').value || '').trim()) { toast('Escribe el nombre del cliente que aparta', true); return; }
   const cuerpo = {
-    articulo_id: a.id, comprador_id: $('#ap_comp').value, cantidad: num($('#ap_cant').value) || 1,
+    articulo_id: a.id, comprador_id: $('#ap_comp').value, cliente_nuevo: ($('#ap_nombre').value || '').trim(), tel_nuevo: ($('#ap_tel').value || '').trim(),
+    cantidad: num($('#ap_cant').value) || 1,
     precio_acordado: num($('#ap_precio').value), anticipo: num($('#ap_ant').value),
     fecha_limite: $('#ap_lim').value, notas: $('#ap_notas').value.trim(), lugar_entrega: $('#ap_lugar').value.trim() || 'Balderas',
   };

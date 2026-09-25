@@ -123,7 +123,7 @@ class PruebasAPI(unittest.TestCase):
     def test_10_apartado_reserva_y_bloquea(self):
         s, ap = self.pedir("POST", "/api/apartados", {
             "articulo_id": self.articulo, "cantidad": 3, "precio_acordado": 600,
-            "anticipo": 200, "fecha_limite": "2099-01-01",
+            "anticipo": 200, "fecha_limite": "2099-01-01", "cliente_nuevo": "Cliente Diez",
         })
         self.assertEqual(s, 201)
 
@@ -528,10 +528,10 @@ class PruebasAPI(unittest.TestCase):
     def test_38_apartado_lleva_lugar_de_entrega(self):
         h = {"Authorization": f"Bearer {self.token}"}
         a = self._pieza("Apartado lugar", 3, 10, 50)
-        r = self.c.post("/api/apartados", headers=h, json={"articulo_id": a["id"], "precio_acordado": 50, "anticipo": 10})
+        r = self.c.post("/api/apartados", headers=h, json={"articulo_id": a["id"], "precio_acordado": 50, "anticipo": 10, "cliente_nuevo": "Cliente 38"})
         self.assertEqual(r.status_code, 201)
         self.assertEqual(r.get_json()["lugar_entrega"], "Balderas", "por defecto se entrega en Balderas")
-        r = self.c.post("/api/apartados", headers=h, json={"articulo_id": a["id"], "precio_acordado": 50, "lugar_entrega": "Punto de encuentro"})
+        r = self.c.post("/api/apartados", headers=h, json={"articulo_id": a["id"], "precio_acordado": 50, "lugar_entrega": "Punto de encuentro", "cliente_nuevo": "Cliente 38b"})
         self.assertEqual(r.get_json()["lugar_entrega"], "Punto de encuentro")
 
     def test_39_migracion_agrega_lugar_de_entrega_a_bases_viejas(self):
@@ -555,6 +555,38 @@ class PruebasAPI(unittest.TestCase):
         finally:
             for suf in ("", "-wal", "-shm"):
                 Path(str(viejo) + suf).unlink(missing_ok=True)
+
+    def test_40_todo_apartado_lleva_el_nombre_del_cliente(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        a = self._pieza("Apartado cliente", 5, 10, 50)
+        base = {"articulo_id": a["id"], "precio_acordado": 50, "anticipo": 10}
+        self.assertEqual(self.c.post("/api/apartados", headers=h, json=base).status_code, 400, "sin cliente no se aparta")
+        self.assertEqual(self.c.post("/api/apartados", headers=h, json={**base, "comprador_id": "C-NOEXISTE"}).status_code, 404)
+        r = self.c.post("/api/apartados", headers=h, json={**base, "cliente_nuevo": "Marisol Tianguis", "tel_nuevo": "555"})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        ap = r.get_json()
+        self.assertEqual(ap["cliente_snap"], "Marisol Tianguis")
+        _, est = self.pedir("GET", "/api/estado")
+        cliente = next(c for c in est["compradores"] if c["id"] == ap["comprador_id"])
+        self.assertEqual((cliente["nombre"], cliente["tel"]), ("Marisol Tianguis", "555"), "el cliente nuevo se da de alta")
+        r2 = self.c.post("/api/apartados", headers=h, json={**base, "comprador_id": cliente["id"]})
+        self.assertEqual(r2.get_json()["cliente_snap"], "Marisol Tianguis")
+        # si después borran al cliente, el apartado conserva su nombre
+        self.assertEqual(self.c.delete(f"/api/compradores/{cliente['id']}", headers=h).status_code, 200)
+        _, est = self.pedir("GET", "/api/estado")
+        viejo = next(x for x in est["apartados"] if x["id"] == ap["id"])
+        self.assertEqual((viejo["comprador_id"], viejo["cliente_snap"]), (None, "Marisol Tianguis"))
+        # un cliente de otra cuenta no se puede usar
+        _, est2 = self.pedir("GET", "/api/estado", token=self.token2)
+        if est2["compradores"]:
+            self.assertEqual(self.c.post("/api/apartados", headers=h, json={**base, "comprador_id": est2["compradores"][0]["id"]}).status_code, 404)
+
+    def test_41_ids_no_se_repiten_ni_en_el_mismo_milisegundo(self):
+        from collecthub.util import uid
+        with patch("collecthub.util.time.time", return_value=1_800_000_000.123):   # el tiempo "se congela"
+            ids = [uid("HW") for _ in range(3000)]
+        self.assertEqual(len(set(ids)), 3000)
+        self.assertRegex(ids[0], r"^HW-[0-9A-Z]{11}$")
 
 
 if __name__ == "__main__":

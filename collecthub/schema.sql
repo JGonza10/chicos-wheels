@@ -155,6 +155,7 @@ CREATE TABLE IF NOT EXISTS apartados (
   fecha           TEXT NOT NULL,
   fecha_limite    TEXT NOT NULL DEFAULT '',
   lugar_entrega   TEXT NOT NULL DEFAULT 'Balderas',
+  cliente_snap    TEXT NOT NULL DEFAULT '',
   estatus         TEXT NOT NULL DEFAULT 'Vigente'
                   CHECK (estatus IN ('Vigente','Liquidado','Vencido','Cancelado')),
   notas           TEXT NOT NULL DEFAULT '',

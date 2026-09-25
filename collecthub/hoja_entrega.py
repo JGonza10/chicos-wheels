@@ -11,6 +11,9 @@ from .reporte import AZUL, GRIS, _fecha_ok, _Pdf, _t
 from .util import ErrorApp
 
 
+ETIQUETA = {"Pendiente": "Apartado", "Empacado": "En proceso"}
+
+
 def generar_hoja_entrega(usuario_id: str, config: dict) -> bytes:
     from .rutas.movimientos import ACTIVOS, encargos_de
 
@@ -93,7 +96,7 @@ def generar_hoja_entrega(usuario_id: str, config: dict) -> bytes:
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*AZUL)
         pdf.cell(0, 7, _t(f"{c.get('nombre', 'Cliente')}{'  -  ' + c['tel'] if c.get('tel') else ''}"
-                          f"   |   Entrega: {e['fecha_entrega'] or 'sin fecha'}   |   {e['estatus']}"),
+                          f"   |   Entrega: {e['fecha_entrega'] or 'sin fecha'}   |   {ETIQUETA.get(e['estatus'], e['estatus'])}"),
                  fill=True, new_x="LMARGIN", new_y="NEXT")
         cols = [("OK", 1, "C"), ("Pieza", 6, "L"), ("Cant", 1.1, "R")]
         if incluir_costos:

@@ -91,3 +91,14 @@ Flujo del negocio: el joven publica en Facebook; un cliente (a veces nuevo) le h
 - **Hoja de entrega** (`collecthub/hoja_entrega.py`): resumen (clientes, piezas, costo, precio, ganancia, ya cobrado por forma, POR COBRAR), lista para empacar consolidada por ubicación, detalle por cliente con costo y precio por pieza y total + renglón de cobro/firma, y cruce final piezas vs dinero (columnas Efectivo/Depósito/Dif. en blanco para llenar a mano). Filtra por fecha de entrega; opción de ocultar costos.
 - Cliente nuevo: se da de alta solo (`cliente_nuevo`, `tel_nuevo`) al crear el encargo.
 - Pruebas 35-37 en `tests/test_api.py`. En la interfaz: menú Movimientos → 🛍 Encargos (`vEncargos`, `MOD.encargo`, `MOD.encentregar`; ojo: los `MOD.x = ...` deben ir DESPUÉS de `const MOD = {}`).
+
+### Reorganización alrededor del flujo real (2026-09-25, cierre)
+
+El usuario aclaró que la app es **solo inventario + control de entregas**: compra (Mattel u otra) → Facebook → apartado → entrega el **sábado en Balderas** (rara vez entre semana, zona Coyoacán) → contabilidad. Por eso:
+
+- **Un solo flujo de apartado**: "Apartar"/"+ Nuevo apartado" ahora abren el formulario de **pedido** (varias piezas por cliente). La pantalla de apartados de una pieza sobrevive como **"Apartados previos"** y solo se muestra si hay registros. Todo apartado/pedido exige cliente (registrado o `cliente_nuevo`) y `apartados.cliente_snap` conserva el nombre aunque borren al cliente.
+- **Etiquetas visibles** (`ETQ_ENC` en `app.js`; en la base siguen Pendiente/Empacado/Entregado): **Apartado → En proceso → Liquidado** ("Entregado · debe $X" si quedó saldo).
+- **Sábado por defecto**: `proximoSabado()` da la fecha inicial del pedido; la hoja de entrega y el filtro de Pedidos usan el próximo día con pedidos; el Panel resume "Próximo sábado".
+- **Cobro rápido** 💵/🏦 (entrega y cobra el resto), **💬 mensaje de WhatsApp** al cliente, columna **"Apartada para"** en el inventario (`reservas(a)`).
+- **🛒 Compra Mattel** (varios links a la vez) registra las piezas como "Por recibir".
+- **Corregido**: `util.uid()` podía repetir ids creados en el mismo milisegundo (fallaba de forma intermitente "cargar datos de ejemplo" con 409 y podía romper importaciones masivas). Ahora lleva contador por proceso (prueba 41).

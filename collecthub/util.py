@@ -1,6 +1,7 @@
 """Validaciones, fórmulas de negocio y el error que se traduce a HTTP 4xx."""
 import re
 import secrets
+import threading
 import time
 from datetime import date
 
@@ -14,14 +15,31 @@ class ErrorApp(Exception):
         self.codigo = codigo
 
 
-def uid(prefijo: str) -> str:
-    """Identificador legible y estable: HW-K3F9A2C"""
-    base36 = ""
-    n = int(time.time() * 1000)
+_ALFA36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+_contador = 0
+_candado = threading.Lock()
+
+
+def _base36(n: int, ancho: int) -> str:
+    out = ""
     while n:
         n, r = divmod(n, 36)
-        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"[r] + base36
-    return f"{prefijo}-{base36[-5:]}{secrets.token_hex(2)[:3]}".upper()
+        out = _ALFA36[r] + out
+    return out[-ancho:].rjust(ancho, "0")
+
+
+def uid(prefijo: str) -> str:
+    """Identificador legible: HW-K3F9A00C7B.
+
+    Marca de tiempo + contador del proceso + azar. El contador garantiza que dos
+    ids creados en el mismo milisegundo (una importación de cientos de filas, los
+    datos de ejemplo) nunca choquen; el azar cubre a varios procesos con la misma base.
+    """
+    global _contador
+    with _candado:
+        _contador = (_contador + 1) % (36 ** 3)
+        c = _contador
+    return f"{prefijo}-{_base36(int(time.time() * 1000), 5)}{_base36(c, 3)}{secrets.token_hex(2)[:3]}".upper()
 
 
 def num(v, defecto: float = 0.0) -> float:

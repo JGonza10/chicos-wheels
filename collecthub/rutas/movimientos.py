@@ -215,15 +215,34 @@ def apartar():
     if anticipo > precio:
         raise ErrorApp("El anticipo no puede ser mayor al precio acordado")
 
+    # Todo apartado lleva el nombre de quien aparta: un cliente registrado o uno nuevo.
+    comprador = texto(b.get("comprador_id"), 40) or None
+    nombre_cliente = ""
+    if comprador:
+        c = uno("SELECT nombre FROM compradores WHERE id=? AND usuario_id=?", (comprador, g.usuario_id))
+        if not c:
+            raise ErrorApp("Cliente no encontrado", 404)
+        nombre_cliente = c["nombre"]
+    else:
+        nombre_cliente = texto(b.get("cliente_nuevo"), 100)
+        if not nombre_cliente:
+            raise ErrorApp("Falta el nombre del cliente que aparta")
+
     id_ap = uid("AP")
-    bd().execute(
-        "INSERT INTO apartados (id,usuario_id,articulo_id,comprador_id,nombre_snap,cantidad,"
-        "precio_acordado,anticipo,fecha,fecha_limite,notas,lugar_entrega) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (id_ap, g.usuario_id, a["id"], texto(b.get("comprador_id"), 40) or None, a["nombre"],
-         cantidad, precio, anticipo, hoy(),
-         fecha(b["fecha_limite"]) if b.get("fecha_limite") else "", texto(b.get("notas"), 300),
-         texto(b.get("lugar_entrega"), 80) or "Balderas"))
-    bd().commit()
+    with transaccion() as con:
+        if not comprador:
+            comprador = uid("C")
+            con.execute("INSERT INTO compradores (id,usuario_id,nombre,tel,interes,notas) VALUES (?,?,?,?,?,?)",
+                        (comprador, g.usuario_id, nombre_cliente, texto(b.get("tel_nuevo"), 40), "Ambas",
+                         "Cliente nuevo (alta desde un apartado)"))
+        con.execute(
+            "INSERT INTO apartados (id,usuario_id,articulo_id,comprador_id,nombre_snap,cantidad,"
+            "precio_acordado,anticipo,fecha,fecha_limite,notas,lugar_entrega,cliente_snap) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (id_ap, g.usuario_id, a["id"], comprador, a["nombre"],
+             cantidad, precio, anticipo, hoy(),
+             fecha(b["fecha_limite"]) if b.get("fecha_limite") else "", texto(b.get("notas"), 300),
+             texto(b.get("lugar_entrega"), 80) or "Balderas", nombre_cliente))
     return jsonify(uno("SELECT * FROM apartados WHERE id=?", (id_ap,))), 201
 
 

@@ -3,7 +3,7 @@
  * verse siempre fresco, nunca una copia vieja servida "offline" por error.
  * Sube CACHE_VERSION cuando cambien app.js/styles.css para forzar a los
  * navegadores con la app ya instalada a bajar la versión nueva. */
-const CACHE_VERSION = 'chicoswheels-v13';
+const CACHE_VERSION = 'chicoswheels-v15';
 const ESTATICOS = ['/', '/app.js', '/styles.css', '/manifest.json'];
 
 self.addEventListener('install', (e) => {
