@@ -317,3 +317,212 @@ def borrar_intercambio(id_t):
     if not cur.rowcount:
         raise ErrorApp("Intercambio no encontrado", 404)
     return jsonify(ok=True)
+
+
+# ==================== ENCARGOS ====================
+FORMAS_PAGO = ("Efectivo", "Depósito", "Transferencia")
+ACTIVOS = ("Pendiente", "Empacado")
+
+
+def encargos_de(usuario_id, id_enc=None):
+    """Encargos del usuario con sus piezas, costos y saldos ya calculados."""
+    filtro, par = ("AND id=?", (usuario_id, id_enc)) if id_enc else ("", (usuario_id,))
+    lista = todos(f"SELECT * FROM encargos WHERE usuario_id=? {filtro} "
+                  "ORDER BY CASE estatus WHEN 'Pendiente' THEN 0 WHEN 'Empacado' THEN 0 ELSE 1 END, "
+                  "fecha_entrega, creado_en", par)
+    for e in lista:
+        e["items"] = todos("SELECT * FROM encargo_items WHERE encargo_id=? ORDER BY rowid", (e["id"],))
+        e["piezas"] = sum(i["cantidad"] for i in e["items"])
+        e["total"] = round(sum(i["cantidad"] * i["precio_unit"] for i in e["items"]), 2)
+        e["costo"] = round(sum(i["cantidad"] * i["costo_unit"] for i in e["items"]), 2)
+        e["ganancia"] = round((e["total_final"] if e["estatus"] == "Entregado" and e["total_final"] is not None
+                               else e["total"]) - e["costo"], 2)
+        e["resta"] = round(max(0.0, e["total"] - e["anticipo"]), 2)
+    return lista
+
+
+def _limpiar_encargo(b, id_actual=None):
+    """Valida cliente, piezas y stock. Devuelve (campos, items, comprador_nuevo)."""
+    comprador = texto(b.get("comprador_id"), 40) or None
+    if comprador and not uno("SELECT 1 FROM compradores WHERE id=? AND usuario_id=?",
+                             (comprador, g.usuario_id)):
+        raise ErrorApp("Cliente no encontrado", 404)
+    nuevo = texto(b.get("cliente_nuevo"), 100) if not comprador else ""
+    if not comprador and not nuevo:
+        raise ErrorApp("Elige un cliente o escribe el nombre del cliente nuevo")
+
+    crudos = b.get("items")
+    if not isinstance(crudos, list) or not crudos:
+        raise ErrorApp("Agrega al menos una pieza al encargo")
+    if len(crudos) > 200:
+        raise ErrorApp("Demasiadas piezas en un solo encargo")
+
+    pedido = {}
+    items = []
+    for it in crudos:
+        a = _articulo(it.get("articulo_id"))
+        if not a:
+            raise ErrorApp("Una de las piezas ya no existe en tu inventario", 404)
+        cant = max(1, entero(it.get("cantidad"), 1))
+        pedido[a["id"]] = pedido.get(a["id"], 0) + cant
+        precio = it.get("precio_unit")
+        items.append({"articulo": a, "cantidad": cant,
+                      "precio_unit": max(0.0, num(precio) if precio not in (None, "") else num(a["valor_estimado"]))})
+    for id_art, cant in pedido.items():
+        a = _articulo(id_art)
+        propio = 0
+        if id_actual:   # lo que este mismo encargo ya tiene reservado se puede volver a pedir
+            propio = (uno("SELECT COALESCE(SUM(cantidad),0) n FROM encargo_items WHERE encargo_id=? "
+                          "AND articulo_id=?", (id_actual, id_art)) or {"n": 0})["n"]
+        if cant > a["disponible"] + propio:
+            raise ErrorApp(f'De "{a["nombre"]}" solo tienes {a["disponible"] + propio} libre(s); '
+                           f"pediste {cant}. El resto está apartado o en otro encargo.", 409)
+
+    anticipo = max(0.0, num(b.get("anticipo")))
+    total = sum(i["cantidad"] * i["precio_unit"] for i in items)
+    if anticipo > total + 0.005:
+        raise ErrorApp("El anticipo no puede ser mayor al total del encargo")
+    forma = b.get("forma_anticipo") if b.get("forma_anticipo") in FORMAS_PAGO else ""
+    campos = {
+        "comprador_id": comprador, "fecha_entrega": fecha(b.get("fecha_entrega")) if b.get("fecha_entrega") else "",
+        "anticipo": anticipo, "forma_anticipo": forma if anticipo else "",
+        "notas": texto(b.get("notas"), 400),
+    }
+    return campos, items, nuevo
+
+
+def _guardar_items(con, id_enc, items):
+    con.execute("DELETE FROM encargo_items WHERE encargo_id=?", (id_enc,))
+    for i in items:
+        con.execute("INSERT INTO encargo_items (id,encargo_id,articulo_id,nombre_snap,cantidad,precio_unit,costo_unit) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (uid("EI"), id_enc, i["articulo"]["id"], i["articulo"]["nombre"], i["cantidad"],
+                     i["precio_unit"], num(i["articulo"]["precio_compra"])))
+
+
+@bp.get("/encargos")
+def listar_encargos():
+    return jsonify(encargos_de(g.usuario_id))
+
+
+@bp.post("/encargos")
+def crear_encargo():
+    b = request.get_json(silent=True) or {}
+    campos, items, nuevo = _limpiar_encargo(b)
+    id_enc = uid("E")
+    with transaccion() as con:
+        if nuevo:
+            campos["comprador_id"] = uid("C")
+            con.execute("INSERT INTO compradores (id,usuario_id,nombre,tel,interes,notas) VALUES (?,?,?,?,?,?)",
+                        (campos["comprador_id"], g.usuario_id, nuevo, texto(b.get("tel_nuevo"), 40), "Ambas",
+                         "Cliente nuevo (alta desde un encargo)"))
+        con.execute("INSERT INTO encargos (id,usuario_id,comprador_id,fecha,fecha_entrega,anticipo,forma_anticipo,notas) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (id_enc, g.usuario_id, campos["comprador_id"], hoy(), campos["fecha_entrega"],
+                     campos["anticipo"], campos["forma_anticipo"], campos["notas"]))
+        _guardar_items(con, id_enc, items)
+    return jsonify(encargos_de(g.usuario_id, id_enc)[0]), 201
+
+
+def _encargo_activo(id_enc):
+    e = uno("SELECT * FROM encargos WHERE id=? AND usuario_id=?", (id_enc, g.usuario_id))
+    if not e:
+        raise ErrorApp("Encargo no encontrado", 404)
+    if e["estatus"] not in ACTIVOS:
+        raise ErrorApp(f"Este encargo ya está {e['estatus'].lower()}", 409)
+    return e
+
+
+@bp.post("/encargos/hoja-entrega")
+def hoja_entrega():
+    """PDF para imprimir: piezas por empacar, detalle por cliente y cruce contra dinero."""
+    from flask import Response
+    from ..hoja_entrega import generar_hoja_entrega
+    pdf = generar_hoja_entrega(g.usuario_id, request.get_json(silent=True) or {})
+    return Response(pdf, mimetype="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="hoja-entrega-{hoy()}.pdf"', "Cache-Control": "no-store"})
+
+
+@bp.put("/encargos/<id_enc>")
+def reemplazar_encargo(id_enc):
+    _encargo_activo(id_enc)
+    b = request.get_json(silent=True) or {}
+    campos, items, nuevo = _limpiar_encargo(b, id_actual=id_enc)
+    with transaccion() as con:
+        if nuevo:
+            campos["comprador_id"] = uid("C")
+            con.execute("INSERT INTO compradores (id,usuario_id,nombre,tel,interes,notas) VALUES (?,?,?,?,?,?)",
+                        (campos["comprador_id"], g.usuario_id, nuevo, texto(b.get("tel_nuevo"), 40), "Ambas",
+                         "Cliente nuevo (alta desde un encargo)"))
+        con.execute("UPDATE encargos SET comprador_id=?, fecha_entrega=?, anticipo=?, forma_anticipo=?, notas=? "
+                    "WHERE id=?", (campos["comprador_id"], campos["fecha_entrega"], campos["anticipo"],
+                                   campos["forma_anticipo"], campos["notas"], id_enc))
+        _guardar_items(con, id_enc, items)
+    return jsonify(encargos_de(g.usuario_id, id_enc)[0])
+
+
+@bp.patch("/encargos/<id_enc>")
+def estatus_encargo(id_enc):
+    """Empacar / desempacar / cancelar. Cancelar libera el stock reservado."""
+    _encargo_activo(id_enc)
+    nuevo = (request.get_json(silent=True) or {}).get("estatus")
+    if nuevo not in ("Pendiente", "Empacado", "Cancelado"):
+        raise ErrorApp("Estatus no válido")
+    bd().execute("UPDATE encargos SET estatus=? WHERE id=?", (nuevo, id_enc))
+    bd().commit()
+    return jsonify(encargos_de(g.usuario_id, id_enc)[0])
+
+
+@bp.delete("/encargos/<id_enc>")
+def borrar_encargo(id_enc):
+    e = uno("SELECT estatus FROM encargos WHERE id=? AND usuario_id=?", (id_enc, g.usuario_id))
+    if not e:
+        raise ErrorApp("Encargo no encontrado", 404)
+    if e["estatus"] == "Entregado":
+        raise ErrorApp("Un encargo entregado ya es parte de tus ventas; no se borra", 409)
+    bd().execute("DELETE FROM encargos WHERE id=?", (id_enc,))
+    bd().commit()
+    return jsonify(ok=True)
+
+
+@bp.post("/encargos/<id_enc>/entregar")
+def entregar_encargo(id_enc):
+    """Entrega en persona: cada pieza se vuelve una venta (con su costo congelado),
+    se descuenta el stock y se anota lo que se cobró. Todo en una transacción."""
+    e = _encargo_activo(id_enc)
+    b = request.get_json(silent=True) or {}
+    enc = encargos_de(g.usuario_id, id_enc)[0]
+    if not enc["items"]:
+        raise ErrorApp("El encargo no tiene piezas")
+    p = (uno("SELECT * FROM plataformas WHERE usuario_id=? AND codigo='TG'", (g.usuario_id,))
+         or uno("SELECT * FROM plataformas WHERE usuario_id=? AND codigo='FB'", (g.usuario_id,))
+         or uno("SELECT * FROM plataformas WHERE usuario_id=? ORDER BY nombre LIMIT 1", (g.usuario_id,)))
+    if not p:
+        raise ErrorApp("No tienes un canal de venta configurado")
+
+    total = enc["total"]
+    final = max(0.0, num(b.get("total_final"))) if b.get("total_final") not in (None, "") else total
+    factor = (final / total) if total > 0 else 1.0
+    cobrado = max(0.0, num(b.get("cobrado"))) if b.get("cobrado") not in (None, "") else max(0.0, final - e["anticipo"])
+    forma = b.get("forma") if b.get("forma") in FORMAS_PAGO else ""
+
+    with transaccion() as con:
+        for n, it in enumerate(enc["items"]):
+            a = _articulo(it["articulo_id"]) if it["articulo_id"] else None
+            if not a:
+                raise ErrorApp(f'La pieza "{it["nombre_snap"]}" ya no existe en tu inventario', 409)
+            if a["cantidad"] < it["cantidad"]:
+                raise ErrorApp(f'De "{a["nombre"]}" ya solo quedan {a["cantidad"]}; no alcanza para el encargo', 409)
+            linea = it["cantidad"] * it["precio_unit"]
+            fila = _fila_venta(a, p, {"comprador_id": e["comprador_id"], "fecha": hoy(), "envio": 0, "otros": 0},
+                               cantidad=it["cantidad"], precio=round(linea * factor, 2),
+                               anticipo_aplicado=round(e["anticipo"] * (linea / total), 2) if total > 0 else 0,
+                               com_fija=num(p["com_fija"]) if n == 0 else 0)
+            con.execute(SQL_VENTA, fila)
+            con.execute("UPDATE articulos SET cantidad=cantidad-?, actualizado_en=datetime('now') WHERE id=?",
+                        (it["cantidad"], a["id"]))
+        con.execute("UPDATE encargos SET estatus='Entregado', entregado_en=?, total_final=?, cobrado_entrega=?, "
+                    "forma_entrega=? WHERE id=?", (hoy(), final, cobrado, forma, id_enc))
+    r = encargos_de(g.usuario_id, id_enc)[0]
+    r["debe"] = round(max(0.0, final - e["anticipo"] - cobrado), 2)
+    return jsonify(r)

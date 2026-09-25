@@ -80,6 +80,7 @@ async function api(ruta, opciones = {}) {
 const GET = (r) => api(r);
 const POST = (r, c) => api(r, { metodo: 'POST', cuerpo: c });
 const PATCH = (r, c) => api(r, { metodo: 'PATCH', cuerpo: c });
+const PUT = (r, c) => api(r, { metodo: 'PUT', cuerpo: c });
 const DEL = (r) => api(r, { metodo: 'DELETE' });
 
 /* ---------- Estado ---------- */
@@ -91,7 +92,7 @@ let ui = {
   qTipo: 'Compra', stream: null, authTab: 'login', authErr: '', ocupado: false,
   fotoPendiente: null, avisoIA: '', identificando: false,
   modoInv: (() => { try { return localStorage.getItem('cw_modoInv') === 'lista' ? 'lista' : 'fichas'; } catch (e) { return 'fichas'; } })(),
-  colOrd: '', colDir: 1, pubDesc: 0, cargaN: 15, ubLlegada: '', balTab: 'carga', corteFecha: '',
+  colOrd: '', colDir: 1, encTab: 'activos', encFecha: '', encCostos: true, enc: null, pubDesc: 0, cargaN: 15, ubLlegada: '', balTab: 'carga', corteFecha: '',
   margenMin: (() => { try { const v = localStorage.getItem('cw_margenMin'); return v === null ? 10 : Math.max(0, num(v)); } catch (e) { return 10; } })(),
   carga: (() => { try { return JSON.parse(localStorage.getItem('cw_carga') || '[]'); } catch (e) { return []; } })(), entTab: 'pendientes', entDesde: '', entHasta: '',
   rep: (() => {
@@ -150,6 +151,7 @@ function normalizar(e) {
     v.id_comprador = v.comprador_id;
     v.neto = num(v.ganancia_neta);
   });
+  e.encargos = e.encargos || [];
   e.apartados.forEach((x) => {
     x.id_articulo = x.articulo_id;
     x.id_comprador = x.comprador_id;
@@ -324,13 +326,13 @@ function salir(silencioso) {
 
 /* ==================== Render ==================== */
 const NAV = [['panel', '◧', 'Panel'], ['inventario', '▦', 'Inventario'],
-  ['SEP1', '', 'Movimientos'], ['ventas', '⇄', 'Ventas'], ['apartados', '⏳', 'Apartados'], ['intercambios', '⇌', 'Intercambios'],
+  ['SEP1', '', 'Movimientos'], ['ventas', '⇄', 'Ventas'], ['encargos', '🛍', 'Encargos'], ['apartados', '⏳', 'Apartados'], ['intercambios', '⇌', 'Intercambios'],
   ['SEP2', '', 'Catálogos'], ['balderas', '📍', 'Balderas'], ['entregas', '📦', 'Entregas'], ['compradores', '☺', 'Compradores'], ['wishlist', '★', 'Faltantes'],
   ['etiquetas', '▩', 'Etiquetas QR'], ['datos', '⛃', 'Datos']];
 const CNT = {
   inventario: () => db.articulos.length, ventas: () => db.ventas.length,
   apartados: () => db.apartados.filter((x) => x.estatus === 'Vigente').length,
-  balderas: () => (db.pedidos || []).filter((p) => !p.atendido).length, entregas: () => porEntregar().length, intercambios: () => db.intercambios.length, compradores: () => db.compradores.length,
+  encargos: () => encActivos().length, balderas: () => (db.pedidos || []).filter((p) => !p.atendido).length, entregas: () => porEntregar().length, intercambios: () => db.intercambios.length, compradores: () => db.compradores.length,
   wishlist: () => db.wishlist.length,
 };
 
@@ -339,7 +341,7 @@ function render() {
   if (!db) { $('#app').innerHTML = '<div class="cargando"><div><div class="spin"></div>Cargando tu colección…</div></div>'; return; }
   /* Modo bazar deshabilitado (2026-09-24): vBazar sigue definida, solo sin acceso desde el menú */
   const V = { panel: vPanel, inventario: vInv, ventas: vVentas, apartados: vApart,
-    intercambios: vTrade, entregas: vEntregas, balderas: vBalderas, compradores: vComp, wishlist: vWish, etiquetas: vQR, datos: vDatos }[ui.vista] || vPanel;
+    intercambios: vTrade, entregas: vEntregas, balderas: vBalderas, encargos: vEncargos, compradores: vComp, wishlist: vWish, etiquetas: vQR, datos: vDatos }[ui.vista] || vPanel;
   $('#app').innerHTML = `
   <div class="shell">
     <aside class="side">
@@ -463,6 +465,8 @@ function vPanel() {
         : `<p style="color:var(--muted);font-size:13px">Aún no hay movimientos.</p>`}
     </div>
   </div>
+  ${(() => { const ea = encActivos(); return ea.length ? `<div class="pnl" style="margin-top:16px;cursor:pointer" data-a="nav" data-v="encargos"><h2>Encargos por entregar (${ea.length})</h2>
+    <div style="font-size:13px;color:var(--muted)">${suma(ea, (e) => e.piezas)} piezas para ${new Set(ea.map((e) => e.comprador_id)).size} cliente(s) · por cobrar <b class="mn" style="color:var(--text)">${money(suma(ea, (e) => e.resta))}</b> · ganancia esperada <b class="mn pos">${money(suma(ea, (e) => e.ganancia))}</b></div></div>` : ''; })()}
   ${(() => { const pr = porRecibir(); return pr.length ? `<div class="pnl" style="margin-top:16px;border-color:var(--yellow)"><h2>Por recibir (${pr.length})</h2>
     <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Piezas que compraste y aún no llegan. Cuando lleguen, escribe dónde las guardas y márcalas.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><input class="in" id="ub_llegada" placeholder="Ubicación, ej. Caja A" value="${esc(ui.ubLlegada)}" style="max-width:240px">
@@ -535,6 +539,93 @@ function rendimientoFuentes() {
   return Object.values(por).filter((o) => o.costo > 0).map((o) => Object.assign(o, { roi: o.neto / o.costo })).sort((a, b) => b.roi - a.roi);
 }
 function guardarCarga() { try { localStorage.setItem('cw_carga', JSON.stringify(ui.carga)); } catch (e) { /* sin almacenamiento */ } }
+
+/* ---------- Encargos: pedidos de clientes para entregar en Balderas ---------- */
+const FORMAS_PAGO = ['Efectivo', 'Depósito', 'Transferencia'];
+const encActivos = () => (db.encargos || []).filter((e) => e.estatus === 'Pendiente' || e.estatus === 'Empacado');
+function vEncargos() {
+  const act = encActivos(), hechos = (db.encargos || []).filter((e) => e.estatus === 'Entregado');
+  const lista = ui.encTab === 'entregados' ? hechos : ui.encTab === 'todos' ? (db.encargos || []) : act;
+  const fechas = [...new Set(act.map((e) => e.fecha_entrega).filter(Boolean))].sort();
+  const sel = act.filter((e) => !ui.encFecha || e.fecha_entrega === ui.encFecha);
+  const S = (f) => suma(sel, f);
+  const grupos = {};
+  lista.forEach((e) => { const k = e.fecha_entrega || ''; (grupos[k] = grupos[k] || []).push(e); });
+  const claves = Object.keys(grupos).sort((a, b) => (a || '9999').localeCompare(b || '9999'));
+  const tabs = [['activos', `Por entregar (${act.length})`], ['entregados', `Entregados (${hechos.length})`], ['todos', 'Todos']];
+  const fmt = (f) => { if (!f) return 'Sin fecha de entrega'; const d = new Date(f + 'T12:00:00'); return isNaN(d) ? f : d.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); };
+  return hdr('Encargos', 'Lo que te piden, empacado para entregar en Balderas',
+    `<button class="btn pri" data-a="nuevoenc">+ Nuevo encargo</button>`) + `
+  ${act.length ? `<div class="pnl" style="margin-bottom:14px;padding:14px 16px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <b style="font-size:13px">Hoja de entrega para imprimir</b>
+      <select class="sel" data-a="encfecha" style="width:auto;padding:7px 32px 7px 12px;font-size:12.5px">
+        <option value="">Todos los pendientes</option>
+        ${fechas.map((f) => `<option value="${f}" ${ui.encFecha === f ? 'selected' : ''}>${esc(fmt(f))}</option>`).join('')}</select>
+      <label class="chk" style="margin:0;padding:6px 10px"><input type="checkbox" data-a="enccostos" ${ui.encCostos ? 'checked' : ''}><span>Incluir costos y ganancia</span></label>
+      <button class="btn pri sm" data-a="hojaent">🖨 Generar PDF</button></div>
+    <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:0">
+      ${kpi('Clientes', new Set(sel.map((e) => e.comprador_id)).size, `${sel.length} encargo${sel.length === 1 ? '' : 's'}`, 'var(--blue)')}
+      ${kpi('Piezas a llevar', S((e) => e.piezas), 'en total', 'var(--purple)')}
+      ${kpi('Costo', money(S((e) => e.costo)), 'lo que te costaron', 'var(--red)')}
+      ${kpi('Precio', money(S((e) => e.total)), 'lo que vas a vender', 'var(--yellow)')}
+      ${kpi('Por cobrar', money(S((e) => e.resta)), `ya cobrado ${money(S((e) => e.anticipo))}`, 'var(--green)')}
+      ${kpi('Ganancia', money(S((e) => e.ganancia)), 'esperada', 'var(--green)')}
+    </div></div>` : ''}
+  <div class="chips">${tabs.map((t) => `<button class="chip ${ui.encTab === t[0] ? 'on' : ''}" data-a="enctab" data-v="${t[0]}">${t[1]}</button>`).join('')}</div>
+  ${claves.length ? claves.map((k) => `
+    <div class="sec" style="margin-top:16px"><h2 style="text-transform:capitalize">${esc(fmt(k))}</h2><span class="ln"></span>
+      <span class="mn" style="font-size:12px;color:var(--muted)">${grupos[k].length} encargo${grupos[k].length === 1 ? '' : 's'} · ${suma(grupos[k], (e) => e.piezas)} piezas</span></div>
+    <div class="pnl wrap" style="padding:6px"><table class="tbl"><thead><tr>
+      <th>Cliente</th><th>Piezas</th><th class="num">Costo</th><th class="num">Precio</th><th class="num">Anticipo</th><th class="num">Por cobrar</th><th>Estatus</th><th></th></tr></thead><tbody>
+      ${grupos[k].map((e) => { const c = cli(e.comprador_id) || {}; const act1 = e.estatus === 'Pendiente' || e.estatus === 'Empacado';
+        return `<tr class="${e.estatus === 'Cancelado' ? 'sold' : ''}"><td><b>${esc(c.nombre || 'Cliente')}</b><div style="font-size:11px;color:var(--muted)">${esc(c.tel || '')}${e.notas ? ' · ' + esc(e.notas) : ''}</div></td>
+        <td style="font-size:12.5px">${e.items.map((i) => `${i.cantidad}× ${esc(i.nombre_snap)} <span class="mu">@ ${money(i.precio_unit)}</span>`).join('<br>')}</td>
+        <td class="num">${money(e.costo)}</td><td class="num"><b>${money(e.estatus === 'Entregado' && e.total_final != null ? e.total_final : e.total)}</b></td>
+        <td class="num">${e.anticipo ? money(e.anticipo) + `<div class="mu" style="font-size:10.5px">${esc(e.forma_anticipo)}</div>` : '—'}</td>
+        <td class="num ${e.resta ? '' : 'pos'}">${e.estatus === 'Entregado' ? `<span class="mu">cobrado ${money(e.cobrado_entrega)}</span>` : money(e.resta)}</td>
+        <td><span class="tag ${e.estatus === 'Entregado' ? 'g' : e.estatus === 'Empacado' ? 'b' : e.estatus === 'Cancelado' ? 'r' : 'y'}">${e.estatus}</span></td>
+        <td style="text-align:right;white-space:nowrap">${act1 ? `
+          <button class="btn sm gh" data-a="encempacar" data-id="${e.id}" data-v="${e.estatus === 'Empacado' ? 'Pendiente' : 'Empacado'}">${e.estatus === 'Empacado' ? 'Desempacar' : '📦 Empacado'}</button>
+          <button class="btn sm gh" data-a="editenc" data-id="${e.id}">Editar</button>
+          <button class="btn sm grn" data-a="encentregar" data-id="${e.id}">Entregar</button>
+          <button class="btn sm gh" data-a="enccancelar" data-id="${e.id}" title="Cancelar y liberar las piezas">✕</button>`
+          : (e.estatus === 'Cancelado' ? `<button class="btn sm gh" data-a="encborrar" data-id="${e.id}">Borrar</button>` : '')}</td></tr>`; }).join('')}
+    </tbody></table></div>`).join('')
+    : vacio('🛍', 'Aún no hay encargos', 'Cuando un cliente te pida una o varias piezas, regístralo aquí: se reservan, se empacan y al entregar en Balderas se vuelven ventas.',
+      '<button class="btn pri" data-a="nuevoenc">Nuevo encargo</button>')}
+  <div class="note">Al registrar un encargo las piezas quedan reservadas (no se pueden ofrecer a otro). Al pulsar <b>Entregar</b> se convierten en ventas y se descuentan del inventario.</div>`;
+}
+/** Estado del formulario de encargo: se lee del DOM antes de cada re-pintado. */
+function encNuevo() {
+  return { id: '', comprador_id: '', cliente_nuevo: '', tel_nuevo: '', fecha_entrega: '', anticipo: '', forma_anticipo: 'Depósito', notas: '', items: [{ articulo_id: '', cantidad: 1, precio_unit: '' }] };
+}
+function snapEnc() {
+  const e = ui.enc; if (!e || !$('#en_comp')) return;
+  const v = (id) => $('#' + id).value;
+  e.comprador_id = v('en_comp'); e.cliente_nuevo = $('#en_nuevo') ? v('en_nuevo') : e.cliente_nuevo; e.tel_nuevo = $('#en_tel') ? v('en_tel') : e.tel_nuevo;
+  e.fecha_entrega = v('en_fecha'); e.anticipo = v('en_ant'); e.forma_anticipo = v('en_forma'); e.notas = v('en_notas');
+  e.items = [...document.querySelectorAll('.en_art')].map((el, i) => {
+    const prev = e.items[i] || {}, id = el.value;
+    const cant = num(document.querySelectorAll('.en_cant')[i].value) || 1;
+    let precio = document.querySelectorAll('.en_pre')[i].value;
+    if (id !== prev.articulo_id) precio = id && art(id) ? String(art(id).valor_estimado) : '';   // pieza nueva: precio de lista
+    return { articulo_id: id, cantidad: cant, precio_unit: precio };
+  });
+}
+async function saveEnc() {
+  snapEnc();
+  const e = ui.enc;
+  const cuerpo = { comprador_id: e.comprador_id || null, cliente_nuevo: e.cliente_nuevo.trim(), tel_nuevo: e.tel_nuevo.trim(),
+    fecha_entrega: e.fecha_entrega, anticipo: num(e.anticipo), forma_anticipo: e.forma_anticipo, notas: e.notas.trim(),
+    items: e.items.filter((i) => i.articulo_id).map((i) => ({ articulo_id: i.articulo_id, cantidad: num(i.cantidad) || 1, precio_unit: i.precio_unit === '' ? null : num(i.precio_unit) })) };
+  if (!cuerpo.comprador_id && !cuerpo.cliente_nuevo) { toast('Elige un cliente o escribe su nombre', true); return; }
+  if (!cuerpo.items.length) { toast('Agrega al menos una pieza', true); return; }
+  try {
+    await accion(() => (e.id ? PUT('/encargos/' + e.id, cuerpo) : POST('/encargos', cuerpo)), e.id ? 'Encargo actualizado' : 'Encargo registrado');
+    ui.enc = null; cerrar();
+  } catch (x) { /* error ya reportado */ }
+}
 
 /* ---------- Balderas: lista de carga y corte del día ---------- */
 function vBalderas() {
@@ -1332,6 +1423,49 @@ MOD.wish = function () {
   ${f('Detalle', inp('w_detalle', w.detalle, 'text', 'Solo tarjeta larga, sin dobleces'))}
   `, `<button class="btn gh" data-a="cerrar">Cancelar</button><button class="btn pri" data-a="savewish">Guardar</button>`, '500px');
 };
+MOD.encargo = function () {
+  const e = ui.enc || encNuevo();
+  const propias = {}; (e.id ? (db.encargos.find((x) => x.id === e.id) || { items: [] }).items : []).forEach((i) => { propias[i.articulo_id] = (propias[i.articulo_id] || 0) + i.cantidad; });
+  const opciones = db.articulos.filter((a) => libre(a) + (propias[a.id] || 0) > 0 || e.items.some((i) => i.articulo_id === a.id))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const filas = e.items.map((i) => { const a = i.articulo_id ? art(i.articulo_id) : null; return { i, a, costo: a ? num(a.precio_compra) : 0, sub: num(i.precio_unit) * num(i.cantidad) }; });
+  const total = suma(filas, (r) => r.sub), costo = suma(filas, (r) => r.costo * num(r.i.cantidad)), ant = num(e.anticipo);
+  return shell(e.id ? 'Editar encargo' : 'Nuevo encargo', 'Una o varias piezas para un cliente', `
+  ${f('Cliente', `<select class="sel" id="en_comp" data-a="encchg"><option value="">— Cliente nuevo —</option>${db.compradores.map((c) => `<option value="${c.id}" ${e.comprador_id === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}</select>`)}
+  ${e.comprador_id ? '' : `<div class="g2">${f('Nombre del cliente nuevo', `<input class="in" id="en_nuevo" value="${esc(e.cliente_nuevo)}" placeholder="Ej. Luis (Facebook)">`)}
+    ${f('Teléfono o contacto', `<input class="in" id="en_tel" value="${esc(e.tel_nuevo)}" placeholder="Opcional">`)}</div>`}
+  ${f('Fecha de entrega en Balderas', `<input class="in" type="date" id="en_fecha" data-a="encchg" value="${esc(e.fecha_entrega)}">`)}
+  <div class="fld"><label class="lbl">Piezas del encargo</label>
+    ${filas.map((r, n) => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 60px 92px 30px;gap:6px;margin-bottom:6px;align-items:center">
+      <select class="sel en_art" data-a="encchg"><option value="">Elige una pieza…</option>${opciones.map((a) => `<option value="${a.id}" ${r.i.articulo_id === a.id ? 'selected' : ''}>${esc(a.nombre)} · ${libre(a) + (propias[a.id] || 0)} disp.</option>`).join('')}</select>
+      <input class="in en_cant" type="number" min="1" value="${esc(r.i.cantidad)}" data-a="encchg" title="Cantidad">
+      <input class="in en_pre" type="number" step="0.01" value="${esc(r.i.precio_unit)}" data-a="encchg" placeholder="Precio c/u" title="Precio por pieza">
+      <button class="btn sm gh" data-a="encrm" data-i="${n}" title="Quitar" ${filas.length === 1 ? 'disabled' : ''}>✕</button>
+      <div style="grid-column:1/-1;font-size:11.5px;color:var(--muted);margin:-2px 0 4px">${r.a ? `Costo ${money(r.costo)} c/u · ${money(r.costo * num(r.i.cantidad))} en total · ganas ${money(r.sub - r.costo * num(r.i.cantidad))}` : ''}</div></div>`).join('')}
+    <button class="btn sm" data-a="encadd">+ Agregar otra pieza</button></div>
+  <div class="calc"><div class="ln"><span>Piezas</span><b>${suma(filas, (r) => num(r.i.cantidad))}</b></div>
+    <div class="ln"><span>Costo total</span><b>${money(costo)}</b></div>
+    <div class="ln"><span>Precio total</span><b>${money(total)}</b></div>
+    <div class="ln"><span>Ganancia</span><b class="${total - costo >= 0 ? 'pos' : 'neg'}">${money(total - costo)}</b></div>
+    <div class="ln"><span>Por cobrar en Balderas</span><b>${money(Math.max(0, total - ant))}</b></div></div>
+  <div class="g2" style="margin-top:12px">${f('Anticipo recibido (opcional)', `<input class="in" type="number" step="0.01" id="en_ant" data-a="encchg" value="${esc(e.anticipo)}" placeholder="0.00">`)}
+    ${f('Cómo lo pagó', `<select class="sel" id="en_forma" data-a="encchg">${FORMAS_PAGO.map((x) => `<option ${e.forma_anticipo === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`)}</div>
+  ${f('Notas', `<textarea class="ta" id="en_notas" rows="2" data-a="encchg" placeholder="Ej. Empacar en bolsa, le da pena el precio…">${esc(e.notas)}</textarea>`)}
+  `, `<button class="btn gh" data-a="cerrar">Cancelar</button><button class="btn pri" data-a="saveenc">${e.id ? 'Guardar cambios' : 'Registrar encargo'}</button>`, '640px');
+};
+MOD.encentregar = function () {
+  const e = ui.ctx; if (!e) return '';
+  const c = cli(e.comprador_id) || {};
+  return shell('Entregar encargo', c.nombre || '', `
+  <div class="calc"><div class="ln"><span>${e.piezas} piezas</span><b>${money(e.total)}</b></div>
+    <div class="ln"><span>Anticipo ya recibido${e.forma_anticipo ? ' (' + esc(e.forma_anticipo) + ')' : ''}</span><b>−${money(e.anticipo)}</b></div>
+    <div class="ln"><span>Resta por cobrar</span><b>${money(e.resta)}</b></div></div>
+  ${f('Total final acordado', `<input class="in" type="number" step="0.01" id="ee_total" value="${e.total}">`, 'Cámbialo solo si le hiciste descuento: las ventas se registran con este total.')}
+  <div class="g2">${f('Cobrado ahora', `<input class="in" type="number" step="0.01" id="ee_cobrado" value="${e.resta}">`)}
+    ${f('Forma de pago', `<select class="sel" id="ee_forma">${FORMAS_PAGO.map((x) => `<option>${x}</option>`).join('')}</select>`)}</div>
+  <div class="note">Se crean las ventas de cada pieza, se descuentan del inventario y el encargo queda como entregado. Si cobras menos de lo que resta, se avisa cuánto te debe.</div>
+  `, `<button class="btn gh" data-a="cerrar">Cancelar</button><button class="btn pri" data-a="saveentrega" data-id="${e.id}">Confirmar entrega</button>`, '520px');
+};
 MOD.publote = function () {
   const l = ui.ctx || [];
   const txt = ['🏎🃏 PIEZAS DISPONIBLES', ''].concat(l.map((a) => {
@@ -1448,6 +1582,20 @@ document.addEventListener('click', async (e) => {
     case 'yallego': await yaLlego(id); break;
     case 'yallegotodas': await yaLlego(null); break;
     case 'sugerircarga': sugerirCarga(); break;
+    case 'nuevoenc': ui.enc = encNuevo(); abrir('encargo', null); break;
+    case 'editenc': { const e = db.encargos.find((x) => x.id === id); ui.enc = { id, comprador_id: e.comprador_id || '', cliente_nuevo: '', tel_nuevo: '', fecha_entrega: e.fecha_entrega || '', anticipo: e.anticipo || '', forma_anticipo: e.forma_anticipo || 'Depósito', notas: e.notas || '', items: e.items.map((i) => ({ articulo_id: i.articulo_id, cantidad: i.cantidad, precio_unit: String(i.precio_unit) })) }; abrir('encargo', null); break; }
+    case 'encadd': snapEnc(); ui.enc.items.push({ articulo_id: '', cantidad: 1, precio_unit: '' }); render(); break;
+    case 'encrm': snapEnc(); ui.enc.items.splice(num(el.dataset.i), 1); render(); break;
+    case 'saveenc': await saveEnc(); break;
+    case 'enctab': ui.encTab = el.dataset.v; render(); break;
+    case 'encempacar': await accion(() => PATCH('/encargos/' + id, { estatus: el.dataset.v }), el.dataset.v === 'Empacado' ? 'Marcado como empacado' : 'Desempacado'); break;
+    case 'encentregar': abrir('encentregar', db.encargos.find((x) => x.id === id)); break;
+    case 'saveentrega': {
+      const r = await accion(() => POST(`/encargos/${id}/entregar`, { total_final: num($('#ee_total').value), cobrado: num($('#ee_cobrado').value), forma: $('#ee_forma').value }));
+      cerrar(); toast(r.debe > 0 ? `Entregado. Te debe ${money(r.debe)}` : 'Entregado y registrado como venta'); break; }
+    case 'enccancelar': if (confirm('¿Cancelar este encargo? Las piezas quedan libres otra vez.')) await accion(() => PATCH('/encargos/' + id, { estatus: 'Cancelado' }), 'Encargo cancelado'); break;
+    case 'encborrar': await accion(() => DEL('/encargos/' + id), 'Encargo borrado'); break;
+    case 'hojaent': await bajarPDF('/encargos/hoja-entrega', `hoja-entrega-${hoy()}.pdf`, 'POST', { fecha: ui.encFecha, incluir_costos: ui.encCostos }); break;
     case 'enttab': ui.entTab = el.dataset.v; render(); break;
     case 'ftipo': ui.fTipo = el.dataset.v; render(); break;
     case 'modoinv': ui.modoInv = el.dataset.v; try { localStorage.setItem('cw_modoInv', ui.modoInv); } catch (e) { /* sin almacenamiento */ } render(); break;
@@ -1600,6 +1748,9 @@ document.addEventListener('change', async (e) => {
   if (a === 'mesesgraf_in') { ui.mesesGraf = Math.max(1, Math.min(36, num(el.value) || 6)); try { localStorage.setItem('cw_mesesGraf', ui.mesesGraf); } catch (e) { /* sin almacenamiento */ } render(); }
   if (a === 'repcfg') { ui.rep[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value; guardarRep(); }
   if (a === 'fentrega' && el.value) await accion(() => PATCH('/ventas/' + el.dataset.id, { estatus_envio: 'Entregado', fecha_entrega: el.value }), 'Fecha de entrega guardada');
+  if (a === 'encchg') { snapEnc(); render(); }
+  if (a === 'encfecha') { ui.encFecha = el.value; render(); }
+  if (a === 'enccostos') { ui.encCostos = el.checked; }
   if (a === 'cargachk') { ui.carga = el.checked ? ui.carga.concat(id0(el)) : ui.carga.filter((x) => x !== id0(el)); guardarCarga(); render(); }
   if (a === 'margenmin') { ui.margenMin = Math.max(0, num(el.value)); try { localStorage.setItem('cw_margenMin', ui.margenMin); } catch (e) { /* sin almacenamiento */ } render(); }
   if (a === 'cargan') { ui.cargaN = Math.max(1, num(el.value) || 15); }

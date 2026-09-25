@@ -203,11 +203,48 @@ CREATE TABLE IF NOT EXISTS pedidos_cliente (
 );
 CREATE INDEX IF NOT EXISTS ix_ped_usuario ON pedidos_cliente(usuario_id, atendido);
 
--- Cuánto puedes vender realmente: la cantidad menos lo comprometido en apartados
-CREATE VIEW IF NOT EXISTS v_articulos AS
+-- Encargos: lo que un cliente pide (una o varias piezas) para entregarle en persona.
+-- Reservan stock mientras están Pendiente/Empacado; al entregar se vuelven ventas.
+CREATE TABLE IF NOT EXISTS encargos (
+  id              TEXT PRIMARY KEY,
+  usuario_id      TEXT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  comprador_id    TEXT REFERENCES compradores(id) ON DELETE SET NULL,
+  fecha           TEXT NOT NULL,
+  fecha_entrega   TEXT NOT NULL DEFAULT '',
+  estatus         TEXT NOT NULL DEFAULT 'Pendiente'
+                  CHECK (estatus IN ('Pendiente','Empacado','Entregado','Cancelado')),
+  anticipo        REAL NOT NULL DEFAULT 0 CHECK (anticipo >= 0),
+  forma_anticipo  TEXT NOT NULL DEFAULT '',
+  notas           TEXT NOT NULL DEFAULT '',
+  entregado_en    TEXT NOT NULL DEFAULT '',
+  total_final     REAL,
+  cobrado_entrega REAL NOT NULL DEFAULT 0,
+  forma_entrega   TEXT NOT NULL DEFAULT '',
+  creado_en       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_enc_usuario ON encargos(usuario_id, estatus, fecha_entrega);
+
+CREATE TABLE IF NOT EXISTS encargo_items (
+  id          TEXT PRIMARY KEY,
+  encargo_id  TEXT NOT NULL REFERENCES encargos(id) ON DELETE CASCADE,
+  articulo_id TEXT REFERENCES articulos(id) ON DELETE SET NULL,
+  nombre_snap TEXT NOT NULL,
+  cantidad    INTEGER NOT NULL CHECK (cantidad > 0),
+  precio_unit REAL NOT NULL DEFAULT 0 CHECK (precio_unit >= 0),
+  costo_unit  REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_encit_enc ON encargo_items(encargo_id);
+CREATE INDEX IF NOT EXISTS ix_encit_art ON encargo_items(articulo_id);
+
+-- Cuánto puedes vender realmente: la cantidad menos lo comprometido en apartados y encargos
+DROP VIEW IF EXISTS v_articulos;
+CREATE VIEW v_articulos AS
 SELECT a.*,
-  a.cantidad - COALESCE((
-    SELECT SUM(ap.cantidad) FROM apartados ap
-    WHERE ap.articulo_id = a.id AND ap.estatus = 'Vigente'
-  ), 0) AS disponible
+  a.cantidad
+  - COALESCE((SELECT SUM(ap.cantidad) FROM apartados ap
+              WHERE ap.articulo_id = a.id AND ap.estatus = 'Vigente'), 0)
+  - COALESCE((SELECT SUM(ei.cantidad) FROM encargo_items ei
+              JOIN encargos e ON e.id = ei.encargo_id
+              WHERE ei.articulo_id = a.id AND e.estatus IN ('Pendiente','Empacado')), 0)
+  AS disponible
 FROM articulos a;

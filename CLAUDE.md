@@ -81,3 +81,13 @@ El usuario final es un joven emprendedor: consigue Hot Wheels y cartas Pokémon 
 - **Semana vs semana anterior** en el Corte; **descuento por combo** en la publicación en lote; **rendimiento por fuente** en el Panel.
 - **Respaldo automático diario** (`collecthub/respaldo.py`): un `.db` por día en `datos/respaldos/` (últimos 14); se apaga con `COLLECTHUB_SIN_RESPALDO=1` (las pruebas lo apagan). Ojo: en Docker `datos/` es el volumen persistente, así que los respaldos también persisten.
 - La fuente "Mattel Creations" es ahora la primera de `FUENTES`; el puente la manda tal cual.
+
+### Encargos y hoja de entrega (2026-09-25, noche)
+
+Flujo del negocio: el joven publica en Facebook; un cliente (a veces nuevo) le hace un **encargo** de 1 a N piezas; él lo empaca y lo entrega en Balderas cobrando en efectivo o depósito.
+
+- Tablas `encargos` + `encargo_items` (con `costo_unit` congelado al crear). La vista `v_articulos` (`disponible`) ahora también descuenta lo reservado en encargos **Pendiente/Empacado**; se recrea en cada arranque (`DROP VIEW` + `CREATE VIEW` en `schema.sql`). Una pieza en un encargo activo no se puede borrar.
+- Rutas en `movimientos.py`: `GET/POST /api/encargos`, `PUT/PATCH/DELETE /api/encargos/<id>` (PATCH = Empacado/Pendiente/Cancelado), `POST /api/encargos/<id>/entregar` (crea una venta por pieza en el canal `TG` "Balderas", descuenta stock, guarda cobrado/forma; devuelve `debe`), `POST /api/encargos/hoja-entrega` (PDF). `estado_completo` trae `encargos` con `items`, `piezas`, `total`, `costo`, `ganancia`, `resta`.
+- **Hoja de entrega** (`collecthub/hoja_entrega.py`): resumen (clientes, piezas, costo, precio, ganancia, ya cobrado por forma, POR COBRAR), lista para empacar consolidada por ubicación, detalle por cliente con costo y precio por pieza y total + renglón de cobro/firma, y cruce final piezas vs dinero (columnas Efectivo/Depósito/Dif. en blanco para llenar a mano). Filtra por fecha de entrega; opción de ocultar costos.
+- Cliente nuevo: se da de alta solo (`cliente_nuevo`, `tel_nuevo`) al crear el encargo.
+- Pruebas 35-37 en `tests/test_api.py`. En la interfaz: menú Movimientos → 🛍 Encargos (`vEncargos`, `MOD.encargo`, `MOD.encentregar`; ojo: los `MOD.x = ...` deben ir DESPUÉS de `const MOD = {}`).

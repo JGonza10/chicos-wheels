@@ -430,6 +430,101 @@ class PruebasAPI(unittest.TestCase):
             finally:
                 con.close()
 
+    def _pieza(self, nombre, cantidad, compra, valor):
+        _, a = self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": nombre, "cantidad": cantidad,
+                                                     "precio_compra": compra, "valor_estimado": valor,
+                                                     "ubicacion": "Caja T"})
+        return a
+
+    def _libres(self, id_art):
+        _, est = self.pedir("GET", "/api/estado")
+        return next(a["disponible"] for a in est["articulos"] if a["id"] == id_art)
+
+    def test_35_encargo_reserva_stock_y_calcula_costos(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        a1, a2 = self._pieza("Enc A", 3, 40, 100), self._pieza("Enc B", 1, 10, 30)
+        r = self.c.post("/api/encargos", headers=h, json={
+            "cliente_nuevo": "Cliente Balderas", "tel_nuevo": "555", "fecha_entrega": "2026-10-03",
+            "anticipo": 100, "forma_anticipo": "Depósito",
+            "items": [{"articulo_id": a1["id"], "cantidad": 2}, {"articulo_id": a2["id"], "cantidad": 1, "precio_unit": 35}]})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        e = r.get_json()
+        self.assertEqual((e["piezas"], e["total"], e["costo"], e["ganancia"], e["resta"]), (3, 235.0, 90.0, 145.0, 135.0))
+        self.assertEqual(self._libres(a1["id"]), 1, "el encargo reserva stock")
+        self.assertEqual(self._libres(a2["id"]), 0)
+        # no se puede encargar lo que ya está reservado
+        r = self.c.post("/api/encargos", headers=h, json={"comprador_id": e["comprador_id"],
+                        "items": [{"articulo_id": a2["id"], "cantidad": 1}]})
+        self.assertEqual(r.status_code, 409)
+        # ni un anticipo mayor al total, ni sin piezas, ni sin cliente
+        self.assertEqual(self.c.post("/api/encargos", headers=h, json={"comprador_id": e["comprador_id"], "anticipo": 9999,
+                         "items": [{"articulo_id": a1["id"], "cantidad": 1}]}).status_code, 400)
+        self.assertEqual(self.c.post("/api/encargos", headers=h, json={"comprador_id": e["comprador_id"], "items": []}).status_code, 400)
+        self.assertEqual(self.c.post("/api/encargos", headers=h, json={"items": [{"articulo_id": a1["id"], "cantidad": 1}]}).status_code, 400)
+        # la pieza no se puede borrar mientras esté en un encargo pendiente
+        self.assertEqual(self.c.delete(f"/api/articulos/{a1['id']}", headers=h).status_code, 409)
+        # editar (PUT) puede volver a pedir lo que el mismo encargo tenía reservado
+        r = self.c.put(f"/api/encargos/{e['id']}", headers=h, json={"comprador_id": e["comprador_id"], "anticipo": 0,
+                       "items": [{"articulo_id": a1["id"], "cantidad": 3}]})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(self._libres(a1["id"]), 0)
+        self.assertEqual(self._libres(a2["id"]), 1, "al quitarla del encargo vuelve a estar libre")
+        # aislamiento: otra cuenta no ve ni toca este encargo
+        h2 = {"Authorization": f"Bearer {self.token2}"}
+        self.assertEqual(self.c.patch(f"/api/encargos/{e['id']}", headers=h2, json={"estatus": "Cancelado"}).status_code, 404)
+        # cancelar libera el stock
+        r = self.c.patch(f"/api/encargos/{e['id']}", headers=h, json={"estatus": "Cancelado"})
+        self.assertEqual(r.get_json()["estatus"], "Cancelado")
+        self.assertEqual(self._libres(a1["id"]), 3)
+        self.assertEqual(self.c.delete(f"/api/encargos/{e['id']}", headers=h).status_code, 200)
+
+    def test_36_entregar_encargo_lo_convierte_en_ventas(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        a1, a2 = self._pieza("Ent A", 2, 50, 120), self._pieza("Ent B", 1, 20, 60)
+        _, est = self.pedir("GET", "/api/estado")
+        ventas_antes = len(est["ventas"])
+        e = self.c.post("/api/encargos", headers=h, json={
+            "cliente_nuevo": "Comprador Entrega", "anticipo": 50, "forma_anticipo": "Efectivo",
+            "items": [{"articulo_id": a1["id"], "cantidad": 2}, {"articulo_id": a2["id"], "cantidad": 1}]}).get_json()
+        self.assertEqual(e["total"], 300.0)
+        r = self.c.patch(f"/api/encargos/{e['id']}", headers=h, json={"estatus": "Empacado"})
+        self.assertEqual(r.get_json()["estatus"], "Empacado")
+        r = self.c.post(f"/api/encargos/{e['id']}/entregar", headers=h, json={"cobrado": 200, "forma": "Depósito"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        d = r.get_json()
+        self.assertEqual((d["estatus"], d["debe"], d["cobrado_entrega"]), ("Entregado", 50.0, 200.0))
+        _, est = self.pedir("GET", "/api/estado")
+        nuevas = est["ventas"][:len(est["ventas"]) - ventas_antes]
+        nuevas = [v for v in est["ventas"] if v["nombre_snap"] in ("Ent A", "Ent B")]
+        self.assertEqual(len(nuevas), 2)
+        self.assertAlmostEqual(sum(v["precio"] for v in nuevas), 300.0)
+        self.assertAlmostEqual(sum(v["ganancia_neta"] for v in nuevas), 300 - (2 * 50 + 20))
+        self.assertEqual(next(a["cantidad"] for a in est["articulos"] if a["id"] == a1["id"]), 0)
+        # ya entregado: no se entrega dos veces, no se cancela, no se borra
+        self.assertEqual(self.c.post(f"/api/encargos/{e['id']}/entregar", headers=h, json={}).status_code, 409)
+        self.assertEqual(self.c.patch(f"/api/encargos/{e['id']}", headers=h, json={"estatus": "Cancelado"}).status_code, 409)
+        self.assertEqual(self.c.delete(f"/api/encargos/{e['id']}", headers=h).status_code, 409)
+
+    def test_37_hoja_de_entrega_pdf(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        # sin encargos pendientes para esa fecha no hay nada que imprimir
+        r = self.c.post("/api/encargos/hoja-entrega", headers=h, json={"fecha": "2031-01-01"})
+        self.assertEqual(r.status_code, 400)
+        a1, a2 = self._pieza("Hoja A", 5, 30, 90), self._pieza("Hoja B", 2, 15, 45)
+        for cliente, cant in (("Ana Balderas", 2), ("Beto Balderas", 3)):
+            r = self.c.post("/api/encargos", headers=h, json={
+                "cliente_nuevo": cliente, "fecha_entrega": "2031-02-01", "notas": "Empacar en bolsa",
+                "anticipo": 30, "forma_anticipo": "Depósito",
+                "items": [{"articulo_id": a1["id"], "cantidad": cant}, {"articulo_id": a2["id"], "cantidad": 1}]})
+            self.assertEqual(r.status_code, 201, r.get_json())
+        for cfg in ({"fecha": "2031-02-01"}, {}, {"fecha": "2031-02-01", "incluir_costos": False}):
+            r = self.c.post("/api/encargos/hoja-entrega", headers=h, json=cfg)
+            self.assertEqual(r.status_code, 200, cfg)
+            self.assertTrue(r.data.startswith(b"%PDF"))
+        self.assertEqual(self.c.post("/api/encargos/hoja-entrega", json={}).status_code, 401)
+        self.assertEqual(self.c.post("/api/encargos/hoja-entrega", headers={"Authorization": f"Bearer {self.token2}"},
+                                     json={"fecha": "2031-02-01"}).status_code, 400, "otra cuenta no ve estos encargos")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

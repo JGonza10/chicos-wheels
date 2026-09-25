@@ -215,6 +215,9 @@ def eliminar(id_art):
                    (id_art,))["n"]
     if vigentes:
         raise ErrorApp("Esta pieza tiene un apartado vigente. Cancélalo primero.", 409)
+    if uno("SELECT 1 FROM encargo_items ei JOIN encargos e ON e.id=ei.encargo_id "
+           "WHERE ei.articulo_id=? AND e.estatus IN ('Pendiente','Empacado')", (id_art,)):
+        raise ErrorApp("Esta pieza está en un encargo pendiente. Cancélalo o quítala de ahí primero.", 409)
     bd().execute("DELETE FROM articulos WHERE id=?", (id_art,))
     bd().commit()
     return jsonify(ok=True)

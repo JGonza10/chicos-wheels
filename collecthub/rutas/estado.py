@@ -6,11 +6,12 @@ from flask import Blueprint, Response, g, jsonify, request
 
 from ..db import todos, transaccion, uno, vencer_apartados
 from ..seed import sembrar
+from .movimientos import encargos_de
 from ..util import ErrorApp, precio_objetivo
 
 bp = Blueprint("estado", __name__)
 
-TABLAS_USUARIO = ("ventas", "apartados", "intercambios", "lotes", "wishlist", "pedidos_cliente",
+TABLAS_USUARIO = ("ventas", "encargos", "apartados", "intercambios", "lotes", "wishlist", "pedidos_cliente",
                   "articulos", "compradores")
 
 
@@ -45,6 +46,7 @@ def estado_completo(usuario_id: str) -> dict:
                            (usuario_id,)),
         "intercambios": intercambios,
         "lotes": todos("SELECT * FROM lotes WHERE usuario_id=? ORDER BY fecha DESC", (usuario_id,)),
+        "encargos": encargos_de(usuario_id),
         "pedidos": todos("SELECT * FROM pedidos_cliente WHERE usuario_id=? ORDER BY atendido, creado_en DESC",
                          (usuario_id,)),
         "wishlist": todos("SELECT * FROM wishlist WHERE usuario_id=? ORDER BY prioridad DESC",
