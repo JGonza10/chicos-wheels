@@ -88,6 +88,9 @@ let ui = {
   modal: null, ctx: null, formTipo: 'Hot Wheels', sel: [], selMode: false,
   qTipo: 'Compra', stream: null, authTab: 'login', authErr: '', ocupado: false,
   fotoPendiente: null, avisoIA: '', identificando: false,
+  modoInv: (() => { try { return localStorage.getItem('cw_modoInv') === 'lista' ? 'lista' : 'fichas'; } catch (e) { return 'fichas'; } })(),
+  colOrd: '', colDir: 1,
+  mesesGraf: (() => { try { return num(localStorage.getItem('cw_mesesGraf')) || 6; } catch (e) { return 6; } })(),
 };
 let tT = null;
 
@@ -369,6 +372,39 @@ const alerta = (t, n, d, c, v) => `<div class="pnl" style="cursor:pointer" data-
   <div style="font-size:31px;font-weight:800;letter-spacing:-.03em;color:${n ? c : 'var(--muted2)'};margin:5px 0 4px">${n}</div>
   <div style="font-size:12px;color:var(--muted)">${d}</div></div>`;
 
+/** Gráfica de barras por mes: compras (gasto) vs ventas netas de los últimos N meses. */
+function graficaMeses() {
+  const n = ui.mesesGraf, hoyD = new Date(), meses = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(hoyD.getFullYear(), hoyD.getMonth() - i, 1);
+    meses.push({ k: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, d, compras: 0, ventas: 0 });
+  }
+  const por = Object.fromEntries(meses.map((m) => [m.k, m]));
+  db.ventas.forEach((v) => { const m = por[(v.fecha || '').slice(0, 7)]; if (m) m.ventas += num(v.neto); });
+  db.articulos.forEach((a) => { const m = por[(a.fecha_adq || '').slice(0, 7)]; if (m) m.compras += num(a.precio_compra) * num(a.cant_inicial || a.cantidad || 1); });
+  const max = Math.max(1, ...meses.map((m) => Math.max(m.compras, Math.abs(m.ventas))));
+  const W = 560, H = 190, pl = 6, pb = 24, pt = 8, ancho = (W - pl) / n, bw = Math.min(26, ancho / 2.6), alto = H - pb - pt;
+  const y = (v) => pt + alto - (Math.abs(v) / max) * alto;
+  const barras = meses.map((m, i) => {
+    const cx = pl + ancho * i + ancho / 2, nom = m.d.toLocaleDateString('es-MX', { month: 'short' }).replace('.', '');
+    const tip = `${m.d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}: compras ${money(m.compras)} · ventas netas ${money(m.ventas)}`;
+    return `<g><title>${esc(tip)}</title>
+      <rect x="${cx - bw - 1}" y="${y(m.compras)}" width="${bw}" height="${pt + alto - y(m.compras)}" rx="2" fill="var(--red)" opacity=".85"/>
+      <rect x="${cx + 1}" y="${y(m.ventas)}" width="${bw}" height="${pt + alto - y(m.ventas)}" rx="2" fill="${m.ventas >= 0 ? 'var(--green)' : 'var(--yellow)'}" opacity=".9"/>
+      ${n <= 12 || i % 2 === 0 ? `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--muted)">${esc(nom)}${m.d.getMonth() === 0 || i === 0 ? ' ' + String(m.d.getFullYear()).slice(2) : ''}</text>` : ''}</g>`;
+  }).join('');
+  const totC = suma(meses, (m) => m.compras), totV = suma(meses, (m) => m.ventas);
+  return `<div class="chips" style="margin-bottom:10px">${[3, 6, 12, 24].map((k) => `<button class="chip ${n === k ? 'on' : ''}" data-a="mesesgraf" data-v="${k}">${k} meses</button>`).join('')}
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)">Otro
+      <input class="in" type="number" min="1" max="36" value="${n}" data-a="mesesgraf_in" style="width:62px;padding:5px 8px"></label></div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Compras y ventas netas por mes">
+      <line x1="${pl}" x2="${W}" y1="${pt + alto}" y2="${pt + alto}" stroke="var(--line2)"/>${barras}</svg>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px">
+      <span><span class="dt" style="background:var(--red)"></span>Compras <b class="mn" style="color:var(--text)">${money(totC)}</b></span>
+      <span><span class="dt" style="background:var(--green)"></span>Ventas netas <b class="mn" style="color:var(--text)">${money(totV)}</b></span>
+      <span>Balance <b class="mn ${totV - totC >= 0 ? 'pos' : 'neg'}">${money(totV - totC)}</b></span></div>`;
+}
+
 /* ---------- Panel ---------- */
 function vPanel() {
   const s = stats();
@@ -396,24 +432,8 @@ function vPanel() {
   </div>
   <div class="pgrid" style="display:grid;grid-template-columns:1.25fr 1fr;gap:16px">
     <div class="pnl">
-      <h2>Nuevo movimiento</h2>
-      <div class="fld"><label class="lbl">${ui.qTipo === 'Venta' ? 'Pieza a vender' : 'Nombre de la pieza'}</label>
-        ${ui.qTipo === 'Venta'
-          ? `<select class="sel" id="q_art">${vendibles.map((a) => `<option value="${a.id}">${esc(a.nombre)} · ${libre(a)} disp.</option>`).join('') || '<option value="">Sin piezas disponibles</option>'}</select>`
-          : `<input class="in" id="q_nombre" placeholder="Ej. Nissan Skyline GT-R">`}</div>
-      <div class="fld"><label class="lbl">Categoría</label><div class="g2">
-        <button class="sel ${ui.formTipo === 'Hot Wheels' ? 'bl' : ''}" data-a="qtipo2" data-t="Hot Wheels" style="text-align:left">🏎️ Hot Wheels</button>
-        <button class="sel ${ui.formTipo === 'Pokémon' ? 'bl' : ''}" data-a="qtipo2" data-t="Pokémon" style="text-align:left">🃏 Pokémon</button>
-      </div></div>
-      <div class="fld"><label class="lbl">Tipo de movimiento</label>
-        <div class="seg">${['Compra', 'Venta'].map((t) => `<button data-a="qtipo" data-t="${t}" class="${ui.qTipo === t ? 'on' : ''}">${t}</button>`).join('')}</div></div>
-      <div class="g2">
-        <div class="fld"><label class="lbl">Cantidad</label><input class="in" id="q_cant" type="number" min="1" value="1"></div>
-        <div class="fld"><label class="lbl">Precio ${ui.qTipo === 'Venta' ? 'cobrado' : 'pagado'}</label><input class="in" id="q_precio" type="number" step="0.01" placeholder="0.00"></div>
-      </div>
-      ${ui.qTipo === 'Venta' ? `<div class="fld"><label class="lbl">Canal</label>
-        <select class="sel" id="q_plat">${db.plataformas.map((p) => `<option value="${p.id}">${esc(p.nombre)} — ${pct(p.com_pct)}</option>`).join('')}</select></div>` : ''}
-      <button class="btn pri" data-a="qguardar" style="width:100%;padding:12px">Guardar movimiento</button>
+      <h2>Movimientos por mes</h2>
+      ${graficaMeses()}
     </div>
     <div class="pnl">
       <h2>Historial reciente</h2>
@@ -465,7 +485,47 @@ function filtrar() {
     nombre: (a, b) => a.nombre.localeCompare(b.nombre),
     antiguedad: (a, b) => (a.fecha_adq || '').localeCompare(b.fecha_adq || ''),
   };
-  return l.sort(o[ui.orden] || o.reciente);
+  l.sort(o[ui.orden] || o.reciente);
+  const col = COLS_INV.find((c) => c.k === ui.colOrd);
+  if (ui.modoInv === 'lista' && col) {
+    l.sort((a, b) => ui.colDir * (col.txt ? String(col.v(a)).localeCompare(String(col.v(b)), 'es', { numeric: true }) : num(col.v(a)) - num(col.v(b))));
+  }
+  return l;
+}
+/* Columnas de la vista de lista (hoja de cálculo). txt = se ordena como texto. */
+const COLS_INV = [
+  { k: 'nombre', t: 'Pieza', txt: 1, v: (a) => a.nombre || '' },
+  { k: 'tipo', t: 'Tipo', txt: 1, v: (a) => a.tipo || '' },
+  { k: 'numero', t: 'Número', txt: 1, v: (a) => a.numero || '' },
+  { k: 'anio', t: 'Año', v: (a) => a.anio || 0 },
+  { k: 'detalle', t: 'Serie / Expansión', txt: 1, v: (a) => (a.tipo === 'Hot Wheels' ? a.serie : a.expansion) || '' },
+  { k: 'variante', t: 'Color / Rareza', txt: 1, v: (a) => (a.tipo === 'Hot Wheels' ? a.color : a.rareza) || '' },
+  { k: 'cantidad', t: 'Cant.', num: 1, v: (a) => num(a.cantidad) },
+  { k: 'estatus', t: 'Estatus', txt: 1, v: (a) => semaforo(a).t },
+  { k: 'ubicacion', t: 'Ubicación', txt: 1, v: (a) => a.ubicacion || '' },
+  { k: 'compra', t: 'Compra', num: 1, v: (a) => num(a.precio_compra) },
+  { k: 'valor', t: 'Valor', num: 1, v: (a) => num(a.valor_estimado) },
+  { k: 'dif', t: 'Dif.', num: 1, v: (a) => num(a.valor_estimado) - num(a.precio_compra) },
+  { k: 'fecha', t: 'Adquirida', txt: 1, v: (a) => a.fecha_adq || '' },
+];
+function tablaInv(l) {
+  const flecha = (c) => (ui.colOrd === c.k ? (ui.colDir > 0 ? ' ▲' : ' ▼') : '');
+  return `<div class="pnl wrap hoja" style="padding:0"><table class="tbl hoja-t"><thead><tr>
+    <th class="rn">#</th>${COLS_INV.map((c) => `<th class="${c.num ? 'num' : ''} ord" data-a="ordcol" data-v="${c.k}" title="Ordenar por ${c.t}">${c.t}${flecha(c)}</th>`).join('')}</tr></thead><tbody>
+    ${l.map((a, i) => {
+      const s = semaforo(a), dif = num(a.valor_estimado) - num(a.precio_compra), ago = !num(a.cantidad);
+      return `<tr class="${ui.sel.includes(a.id) ? 'sel2' : ''} ${ago ? 'sold' : ''}" data-a="ver" data-id="${a.id}">
+      <td class="rn">${i + 1}</td>
+      <td><b>${a.grail ? '👑 ' : ''}${esc(a.nombre)}</b></td><td>${esc(a.tipo)}</td><td class="mn">${esc(a.numero || '')}</td>
+      <td class="mn">${esc(a.anio || '')}</td><td>${esc(COLS_INV[4].v(a))}</td><td>${esc(COLS_INV[5].v(a))}</td>
+      <td class="num">${num(a.cantidad)}${a.apartadas ? ` <span class="mu">(${a.apartadas} ap.)</span>` : ''}</td>
+      <td><span class="dt" style="background:${s.col}"></span>${s.t}</td><td>${esc(a.ubicacion || '—')}</td>
+      <td class="num">${money(a.precio_compra)}</td><td class="num"><b>${money(a.valor_estimado)}</b></td>
+      <td class="num ${dif >= 0 ? 'pos' : 'neg'}">${dif >= 0 ? '+' : ''}${money(dif)}</td>
+      <td class="mn">${esc(a.fecha_adq || '')}</td></tr>`; }).join('')}
+    </tbody><tfoot><tr><td class="rn"></td><td colspan="9"><b>Total (${l.length} filas)</b></td>
+      <td class="num">${money(suma(l, (a) => num(a.precio_compra) * num(a.cantidad)))}</td>
+      <td class="num">${money(suma(l, (a) => num(a.valor_estimado) * num(a.cantidad)))}</td><td></td><td></td></tr></tfoot></table></div>`;
 }
 function vInv() {
   const l = filtrar();
@@ -481,6 +541,9 @@ function vInv() {
       </select></label>
     <span style="width:1px;height:22px;background:var(--line2)"></span>
     <button class="chip ${ui.selMode ? 'on' : ''}" data-a="selmode">☑ Seleccionar varias</button>
+    <span style="width:1px;height:22px;background:var(--line2)"></span>
+    <button class="chip ${ui.modoInv === 'fichas' ? 'on' : ''}" data-a="modoinv" data-v="fichas" title="Ver como fichas">▦ Fichas</button>
+    <button class="chip ${ui.modoInv === 'lista' ? 'on' : ''}" data-a="modoinv" data-v="lista" title="Ver como hoja de cálculo">☰ Lista</button>
     <select class="sel" data-a="orden" style="width:auto;margin-left:auto;padding:7px 32px 7px 12px;font-size:12.5px">
       ${[['reciente', 'Más recientes'], ['valor', 'Mayor valor'], ['nombre', 'A–Z'], ['antiguedad', 'Más tiempo guardadas']].map((o) => `<option value="${o[0]}" ${ui.orden === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}
     </select></div>
@@ -492,7 +555,7 @@ function vInv() {
     <button class="btn pri sm" data-a="lote">Vender como lote</button>
     <button class="btn sm" data-a="tradeSel">Usar en intercambio</button>
     <button class="btn gh sm" data-a="limpiarsel">Quitar selección</button></div>` : ''}
-  ${l.length ? `<div class="rack">${l.map(ficha).join('')}</div>`
+  ${l.length ? (ui.modoInv === 'lista' ? tablaInv(l) : `<div class="rack">${l.map(ficha).join('')}</div>`)
     : vacio('🔍', 'Nada coincide con ese filtro', 'Cambia los filtros o registra la pieza que buscas.', '<button class="btn pri" data-a="nuevo">Registrar pieza</button>')}`;
 }
 function ficha(a) {
@@ -1106,7 +1169,10 @@ document.addEventListener('click', async (e) => {
     /* --- navegación --- */
     case 'nav': ui.vista = el.dataset.v; ui.modal = null; ui.sel = []; ui.selMode = false; render(); window.scrollTo(0, 0); break;
     case 'cerrar': cerrar(); break;
+    case 'mesesgraf': ui.mesesGraf = Math.max(1, Math.min(36, num(el.dataset.v))); try { localStorage.setItem('cw_mesesGraf', ui.mesesGraf); } catch (e) { /* sin almacenamiento */ } render(); break;
     case 'ftipo': ui.fTipo = el.dataset.v; render(); break;
+    case 'modoinv': ui.modoInv = el.dataset.v; try { localStorage.setItem('cw_modoInv', ui.modoInv); } catch (e) { /* sin almacenamiento */ } render(); break;
+    case 'ordcol': ui.colDir = ui.colOrd === el.dataset.v ? -ui.colDir : 1; ui.colOrd = el.dataset.v; render(); break;
     case 'festatus': ui.fEstatus = el.dataset.v; render(); break;
     case 'selmode': ui.selMode = !ui.selMode; if (!ui.selMode) ui.sel = []; render();
       toast(ui.selMode ? 'Toca las piezas que quieras agrupar' : 'Selección desactivada'); break;
@@ -1123,7 +1189,6 @@ document.addEventListener('click', async (e) => {
     case 'qtipo': ui.qTipo = el.dataset.t; render(); break;
     case 'qtipo2': ui.formTipo = el.dataset.t; render(); break;
     case 'savepieza': await savePieza(); break;
-    case 'qguardar': await qGuardar(); break;
     case 'delpieza':
       if (confirm('¿Eliminar esta pieza del inventario?')) {
         await accion(() => DEL('/articulos/' + id), 'Pieza eliminada'); cerrar();
@@ -1252,6 +1317,7 @@ document.addEventListener('change', async (e) => {
   const a = el.dataset.a;
   if (a === 'orden') { ui.orden = el.value; render(); }
   if (a === 'festatus_sel') { ui.fEstatus = el.value; render(); }
+  if (a === 'mesesgraf_in') { ui.mesesGraf = Math.max(1, Math.min(36, num(el.value) || 6)); try { localStorage.setItem('cw_mesesGraf', ui.mesesGraf); } catch (e) { /* sin almacenamiento */ } render(); }
   if (a === 'recalc') pintarVenta();
   if (a === 'recalcLote') pintarLote();
   if (a === 'envio') await accion(() => PATCH('/ventas/' + el.dataset.id, { estatus_envio: el.value }), 'Estatus de envío actualizado');
@@ -1341,26 +1407,6 @@ async function savePieza() {
     const int = db.compradores.filter((c) => c.interes === datos.tipo || c.interes === 'Ambas').map((c) => c.nombre);
     toast(int.length ? `Guardada. Avísale a ${int.slice(0, 2).join(' y ')}` : 'Pieza registrada');
   } catch (e) { /* el toast de error ya salió */ }
-}
-async function qGuardar() {
-  const cant = num($('#q_cant').value) || 1, precio = num($('#q_precio').value);
-  if (ui.qTipo === 'Compra') {
-    const nombre = $('#q_nombre').value.trim();
-    if (!nombre) { toast('Ponle nombre a la pieza', true); return; }
-    await accion(() => POST('/articulos', {
-      tipo: ui.formTipo, nombre, cantidad: cant, precio_compra: precio, valor_estimado: precio,
-      fecha_adq: hoy(), fuente: 'Compra en línea',
-      estado: ui.formTipo === 'Pokémon' ? 'Near Mint' : 'Sellado / Mint',
-      sub: ui.formTipo === 'Pokémon' ? 'Español' : 'Tarjeta corta',
-    }), 'Compra registrada. Completa los detalles cuando puedas.');
-  } else {
-    const idA = $('#q_art') ? $('#q_art').value : '';
-    if (!idA) { toast('No hay piezas disponibles para vender', true); return; }
-    if (!precio) { toast('Falta el precio cobrado', true); return; }
-    await accion(() => POST('/ventas', {
-      articulo_id: idA, plataforma_id: $('#q_plat').value, cantidad: cant, precio, fecha: hoy(),
-    }), (v) => `Venta registrada · ${money(v.ganancia_neta)} netos`);
-  }
 }
 async function saveVenta(apId) {
   const a = ui.ctx;
