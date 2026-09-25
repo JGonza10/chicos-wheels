@@ -236,6 +236,17 @@ CREATE TABLE IF NOT EXISTS encargo_items (
   costo_unit  REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_encit_enc ON encargo_items(encargo_id);
+
+-- Abonos posteriores a la entrega (el cliente se llevó la pieza y quedó debiendo)
+CREATE TABLE IF NOT EXISTS encargo_pagos (
+  id         TEXT PRIMARY KEY,
+  encargo_id TEXT NOT NULL REFERENCES encargos(id) ON DELETE CASCADE,
+  fecha      TEXT NOT NULL,
+  monto      REAL NOT NULL CHECK (monto > 0),
+  forma      TEXT NOT NULL DEFAULT '',
+  creado_en  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_encpag_enc ON encargo_pagos(encargo_id);
 CREATE INDEX IF NOT EXISTS ix_encit_art ON encargo_items(articulo_id);
 
 -- Cuánto puedes vender realmente: la cantidad menos lo comprometido en apartados y encargos

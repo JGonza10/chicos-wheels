@@ -183,6 +183,7 @@ def generar_pdf(usuario_id: str, config: dict) -> bytes:
 
     # Los apartados traen su propio estatus (Vigente/Vencido/...), no el del inventario.
     ap = todos("SELECT * FROM apartados WHERE usuario_id=? ORDER BY fecha_limite", (usuario_id,))
+    nombres = {x["id"]: x["nombre"] for x in todos("SELECT id,nombre FROM compradores WHERE usuario_id=?", (usuario_id,))}
 
     pdf = _Pdf(c["titulo"], c["orientacion"])
     pdf.alias_nb_pages()
@@ -241,11 +242,11 @@ def generar_pdf(usuario_id: str, config: dict) -> bytes:
     if "ventas" in c["secciones"]:
         pdf.titulo_seccion(f"Ventas ({len(ventas)})")
         if ventas:
-            filas = [[v["fecha"], v["nombre_snap"], v["plataforma_snap"], str(v["cantidad"]),
+            filas = [[v["fecha"], nombres.get(v["comprador_id"], "-"), v["nombre_snap"], v["plataforma_snap"], str(v["cantidad"]),
                       m(v["precio"]), m(v["ganancia_neta"]), v["estatus_envio"]] for v in ventas]
-            pdf.tabla([("Fecha", 2, "L"), ("Pieza", 5, "L"), ("Canal", 2.6, "L"), ("Cant", 1, "R"),
+            pdf.tabla([("Fecha", 2, "L"), ("Cliente", 3.2, "L"), ("Pieza", 4.6, "L"), ("Canal", 2.4, "L"), ("Cant", 1, "R"),
                        ("Cobrado", 2.2, "R"), ("Neto", 2.2, "R"), ("Envio", 2, "L")], filas,
-                      pie=["Total", "", "", "", m(sum(v["precio"] for v in ventas)),
+                      pie=["Total", "", "", "", "", m(sum(v["precio"] for v in ventas)),
                            m(sum(v["ganancia_neta"] or 0 for v in ventas)), ""])
         else:
             pdf.vacio("Sin ventas en el periodo.")
@@ -253,10 +254,10 @@ def generar_pdf(usuario_id: str, config: dict) -> bytes:
     if "apartados" in c["secciones"]:
         pdf.titulo_seccion(f"Apartados ({len(ap)})")
         if ap:
-            filas = [[x["fecha"], x["nombre_snap"], x["estatus"], x["fecha_limite"] or "-",
+            filas = [[x["fecha"], nombres.get(x["comprador_id"]) or x.get("cliente_snap") or "-", x["nombre_snap"], x["estatus"], x["fecha_limite"] or "-",
                       m(x["precio_acordado"]), m(x["anticipo"]),
                       m(x["precio_acordado"] - x["anticipo"])] for x in ap]
-            pdf.tabla([("Fecha", 2, "L"), ("Pieza", 5, "L"), ("Estatus", 2, "L"), ("Limite", 2, "L"),
+            pdf.tabla([("Fecha", 2, "L"), ("Cliente", 3.2, "L"), ("Pieza", 4.6, "L"), ("Estatus", 2, "L"), ("Limite", 2, "L"),
                        ("Acordado", 2.2, "R"), ("Anticipo", 2.2, "R"), ("Pendiente", 2.2, "R")], filas)
         else:
             pdf.vacio("No hay apartados.")

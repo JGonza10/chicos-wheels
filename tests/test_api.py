@@ -621,6 +621,48 @@ class PruebasAPI(unittest.TestCase):
         self.assertEqual(self.c.post("/api/encargos/hoja-entrega-excel", headers={"Authorization": f"Bearer {self.token2}"},
                                      json={"fecha": "2032-02-07"}).status_code, 400, "otra cuenta no ve estos pedidos")
 
+    def test_43_cobranza_abonos_despues_de_entregar(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        a = self._pieza("Cobranza", 2, 40, 100)
+        e = self.c.post("/api/encargos", headers=h, json={"cliente_nuevo": "Deudor", "anticipo": 20, "forma_anticipo": "Efectivo",
+                        "items": [{"articulo_id": a["id"], "cantidad": 2}]}).get_json()
+        self.assertEqual(self.c.post(f"/api/encargos/{e['id']}/pago", headers=h, json={"monto": 10}).status_code, 409, "aún no entregado")
+        d = self.c.post(f"/api/encargos/{e['id']}/entregar", headers=h, json={"cobrado": 100, "forma": "Efectivo"}).get_json()
+        self.assertEqual((d["debe"], d["estatus"]), (80.0, "Entregado"), "200 - 20 anticipo - 100 cobrado")
+        self.assertEqual(self.c.post(f"/api/encargos/{e['id']}/pago", headers=h, json={"monto": 0}).status_code, 400)
+        self.assertEqual(self.c.post(f"/api/encargos/{e['id']}/pago", headers=h, json={"monto": 999}).status_code, 409, "no puede abonar de más")
+        self.assertEqual(self.c.post(f"/api/encargos/{e['id']}/pago", headers={"Authorization": f"Bearer {self.token2}"}, json={"monto": 5}).status_code, 404)
+        r = self.c.post(f"/api/encargos/{e['id']}/pago", headers=h, json={"monto": 30, "forma": "Depósito"})
+        self.assertEqual((r.status_code, r.get_json()["debe"]), (201, 50.0))
+        r = self.c.post(f"/api/encargos/{e['id']}/pago", headers=h, json={"monto": 50, "forma": "Efectivo"})
+        self.assertEqual(r.get_json()["debe"], 0.0)
+        self.assertEqual(len(r.get_json()["pagos"]), 2)
+        self.assertEqual(self.c.post(f"/api/encargos/{e['id']}/pago", headers=h, json={"monto": 1}).status_code, 409, "ya liquidado")
+
+    def test_44_catalogo_pdf_con_fotos(self):
+        from unittest.mock import MagicMock
+        h = {"Authorization": f"Bearer {self.token}"}
+        self.assertEqual(self.c.post("/api/articulos/catalogo-pdf", json={}).status_code, 401)
+        a = self._pieza("Catalogo con foto", 1, 10, 55)
+        self.c.post(f"/api/articulos/{a['id']}/foto", data={"foto": (self._imagen(), "f.jpg")}, headers=h, content_type="multipart/form-data")
+        _, ext = self.pedir("POST", "/api/articulos", {"tipo": "Pokémon", "nombre": "Carta con URL ajena", "cantidad": 1, "valor_estimado": 20,
+                                                     "foto": "https://evil.example.com/foto.jpg"})
+        for i in range(9):
+            self._pieza(f"Catalogo relleno {i}", 1, 5, 25)
+        with patch("collecthub.catalogo.urllib.request.urlopen", side_effect=AssertionError("no debe descargar de hosts ajenos")):
+            r = self.c.post("/api/articulos/catalogo-pdf", headers=h, json={})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data.startswith(b"%PDF"))
+        paginas = r.data.count(b"/Type /Page") - r.data.count(b"/Type /Pages")
+        self.assertGreaterEqual(paginas, 2, "más de 9 piezas ocupan más de una página")
+        # una selección concreta
+        r = self.c.post("/api/articulos/catalogo-pdf", headers=h, json={"ids": [a["id"]]})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.c.post("/api/articulos/catalogo-pdf", headers=h, json={"ids": ["HW-NOEXISTE"]}).status_code, 400)
+        # el catálogo no incluye piezas 'Conservar' ni 'Por recibir'
+        _, cons = self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": "Solo para mi", "estatus": "Conservar", "valor_estimado": 99})
+        self.assertEqual(self.c.post("/api/articulos/catalogo-pdf", headers=h, json={"ids": [cons["id"]]}).status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

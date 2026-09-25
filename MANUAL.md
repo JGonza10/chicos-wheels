@@ -27,13 +27,15 @@ La app existe para un ciclo simple: **comprar → recibir → publicar en Facebo
    - *Compra en otro lado (o cartas Pokémon):* **Registrar pieza** a mano, o **📷 Con foto** para que la IA sugiera los datos.
    - Si el monitor/bot del proyecto 15 compra por ti, la pieza llega sola al inventario como **Por recibir**.
 2. **Recibir.** En el Panel aparece **Por recibir**: escribe dónde la guardas (ej. Caja A) y pulsa **Ya llegó**.
-3. **Publicar en Facebook.** En la pieza, **Publicación** genera el texto listo para copiar (con "entrega en Balderas") y **📸 Foto lista** la deja cuadrada y nítida. Para varias piezas: **Seleccionar varias → Publicar en lote** (con descuento por combo opcional).
+3. **Publicar en Facebook.** Además del texto y la foto de cada pieza, el botón **📒 Catálogo PDF** (en Inventario) arma un PDF con fotos y precios de lo que tienes disponible (o de las piezas que selecciones, máximo 60) para compartirlo en Facebook o WhatsApp. En la pieza, **Publicación** genera el texto listo para copiar (con "entrega en Balderas") y **📸 Foto lista** la deja cuadrada y nítida. Para varias piezas: **Seleccionar varias → Publicar en lote** (con descuento por combo opcional).
 4. **Apartar.** Cuando un cliente quiere algo: **Pedidos → + Nuevo pedido** (o **Apartar** en la ficha de la pieza). Elige al cliente o escribe uno nuevo, agrega **una o varias piezas**, deja la fecha (por defecto el **próximo sábado**) y, si dejó dinero, el anticipo y cómo lo pagó. Las piezas quedan reservadas: no se pueden ofrecer a otro.
 5. **Estatus de cada pedido:** **Apartado** (reservado, con o sin anticipo) → **En proceso** (ya empacado para el sábado) → **Liquidado** (entregado y pagado). En el Inventario cada pieza reservada dice **para quién y para cuándo**.
 6. **Confirmar con el cliente.** El botón **💬** abre WhatsApp con el mensaje del pedido (piezas, total, anticipo, lo que resta y "nos vemos el sábado en Balderas").
 7. **Llevar el catálogo.** En **Pedidos** elige el sábado y **🖨 Generar PDF**: trae qué empacar (por ubicación), el detalle por cliente con costo y precio por pieza y total, y el **cruce final** de piezas contra dinero por cobrar (efectivo o depósito). Se imprime y se lleva. Si prefieres una **lista tipo hoja de cálculo**, el botón **📊 Excel** baja el mismo reporte en `.xlsx`: una fila por pieza (con filtros y totales), una hoja "Por cliente" con columnas para anotar lo cobrado en efectivo y depósito y la diferencia, y una hoja "Empacar" con las piezas juntas por ubicación.
 8. **Entregar y cobrar.** En Balderas, por cada cliente: **💵** (entregado y cobrado en efectivo) o **🏦** (por depósito) de un toque, o **Entregar…** si hubo descuento o cobró otra cantidad. Cada pieza se vuelve una venta y sale del inventario.
-9. **Ver cómo va el negocio.** El **Panel** muestra los pedidos por entregar, lo que falta cobrar, los movimientos por mes y de dónde salen tus mejores piezas.
+9. **Si un cliente queda debiendo.** El pedido queda como *Entregado · debe $X* y aparece en el Panel en **Te deben**. Cuando pague: **💵/🏦** (pagó todo), **Abono…** (pago parcial) o **💬** (recordatorio de cobro por WhatsApp). Cada abono queda registrado hasta que el pedido se liquida.
+10. **Cerrar el sábado de un toque.** Al volver a casa, si todos los pedidos de ese día salieron como estaba apuntado, en el encabezado del día pulsa **💵 Cerrar el día** (o 🏦 si fue por depósito): entrega y cobra todos a la vez. Si hubo excepciones, hazlo pedido por pedido.
+11. **Ver cómo va el negocio.** El **Panel** muestra los pedidos por entregar, lo que falta cobrar, los movimientos por mes y de dónde salen tus mejores piezas.
 
 Entre semana también se puede: en el pedido se cambia la fecha de entrega a otro día (por ejemplo, alrededores de Coyoacán).
 
@@ -44,6 +46,8 @@ Entre semana también se puede: en el pedido se cambia la fecha de entrega a otr
 - La ganancia neta la calcula la base de datos misma (no la pantalla ni el servidor) para que no se pueda falsear editando el código.
 - **Precio mínimo ("piso")**: lo menos que puedes aceptar y aún ganar tu margen mínimo; aparece en la ficha de la pieza.
 - **Lista de espera de clientes**: si alguien pide algo que no tienes, anótalo en Compradores; al abrir una pieza parecida verás su pedido.
+- **Recontactar clientes**: en Compradores, quien lleva más de 30 días sin comprar aparece con 🔔, y **💬 Novedades** le manda por WhatsApp las 3 piezas más recientes de lo que le interesa.
+- **Avisos al armar un pedido**: si el precio queda debajo de tu piso o debajo de lo que te costó, la app te lo marca antes de guardar.
 - **Respaldo automático diario** de la base de datos (últimos 14 días, en la carpeta `datos/respaldos`).
 
 ## 5. Catálogos de apoyo

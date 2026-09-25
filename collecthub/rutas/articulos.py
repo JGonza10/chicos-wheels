@@ -310,6 +310,16 @@ def subir_foto(id_art):
     return jsonify(uno("SELECT * FROM v_articulos WHERE id=?", (id_art,)))
 
 
+@bp.post("/catalogo-pdf")
+def catalogo_pdf():
+    """Catálogo con fotos y precios de lo que hay disponible, para compartir por Facebook."""
+    from flask import Response
+    from ..catalogo import generar_catalogo
+    pdf = generar_catalogo(g.usuario_id, request.get_json(silent=True) or {})
+    return Response(pdf, mimetype="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="catalogo-{hoy()}.pdf"', "Cache-Control": "no-store"})
+
+
 @bp.post("/desde-mattel")
 def desde_mattel():
     """Trae nombre, foto y precio (en pesos) de un link de Mattel Creations para

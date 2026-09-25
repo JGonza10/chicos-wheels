@@ -404,6 +404,11 @@ video.scan{width:100%;border-radius:var(--r);background:#000;max-height:300px;ob
   .main{padding:16px 14px 100px}
   .hdr h1{font-size:19px}
   .g2,.g3,.pgrid,.themes{grid-template-columns:1fr!important}
+  .g2>*,.g3>*,.pgrid>*{min-width:0}
+  .pnl{overflow-x:auto}
+  .enfila{grid-template-columns:60px minmax(0,1fr) 34px!important}
+  .enfila .en_art{grid-column:1/-1}
+  .enfila>div{grid-column:1/-1}
   .rack{grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px}
   .kpis{grid-template-columns:1fr 1fr;gap:10px}
   .kpi .v{font-size:21px}

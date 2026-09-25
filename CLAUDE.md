@@ -106,3 +106,10 @@ El usuario aclaró que la app es **solo inventario + control de entregas**: comp
 - **Hoja de entrega en Excel** (`collecthub/hoja_excel.py`, `POST /api/encargos/hoja-entrega-excel`, botón 📊): hojas Pedidos (una fila por pieza, fórmulas, filtros; anticipo/resta solo en la primera fila de cada pedido para no duplicar sumas), Por cliente (Cobrado efectivo/depósito + Diferencia) y Empacar. Los totales son fórmulas: Excel/Sheets los calculan al abrir (algunos visores de celular no). Prueba 42.
 
 - **Quitados del menú (2026-09-25, a pedido):** *Balderas* (lista de carga y corte del día) y *Entregas*: quedaron resueltos con **Pedidos**. Se borró su código de `app.js`. El "piso" de regateo (`precioMinimo`) sigue en la ficha de la pieza con margen fijo de 10% (`ui.margenMin`; ya no hay pantalla para cambiarlo). Si se necesita el corte del día o la lista de carga, están en el historial de git (commit `db16ad4`).
+
+### Habilidades del 2026-09-25 (cierre)
+- **Cobranza**: tabla `encargo_pagos`; `POST /api/encargos/<id>/pago` (abono; no permite pagar de más ni en pedidos no entregados). `encargos_de()` calcula `debe` (con abonos) y `pagos`; la interfaz nunca calcula el saldo, lo lee del servidor. Panel: tarjeta **Te deben**; en Pedidos, botones 💵/🏦/Abono…/💬 en pedidos entregados con saldo.
+- **Catálogo PDF** (`collecthub/catalogo.py`, `POST /api/articulos/catalogo-pdf`): 9 piezas por página con foto y precio; solo piezas Disponibles (no Conservar ni Por recibir), máximo 60. Fotos externas solo de hosts conocidos (`HOSTS_FOTO`), con tope de tamaño y 6 s.
+- **Cerrar el día** (`encgrupo`): entrega y cobra en lote todos los pedidos activos de una fecha.
+- **Recontactar** clientes (>30 días sin comprar) y **💬 Novedades**; aviso de precio bajo piso/costo en el formulario de pedido. `enviarWhatsApp()` es el único punto que abre wa.me o copia el texto.
+- Pruebas 43-44.

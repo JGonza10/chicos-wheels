@@ -358,6 +358,12 @@ def encargos_de(usuario_id, id_enc=None):
         e["ganancia"] = round((e["total_final"] if e["estatus"] == "Entregado" and e["total_final"] is not None
                                else e["total"]) - e["costo"], 2)
         e["resta"] = round(max(0.0, e["total"] - e["anticipo"]), 2)
+        e["pagos"] = todos("SELECT * FROM encargo_pagos WHERE encargo_id=? ORDER BY fecha, rowid", (e["id"],))
+        if e["estatus"] == "Entregado":
+            final = e["total_final"] if e["total_final"] is not None else e["total"]
+            e["debe"] = round(max(0.0, final - e["anticipo"] - e["cobrado_entrega"] - sum(p["monto"] for p in e["pagos"])), 2)
+        else:
+            e["debe"] = 0.0
     return lista
 
 
@@ -553,6 +559,28 @@ def entregar_encargo(id_enc):
                         (it["cantidad"], a["id"]))
         con.execute("UPDATE encargos SET estatus='Entregado', entregado_en=?, total_final=?, cobrado_entrega=?, "
                     "forma_entrega=? WHERE id=?", (hoy(), final, cobrado, forma, id_enc))
-    r = encargos_de(g.usuario_id, id_enc)[0]
-    r["debe"] = round(max(0.0, final - e["anticipo"] - cobrado), 2)
-    return jsonify(r)
+    return jsonify(encargos_de(g.usuario_id, id_enc)[0])
+
+
+@bp.post("/encargos/<id_enc>/pago")
+def pago_encargo(id_enc):
+    """Abono de un cliente que se llevó la pieza y quedó debiendo."""
+    e = uno("SELECT estatus FROM encargos WHERE id=? AND usuario_id=?", (id_enc, g.usuario_id))
+    if not e:
+        raise ErrorApp("Pedido no encontrado", 404)
+    if e["estatus"] != "Entregado":
+        raise ErrorApp("Solo se registran abonos de pedidos ya entregados", 409)
+    b = request.get_json(silent=True) or {}
+    monto = num(b.get("monto"))
+    if monto <= 0:
+        raise ErrorApp("Escribe cuánto pagó")
+    actual = encargos_de(g.usuario_id, id_enc)[0]
+    if actual["debe"] <= 0.004:
+        raise ErrorApp("Este pedido ya está liquidado", 409)
+    if monto > actual["debe"] + 0.005:
+        raise ErrorApp(f"Solo debe {actual['debe']:.2f}; el abono no puede ser mayor", 409)
+    forma = b.get("forma") if b.get("forma") in FORMAS_PAGO else ""
+    with transaccion() as con:
+        con.execute("INSERT INTO encargo_pagos (id,encargo_id,fecha,monto,forma) VALUES (?,?,?,?,?)",
+                    (uid("PG"), id_enc, hoy(), monto, forma))
+    return jsonify(encargos_de(g.usuario_id, id_enc)[0]), 201
