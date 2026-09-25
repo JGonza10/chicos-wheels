@@ -7,6 +7,7 @@ el dinero, el stock y el aislamiento entre cuentas.
     python -m unittest discover -s tests -v
 """
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ from PIL import Image
 _TMP = Path(tempfile.gettempdir()) / f"ch-test-{os.getpid()}.db"
 os.environ["DB_FILE"] = str(_TMP)
 os.environ["JWT_SECRET"] = "llave-de-prueba"
+os.environ["COLLECTHUB_SIN_RESPALDO"] = "1"
 
 from collecthub import crear_app  # noqa: E402
 
@@ -65,7 +67,7 @@ class PruebasAPI(unittest.TestCase):
         self.assertEqual(s, 201)
         PruebasAPI.token = d["token"]
         _, plats = self.pedir("GET", "/api/plataformas")
-        self.assertEqual(len(plats), 4, "debe traer Mercado Libre, eBay, Facebook y Bazar")
+        self.assertEqual(len(plats), 5, "debe traer Mercado Libre, eBay, Facebook, Bazar y Balderas")
         PruebasAPI.plataforma = next(p["id"] for p in plats if p["codigo"] == "ML")
 
     def test_03_no_repite_correo(self):
@@ -327,6 +329,106 @@ class PruebasAPI(unittest.TestCase):
         r = self.c.get("/api/articulos/foto/..%2f..%2fetc%2fpasswd",
                        headers={"Authorization": f"Bearer {self.token}"})
         self.assertIn(r.status_code, (400, 404))
+
+    def test_29_reporte_pdf_configurable(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        r = self.c.post("/api/reporte-pdf", json={}, headers=h)
+        self.assertEqual(r.status_code, 400, "sin secciones no hay reporte")
+        cfg = {"secciones": ["resumen", "inventario", "ventas", "apartados"], "estatus": "todos",
+               "orientacion": "horizontal", "titulo": "Prueba – Pokémon"}
+        r = self.c.post("/api/reporte-pdf", json=cfg, headers=h)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data.startswith(b"%PDF"))
+        for est in ("disponible", "apartado", "conservar", "agotado", "estancado"):
+            r = self.c.post("/api/reporte-pdf", json={**cfg, "estatus": est, "tipo": "Pokémon"}, headers=h)
+            self.assertEqual(r.status_code, 200, est)
+        r = self.c.post("/api/reporte-pdf", json={**cfg, "estatus": "inventado"}, headers=h)
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(self.c.post("/api/reporte-pdf", json=cfg).status_code, 401)
+
+    def test_30_fecha_de_entrega_se_guarda_y_se_limpia(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        _, art = self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": "Entrega", "cantidad": 2,
+                                                       "precio_compra": 10, "valor_estimado": 30})
+        _, plat = self.pedir("GET", "/api/estado")
+        pid = plat["plataformas"][0]["id"]
+        _, v = self.pedir("POST", "/api/ventas", {"articulo_id": art["id"], "plataforma_id": pid,
+                                                  "cantidad": 1, "precio": 30, "envio": 5})
+        vid = v["id"]
+        r = self.c.patch(f"/api/ventas/{vid}", json={"estatus_envio": "Entregado"}, headers=h)
+        self.assertEqual(r.status_code, 200)
+        self.assertRegex(r.get_json()["fecha_entrega"], r"^\d{4}-\d{2}-\d{2}$")
+        r = self.c.patch(f"/api/ventas/{vid}", json={"estatus_envio": "Entregado", "fecha_entrega": "2026-01-15"}, headers=h)
+        self.assertEqual(r.get_json()["fecha_entrega"], "2026-01-15")
+        r = self.c.patch(f"/api/ventas/{vid}", json={"estatus_envio": "Enviado"}, headers=h)
+        self.assertEqual(r.get_json()["fecha_entrega"], "", "al regresar de Entregado la fecha se borra")
+        r = self.c.get(f"/api/ventas/{vid}/recibo", headers=h)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data.startswith(b"%PDF"))
+        r = self.c.get(f"/api/ventas/{vid}/recibo", headers={"Authorization": f"Bearer {self.token2}"})
+        self.assertEqual(r.status_code, 404, "otra cuenta no puede bajar el recibo")
+
+    def test_31_pedidos_de_clientes(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        h2 = {"Authorization": f"Bearer {self.token2}"}
+        self.assertEqual(self.c.post("/api/pedidos", json={}, headers=h).status_code, 400)
+        r = self.c.post("/api/pedidos", json={"descripcion": "Datsun 240Z verde", "tope": 150}, headers=h)
+        self.assertEqual(r.status_code, 201)
+        pid = r.get_json()["id"]
+        self.assertEqual(self.c.patch(f"/api/pedidos/{pid}", json={"atendido": True}, headers=h).get_json()["atendido"], 1)
+        self.assertEqual(self.c.patch(f"/api/pedidos/{pid}", json={"atendido": True}, headers=h2).status_code, 404)
+        estado = self.c.get("/api/estado", headers=h).get_json()
+        self.assertTrue(any(p["id"] == pid for p in estado["pedidos"]))
+        self.assertEqual(self.c.delete(f"/api/pedidos/{pid}", headers=h).status_code, 200)
+
+    def test_32_foto_lista_para_publicar(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        _, art = self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": "Foto FB"})
+        r = self.c.get(f"/api/articulos/{art['id']}/foto-publicar", headers=h)
+        self.assertEqual(r.status_code, 400, "sin foto propia no hay nada que preparar")
+        self.c.post(f"/api/articulos/{art['id']}/foto", data={"foto": (self._imagen(), "f.jpg")},
+                    headers=h, content_type="multipart/form-data")
+        r = self.c.get(f"/api/articulos/{art['id']}/foto-publicar", headers=h)
+        self.assertEqual(r.status_code, 200)
+        from PIL import Image
+        self.assertEqual(Image.open(io.BytesIO(r.data)).size, (1080, 1080))
+        r = self.c.get(f"/api/articulos/{art['id']}/foto-publicar", headers={"Authorization": f"Bearer {self.token2}"})
+        self.assertEqual(r.status_code, 404)
+
+    def test_33_datos_desde_link_de_mattel(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        ficha = json.dumps({"title": "Hot Wheels Demo", "price": 2500, "vendor": "Hot Wheels Collectors",
+                            "available": True, "featured_image": "//cdn.shopify.com/x.jpg", "images": [],
+                            "description": "<p>Pieza <b>demo</b></p>"}).encode()
+        with patch("collecthub.mattel._leer", return_value=ficha), patch("collecthub.mattel.tipo_de_cambio", return_value=20.0):
+            r = self.c.post("/api/articulos/desde-mattel", json={"url": "https://creations.mattel.com/products/demo-hcd19"}, headers=h)
+            self.assertEqual(r.status_code, 200)
+            d = r.get_json()
+            self.assertEqual((d["nombre"], d["precio_usd"], d["precio_mxn"]), ("Hot Wheels Demo", 25.0, 500.0))
+            self.assertEqual(d["imagen"], "https://cdn.shopify.com/x.jpg")
+            self.assertEqual(d["descripcion"], "Pieza demo")
+        for malo in ("http://creations.mattel.com/products/x", "https://evil.com/products/x",
+                     "https://mattel.com.evil.com/products/x", "https://creations.mattel.com/collections/x",
+                     "https://localhost:3000/products/x", ""):
+            r = self.c.post("/api/articulos/desde-mattel", json={"url": malo}, headers=h)
+            self.assertEqual(r.status_code, 400, malo)
+        self.assertEqual(self.c.post("/api/articulos/desde-mattel", json={"url": "https://creations.mattel.com/products/x"}).status_code, 401)
+
+    def test_34_respaldo_diario_conserva_solo_los_ultimos(self):
+        from collecthub import respaldo
+        with tempfile.TemporaryDirectory() as d, patch.object(respaldo, "carpeta", return_value=Path(d)):
+            for dia in range(1, 21):
+                (Path(d) / f"collecthub-2026-01-{dia:02d}.db").write_bytes(b"x")
+            hoy_ = respaldo.hacer_respaldo()
+            self.assertTrue(hoy_ and hoy_.exists())
+            self.assertIsNone(respaldo.hacer_respaldo(), "un solo respaldo por día")
+            self.assertEqual(len(list(Path(d).glob("collecthub-*.db"))), respaldo.CONSERVAR)
+            import sqlite3
+            con = sqlite3.connect(hoy_)
+            try:
+                self.assertTrue(con.execute("select count(*) from usuarios").fetchone())
+            finally:
+                con.close()
 
 
 if __name__ == "__main__":

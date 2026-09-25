@@ -170,6 +170,44 @@ def borrar_deseo(id_w):
     return jsonify(ok=True)
 
 
+# ---------- Pedidos de clientes (lista de espera) ----------
+@bp.post("/pedidos")
+def crear_pedido():
+    b = request.get_json(silent=True) or {}
+    desc = texto(b.get("descripcion"), 200)
+    if not desc:
+        raise ErrorApp("Escribe qué te pidió el cliente")
+    comprador = b.get("comprador_id") or None
+    if comprador and not uno("SELECT 1 FROM compradores WHERE id=? AND usuario_id=?",
+                             (comprador, g.usuario_id)):
+        raise ErrorApp("Comprador no encontrado", 404)
+    id_p = uid("R")
+    bd().execute("INSERT INTO pedidos_cliente (id,usuario_id,comprador_id,descripcion,tope) "
+                 "VALUES (?,?,?,?,?)", (id_p, g.usuario_id, comprador, desc, max(0.0, num(b.get("tope")))))
+    bd().commit()
+    return jsonify(uno("SELECT * FROM pedidos_cliente WHERE id=?", (id_p,))), 201
+
+
+@bp.patch("/pedidos/<id_p>")
+def marcar_pedido(id_p):
+    b = request.get_json(silent=True) or {}
+    cur = bd().execute("UPDATE pedidos_cliente SET atendido=? WHERE id=? AND usuario_id=?",
+                       (1 if b.get("atendido") else 0, id_p, g.usuario_id))
+    bd().commit()
+    if not cur.rowcount:
+        raise ErrorApp("Pedido no encontrado", 404)
+    return jsonify(uno("SELECT * FROM pedidos_cliente WHERE id=?", (id_p,)))
+
+
+@bp.delete("/pedidos/<id_p>")
+def borrar_pedido(id_p):
+    cur = bd().execute("DELETE FROM pedidos_cliente WHERE id=? AND usuario_id=?", (id_p, g.usuario_id))
+    bd().commit()
+    if not cur.rowcount:
+        raise ErrorApp("Pedido no encontrado", 404)
+    return jsonify(ok=True)
+
+
 # ---------- Ajustes ----------
 MONEDAS = ("MXN", "USD", "EUR", "COP", "ARS", "CLP", "PEN")
 

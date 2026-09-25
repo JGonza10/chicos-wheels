@@ -49,3 +49,35 @@ En esta máquina la app no arranca sola: se prende a pedido desde el hub local "
 - Cálculos de dinero/ganancia que deban ser invulnerables a manipulación van en SQL (`GENERATED ALWAYS`), no en Python ni en JS — sigue el patrón existente en `schema.sql`.
 - Cambios en `Content-Security-Policy` (`collecthub/__init__.py`): `'unsafe-inline'` en `style-src` es necesario porque `app.js` arma vistas con estilos inline — no lo quites sin revisar el frontend completo. `img-src` incluye `blob:` a propósito, para las fotos `local:` que el frontend trae por `fetch` y muestra como object URL.
 - **Puede haber una instancia de esta app en el puerto 3000 si se prendió desde Nexus** — antes de levantar `python app.py` para probar algo, revisa si el puerto 3000 ya está ocupado (`netstat -ano | grep :3000`) y usa `PORT=<otro>` para no pisarla ni terminar ese proceso sin avisar. Ambas comparten el mismo `datos/collecthub.db` por defecto si no defines `DB_FILE` distinto — cualquier prueba manual (usuarios, artículos) queda en la base real, bórrala después.
+
+## Cambios del 2026-09-25
+
+- **Vista Lista** del inventario (hoja de cálculo: columnas ordenables, totales, encabezado fijo) y **gráfica de movimientos por mes** en el Panel (3/6/12/24 o N meses); se quitó el formulario "Nuevo movimiento" del Panel.
+- **Tema Claro** (`data-tema="claro"`, barra lateral oscura porque su texto está fijo en claro).
+- **Reporte PDF configurable** (`collecthub/reporte.py`, `POST /api/reporte-pdf`, dependencia `fpdf2`): secciones, categoría, estatus, orden, orientación y rango de fechas de ventas. Configuración en `localStorage` (`cw_reporte`).
+- **Entregas** (Catálogos): ventas con envío + apartados, por fecha; `ventas.fecha_entrega` (migración automática en `db.crear_esquema`, se llena al marcar "Entregado" y se borra si regresa de estatus).
+- **Recibo PDF por venta** (`GET /api/ventas/<id>/recibo`, botón 🧾 en Entregas): entrega en Balderas o guía de envío.
+- **Canal "Balderas"** (`TG`) para cuentas nuevas y existentes. Gonza vende **solo por Facebook y entrega en Balderas**; Mercado Libre/eBay no se usan por ahora (siguen en el catálogo, no estorban). El texto de "Publicación" ya menciona la entrega en Balderas.
+- **Movimientos de precio** en el Panel: piezas cuyo valor cambió ≥15% en su última valuación.
+- Al cambiar `app.js`/`styles.css` hay que subir `CACHE_VERSION` en `static/sw.js` (hoy `chicoswheels-v8`).
+- **Puente con el proyecto 15**: cada compra confirmada de Mattel se registra aquí (ubicación "Por recibir", foto, valor = reventa estimada). Necesita `COLLECTHUB_EMAIL`/`COLLECTHUB_PASSWORD` en el `.env` del proyecto 15.
+
+### Habilidades agregadas después (mismo día)
+
+- **Balderas** (menú Catálogos → 📍): *Lista de carga* imprimible (marcas lo que llevas; al imprimir solo salen esas, con casilla "Vendida") y *Corte del día* (ventas, cobrado, ganancia, anticipos, entregas). Persistencia local: `cw_carga`, `cw_margenMin`.
+- **Precio mínimo ("piso")**: `precioMinimo(a)` en `app.js` = (costo × (1+margen) + comisión fija) ÷ (1 − comisión% − retención%) con el canal Balderas (o Facebook). Margen editable (10% por defecto). Se ve en la lista de carga y en la ficha de la pieza.
+- **Publicar en lote** (selección múltiple → "Publicar en lote") y **📸 Foto lista** (`GET /api/articulos/<id>/foto-publicar`: cuadrada 1080×1080, contraste y nitidez; solo fotos locales).
+- **Lista de espera de clientes**: tabla `pedidos_cliente`, rutas `/api/pedidos` (POST/PATCH/DELETE), incluida en `/api/estado` como `pedidos`. Se administra en Compradores; al abrir una pieza parecida sale "Te la pidieron".
+- Corregido: el menú lateral de los temas Champs y Claro salía ilegible (`#ch button{color:inherit}` ganaba por especificidad a `.nav button`; ahora `#ch .nav button`).
+- El proyecto 15 avisa por Telegram (9:00 diario) los apartados que vencen hoy o mañana (`collecthub_bridge.apartados_por_vencer`).
+
+### Negocio de referencia y habilidades del 2026-09-25 (tarde)
+
+El usuario final es un joven emprendedor: consigue Hot Wheels y cartas Pokémon (casi todo en Mattel Creations, vía el monitor/bot del proyecto 15), las publica en Facebook y las revende cada semana en la convención/tianguis de **Balderas**. Toda función nueva debe servir a ese ciclo: conseguir → recibir → publicar → vender en Balderas → reinvertir.
+
+- **Registro desde link de Mattel** (`collecthub/mattel.py`, `POST /api/articulos/desde-mattel`): lee `/products/<handle>.js` de Shopify (solo hosts `*.mattel.com` por https), convierte US$→MXN con tipo de cambio en vivo (fallback 20.0). Solo sugiere; el registro manual sigue igual para compras fuera de Mattel.
+- **Por recibir**: el puente deja las piezas con ubicación "Por recibir"; el Panel las lista con "Ya llegó" (una o todas) y quedan fuera de la lista de carga.
+- **✨ Sugerir carga** (Balderas): prioriza pedidos de clientes, piezas con tiempo guardadas y mejor margen; nunca las griales.
+- **Semana vs semana anterior** en el Corte; **descuento por combo** en la publicación en lote; **rendimiento por fuente** en el Panel.
+- **Respaldo automático diario** (`collecthub/respaldo.py`): un `.db` por día en `datos/respaldos/` (últimos 14); se apaga con `COLLECTHUB_SIN_RESPALDO=1` (las pruebas lo apagan). Ojo: en Docker `datos/` es el volumen persistente, así que los respaldos también persisten.
+- La fuente "Mattel Creations" es ahora la primera de `FUENTES`; el puente la manda tal cual.

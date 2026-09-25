@@ -10,7 +10,7 @@ from ..util import ErrorApp, precio_objetivo
 
 bp = Blueprint("estado", __name__)
 
-TABLAS_USUARIO = ("ventas", "apartados", "intercambios", "lotes", "wishlist",
+TABLAS_USUARIO = ("ventas", "apartados", "intercambios", "lotes", "wishlist", "pedidos_cliente",
                   "articulos", "compradores")
 
 
@@ -45,6 +45,8 @@ def estado_completo(usuario_id: str) -> dict:
                            (usuario_id,)),
         "intercambios": intercambios,
         "lotes": todos("SELECT * FROM lotes WHERE usuario_id=? ORDER BY fecha DESC", (usuario_id,)),
+        "pedidos": todos("SELECT * FROM pedidos_cliente WHERE usuario_id=? ORDER BY atendido, creado_en DESC",
+                         (usuario_id,)),
         "wishlist": todos("SELECT * FROM wishlist WHERE usuario_id=? ORDER BY prioridad DESC",
                           (usuario_id,)),
     }
@@ -109,6 +111,16 @@ def stats():
                           "SUM(valor_estimado*cantidad) AS valor FROM articulos "
                           "WHERE usuario_id=? AND cantidad>0 GROUP BY tipo", (u,)),
     })
+
+
+@bp.post("/reporte-pdf")
+def reporte_pdf():
+    """PDF configurable: secciones, categoría, estatus, orden y rango de fechas de ventas."""
+    from ..reporte import generar_pdf
+    datos = generar_pdf(g.usuario_id, request.get_json(silent=True) or {})
+    return Response(datos, mimetype="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="reporte-{datetime.now():%Y-%m-%d}.pdf"',
+        "Cache-Control": "no-store"})
 
 
 @bp.post("/calculadora/precio-objetivo")

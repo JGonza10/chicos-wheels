@@ -28,6 +28,8 @@ def crear_app() -> Flask:
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB
 
     crear_esquema()
+    from .respaldo import iniciar as iniciar_respaldos
+    iniciar_respaldos()
     app.teardown_appcontext(cerrar_bd)
 
     # CORS: sin CORS_ORIGIN configurado, NO se manda Access-Control-Allow-Origin.

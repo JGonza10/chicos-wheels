@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS ventas (
   guia              TEXT NOT NULL DEFAULT '',
   estatus_envio     TEXT NOT NULL DEFAULT 'Sin envío'
                     CHECK (estatus_envio IN ('Sin envío','Pendiente','Enviado','Entregado')),
+  fecha_entrega     TEXT NOT NULL DEFAULT '',
   creado_en         TEXT NOT NULL DEFAULT (datetime('now')),
   -- La regla de negocio más importante del sistema, escrita una sola vez:
   ganancia_neta     REAL GENERATED ALWAYS AS (
@@ -189,6 +190,18 @@ CREATE TABLE IF NOT EXISTS wishlist (
   prioridad  INTEGER NOT NULL DEFAULT 3 CHECK (prioridad BETWEEN 1 AND 5),
   detalle    TEXT NOT NULL DEFAULT ''
 );
+
+-- Lo que un cliente te pidió y aún no tienes (lista de espera para avisarle)
+CREATE TABLE IF NOT EXISTS pedidos_cliente (
+  id           TEXT PRIMARY KEY,
+  usuario_id   TEXT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  comprador_id TEXT REFERENCES compradores(id) ON DELETE SET NULL,
+  descripcion  TEXT NOT NULL,
+  tope         REAL NOT NULL DEFAULT 0,
+  atendido     INTEGER NOT NULL DEFAULT 0,
+  creado_en    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_ped_usuario ON pedidos_cliente(usuario_id, atendido);
 
 -- Cuánto puedes vender realmente: la cantidad menos lo comprometido en apartados
 CREATE VIEW IF NOT EXISTS v_articulos AS

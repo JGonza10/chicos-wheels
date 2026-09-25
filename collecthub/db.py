@@ -45,6 +45,17 @@ def crear_esquema():
     con = conectar()
     try:
         con.executescript(sql)
+        # Bases creadas antes de existir una columna: CREATE IF NOT EXISTS no la agrega.
+        cols = {f["name"] for f in con.execute("PRAGMA table_info(ventas)")}
+        if "fecha_entrega" not in cols:
+            con.execute("ALTER TABLE ventas ADD COLUMN fecha_entrega TEXT NOT NULL DEFAULT ''")
+            con.execute("UPDATE ventas SET fecha_entrega=fecha WHERE estatus_envio='Entregado'")
+        # Canal de entrega en persona (Balderas) para cuentas que ya existían.
+        con.execute("""INSERT INTO plataformas (id,usuario_id,codigo,nombre,com_pct,com_fija,ret_pct,notas)
+            SELECT 'P-TG-' || u.id, u.id, 'TG', 'Balderas', 0, 0, 0,
+                   'Entrega en persona en Balderas.'
+            FROM usuarios u WHERE NOT EXISTS
+              (SELECT 1 FROM plataformas p WHERE p.usuario_id=u.id AND p.codigo='TG')""")
         con.commit()
     finally:
         con.close()

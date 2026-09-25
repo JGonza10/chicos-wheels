@@ -8,7 +8,7 @@
      gonza   → cian + violeta, con dorado cálido en los enlaces
      champs  → oro + marino sobre gris muy suave, para trabajar de día (nunca blanco puro)
      grafito → gris neutro sin brillos, para sesiones largas
-   Se elige poniendo  <div id="ch" data-tema="nexus|gonza|champs|grafito">
+   Se elige poniendo  <div id="ch" data-tema="nexus|gonza|champs|claro|grafito">
    (ver app.js → aplicarTema/TEMAS). Todo queda con el mismo namespace bajo
    #ch que ya tenía este archivo, para no chocar con nada fuera de la app.
    ========================================================================== */
@@ -95,6 +95,30 @@
   --hover-fila:rgba(10,31,68,.035);
   --grad:linear-gradient(180deg,#FFD700 0%,#B8860B 100%);  /* aquí sí se usa
      el dorado brillante: es decorativo (barras, no texto) */
+  --scan:0;
+}
+
+/* ── TEMA: CLARO — blanco limpio, azul como acento, barra lateral oscura ──── */
+#ch[data-tema="claro"]{
+  --bg:#F6F7F9;      --bg2:#EDEFF3;
+  --panel:#FFFFFF;   --panel2:#F1F3F6;  --raise:#E8EBF0;
+  --line:rgba(20,30,50,.12);     --line2:rgba(20,30,50,.18);
+  --blue:#1F6FEB;    --blue2:#1758BC;   --cyan:#0B7FA6;
+  --red:#D32F2F;     --yellow:#B7791F;  --green:#11845B;
+  --purple:#6B5BD2;  --orange:#C2611A;
+  --text:#1B2433;    --muted:#586377;   --muted2:#8792A4;
+
+  --tint-blue:#E3EEFD;
+  --tint-yellow:#FAEFD6;
+  --tint-red:#FBE3E3;
+  --tint-green:#DDF1E9;
+  --tint-orange:#F9E6D5;
+
+  --campo:#FFFFFF;
+  --panel-fondo:#FFFFFF;
+  --side-fondo:linear-gradient(180deg,#1B2433,#0F1622);
+  --hover-fila:rgba(20,30,50,.04);
+  --grad:linear-gradient(180deg,#FFD24D 0%,#E0A81E 100%);
   --scan:0;
 }
 
@@ -186,11 +210,11 @@ h1,h2,h3{font-family:var(--d);font-weight:700;letter-spacing:.04em;line-height:1
 .logo i{font-style:normal;color:var(--yellow)}
 .logo small{display:block;font-family:var(--m);font-size:9px;letter-spacing:.24em;color:#8C9DB2;font-weight:400;margin-top:5px;text-transform:uppercase}
 .nav{display:flex;flex-direction:column;gap:2px}
-.nav button{background:none;border:0;text-align:left;padding:9px 11px;border-radius:var(--r);color:#8C9DB2;
+#ch .nav button{background:none;border:0;text-align:left;padding:9px 11px;border-radius:var(--r);color:#8C9DB2;
   cursor:pointer;display:flex;align-items:center;gap:10px;font-family:var(--d);font-weight:500;font-size:12.5px;
   letter-spacing:.06em;text-transform:uppercase;width:100%;transition:.14s}
-.nav button:hover{background:color-mix(in srgb,var(--yellow) 6%,transparent);color:#DCE6F2}
-.nav button.on{background:var(--grad);color:#05080E;font-weight:700;box-shadow:0 6px 16px -8px var(--yellow)}
+#ch .nav button:hover{background:color-mix(in srgb,var(--yellow) 6%,transparent);color:#DCE6F2}
+#ch .nav button.on{background:var(--grad);color:#05080E;font-weight:700;box-shadow:0 6px 16px -8px var(--yellow)}
 .nav button .ic{width:17px;text-align:center;font-size:14px}
 .nav button .cnt{margin-left:auto;font-family:var(--m);font-size:10px;opacity:.8}
 .navsep{font-family:var(--m);font-size:9px;letter-spacing:.2em;color:var(--muted2);padding:16px 11px 6px;text-transform:uppercase}
@@ -390,8 +414,15 @@ video.scan{width:100%;border-radius:var(--r);background:#000;max-height:300px;ob
   .mob button.on{color:var(--yellow)}
   .fab{bottom:82px;right:16px;width:50px;height:50px;font-size:25px}
 }
+.solo-print{display:none}
 @media print{
-  .side,.mob,.fab,.hdr,.noprint{display:none!important}
+  .side,.mob,.fab,.hdr,.noprint,.np{display:none!important}
+  .solo-print{display:block!important}
+  th.solo-print,td.solo-print{display:table-cell!important}
+  #ch{color:#000!important}
+  .impr,.impr *{color:#000!important;background:#fff!important;border-color:#999!important}
+  .hoja{max-height:none!important;overflow:visible!important}
+  .hoja-t th{position:static!important}
   #ch{background:#fff!important}
   #ch::before{display:none!important}
   .main{padding:0}

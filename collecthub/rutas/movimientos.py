@@ -150,6 +150,14 @@ def vender_lote():
     ), 201
 
 
+@bp.get("/ventas/<id_venta>/recibo")
+def recibo_venta(id_venta):
+    from flask import Response
+    from ..reporte import generar_recibo
+    return Response(generar_recibo(g.usuario_id, id_venta), mimetype="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="recibo-{id_venta}.pdf"', "Cache-Control": "no-store"})
+
+
 @bp.patch("/ventas/<id_venta>")
 def actualizar_venta(id_venta):
     v = uno("SELECT * FROM ventas WHERE id=? AND usuario_id=?", (id_venta, g.usuario_id))
@@ -159,8 +167,13 @@ def actualizar_venta(id_venta):
     if b.get("estatus_envio") not in ("Sin envío", "Pendiente", "Enviado", "Entregado"):
         raise ErrorApp("Estatus de envío no válido")
     guia = texto(b["guia"], 60) if b.get("guia") is not None else v["guia"]
-    bd().execute("UPDATE ventas SET estatus_envio=?, guia=? WHERE id=?",
-                 (b["estatus_envio"], guia, id_venta))
+    # La fecha real de entrega solo existe mientras la venta esté Entregada.
+    if b["estatus_envio"] == "Entregado":
+        f_ent = fecha(b["fecha_entrega"]) if b.get("fecha_entrega") else (v["fecha_entrega"] or hoy())
+    else:
+        f_ent = ""
+    bd().execute("UPDATE ventas SET estatus_envio=?, guia=?, fecha_entrega=? WHERE id=?",
+                 (b["estatus_envio"], guia, f_ent, id_venta))
     bd().commit()
     return jsonify(uno("SELECT * FROM ventas WHERE id=?", (id_venta,)))
 

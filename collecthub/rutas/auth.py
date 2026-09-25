@@ -17,6 +17,7 @@ PLATAFORMAS_INICIALES = [
     ("EB", "eBay", 0.1325, 0, 0, "Incluye la tarifa de pago internacional."),
     ("FB", "Facebook Marketplace", 0, 0, 0, "Venta directa, sin comisión."),
     ("BZ", "Bazar / Convención", 0, 150, 0, "Costo de la mesa prorrateado."),
+    ("TG", "Balderas", 0, 0, 0, "Entrega en persona en Balderas."),
 ]
 
 

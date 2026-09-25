@@ -307,6 +307,39 @@ def subir_foto(id_art):
     return jsonify(uno("SELECT * FROM v_articulos WHERE id=?", (id_art,)))
 
 
+@bp.post("/desde-mattel")
+def desde_mattel():
+    """Trae nombre, foto y precio (en pesos) de un link de Mattel Creations para
+    precargar el formulario. No guarda nada: es una sugerencia, como /identificar."""
+    from ..mattel import traer_producto
+    return jsonify(traer_producto((request.get_json(silent=True) or {}).get("url")))
+
+
+@bp.get("/<id_art>/foto-publicar")
+def foto_para_publicar(id_art):
+    """La foto del artículo lista para Facebook: cuadrada 1080x1080, fondo claro liso,
+    contraste automático y un poco de nitidez. Solo fotos locales (las de URL externa
+    no se descargan desde aquí)."""
+    import io
+
+    from flask import Response
+    from PIL import Image, ImageEnhance, ImageOps
+    a = mio(id_art)
+    foto = a.get("foto") or ""
+    nombre = foto[len("local:"):] if foto.startswith("local:") else ""
+    if not NOMBRE_FOTO_VALIDO.match(nombre) or not (CARPETA_FOTOS / g.usuario_id / nombre).is_file():
+        raise ErrorApp("Esta pieza no tiene una foto propia guardada. Súbela con 📷 Con foto o al editar.")
+    with Image.open(CARPETA_FOTOS / g.usuario_id / nombre) as im:
+        im = ImageOps.autocontrast(im.convert("RGB"), cutoff=1)
+        im = ImageEnhance.Sharpness(im).enhance(1.35)
+        im = ImageEnhance.Color(im).enhance(1.08)
+        im = ImageOps.pad(im, (1080, 1080), color=(246, 247, 249), method=Image.LANCZOS)
+        salida = io.BytesIO()
+        im.save(salida, "JPEG", quality=90, optimize=True)
+    return Response(salida.getvalue(), mimetype="image/jpeg", headers={
+        "Content-Disposition": f'attachment; filename="{id_art}-facebook.jpg"', "Cache-Control": "no-store"})
+
+
 @bp.get("/foto/<archivo>")
 def ver_foto(archivo):
     """Sirve una foto local. La carpeta se arma con g.usuario_id (nunca con
