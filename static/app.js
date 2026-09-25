@@ -719,7 +719,7 @@ function vEntregas() {
     guia: v.guia, est: v.estatus_envio, hecho: v.estatus_envio === 'Entregado', fent: v.fecha_entrega || '', fventa: v.fecha }); });
   db.apartados.forEach((x) => { if (x.estatus === 'Vigente' || x.estatus === 'Vencido') filas.push({
     id: x.id, f: x.fecha_limite || x.fecha, tipo: 'Apartado', nombre: x.nombre_snap, cant: x.cantidad,
-    quien: cli(x.id_comprador) ? cli(x.id_comprador).nombre : '—', canal: 'Anticipo ' + money(x.anticipo),
+    quien: cli(x.id_comprador) ? cli(x.id_comprador).nombre : '—', canal: 'Anticipo ' + money(x.anticipo) + ' · entrega en ' + (x.lugar_entrega || 'Balderas'),
     guia: '', fent: '', est: x.estatus === 'Vencido' ? 'Vencido' : 'Por liquidar', hecho: false, aviso: x.estatus === 'Vencido' || (x.fecha_limite && x.fecha_limite < hoyS) }); });
   filas.forEach((r) => { if (r.hecho) r.f = r.fent || r.fventa; });
   const enRango = (r) => (!ui.entDesde || r.f >= ui.entDesde) && (!ui.entHasta || r.f <= ui.entHasta);
@@ -924,7 +924,7 @@ function vApart() {
   return hdr('Apartados', `${vig.length} vigentes · ${money(suma(vig, (x) => x.anticipo))} en anticipos`,
     `<button class="btn pri" data-a="nuevoapartado">+ Nuevo apartado</button>`) +
   (l.length ? `<div class="pnl wrap" style="padding:16px 6px"><table class="tbl"><thead><tr>
-    <th>Pieza</th><th>Cliente</th><th class="num">Acordado</th><th class="num">Anticipo</th><th class="num">Resta</th>
+    <th>Pieza</th><th>Cliente</th><th>Entrega en</th><th class="num">Acordado</th><th class="num">Anticipo</th><th class="num">Resta</th>
     <th>Límite</th><th>Estatus</th><th></th></tr></thead><tbody>
     ${l.map((x) => { const resta = num(x.precio_acordado) - num(x.anticipo);
       const vence = x.estatus === 'Vigente' && x.fecha_limite && x.fecha_limite >= hoy()
@@ -932,6 +932,7 @@ function vApart() {
       const est = { Vigente: 'g', Liquidado: 'b', Vencido: 'r', Cancelado: '' }[x.estatus] || '';
       return `<tr><td><b>${esc(x.nombre_snap)}</b><div style="font-size:11px;color:var(--muted)">×${x.cantidad}${x.notas ? ' · ' + esc(x.notas) : ''}</div></td>
       <td>${esc(cli(x.id_comprador) ? cli(x.id_comprador).nombre : '—')}</td>
+      <td style="font-size:12.5px">${esc(x.lugar_entrega || 'Balderas')}</td>
       <td class="num">${money(x.precio_acordado)}</td><td class="num" style="color:var(--yellow)">${money(x.anticipo)}</td>
       <td class="num"><b>${money(resta)}</b></td>
       <td class="mn" style="font-size:12.5px">${x.fecha_limite || '—'}${vence !== null && vence <= 3 ? `<div style="color:var(--red);font-size:11px">vence en ${vence} d</div>` : ''}</td>
@@ -1223,7 +1224,7 @@ MOD.ver = function () {
       .filter((d) => d[1] !== '' && d[1] != null).map((d) => `<div><div class="lbl" style="margin-bottom:2px">${d[0]}</div><div style="font-size:13px">${esc(d[1])}</div></div>`).join('')}
   </div>
   ${a.notas ? `<div class="note">${esc(a.notas)}</div>` : ''}
-  ${ap.length ? `<div class="note w"><b>Apartada:</b> ${ap.map((x) => `${cli(x.id_comprador) ? esc(cli(x.id_comprador).nombre) : 'un cliente'} dejó ${money(x.anticipo)}, resta ${money(num(x.precio_acordado) - num(x.anticipo))} hasta el ${x.fecha_limite || '—'}`).join('; ')}.</div>` : ''}
+  ${ap.length ? `<div class="note w"><b>Apartada:</b> ${ap.map((x) => `${cli(x.id_comprador) ? esc(cli(x.id_comprador).nombre) : 'un cliente'} dejó ${money(x.anticipo)}, resta ${money(num(x.precio_acordado) - num(x.anticipo))} hasta el ${x.fecha_limite || '—'} · entrega en ${esc(x.lugar_entrega || 'Balderas')}`).join('; ')}.</div>` : ''}
   ${libre(a) ? `<div class="note"><b>Piso para regatear:</b> ${money(precioMinimo(a))} (con margen mínimo de ${ui.margenMin}%). Por debajo de eso ya no ganas lo que quieres.</div>` : ''}
   ${pedidosPara(a).length ? `<div class="note w"><b>Te la pidieron:</b> ${pedidosPara(a).map((p) => `${cli(p.comprador_id) ? esc(cli(p.comprador_id).nombre) : 'un cliente'} (“${esc(p.descripcion)}”)`).join('; ')}. Avísale antes de publicarla.</div>` : ''}
   ${inte.length && libre(a) ? `<div class="note g"><b>Avísale primero a:</b> ${inte.slice(0, 4).map((c) => esc(c.nombre)).join(', ')} — coleccionan justo esto.</div>` : ''}
@@ -1322,6 +1323,7 @@ MOD.apartado = function () {
     ${f('Anticipo recibido', inp('ap_ant', '', 'number', '0.00'))}
     ${f('Fecha límite', inp('ap_lim', lim, 'date'))}
   </div>
+  ${f('Lugar de entrega', `${inp('ap_lugar', 'Balderas', 'text', 'Balderas')}<datalist id="lugares_entrega"><option value="Balderas"><option value="Envío por paquetería"><option value="Punto de encuentro"></datalist>`, 'Normalmente Balderas. Puedes escribir otro lugar.')}
   ${f('Notas', inp('ap_notas', '', 'text', 'Paga los viernes · entrega en el metro'))}
   <div class="note w"><b>Mientras el apartado esté vigente</b> la pieza deja de contar como disponible y el servidor rechaza cualquier venta que la incluya. Si pasa la fecha límite sin liquidarse, cambia sola a Vencido.</div>
   `, `<button class="btn gh" data-a="cerrar">Cancelar</button><button class="btn yel" data-a="saveapartado">Registrar apartado</button>`, '560px');
@@ -1882,7 +1884,7 @@ async function saveApartado() {
   const cuerpo = {
     articulo_id: a.id, comprador_id: $('#ap_comp').value, cantidad: num($('#ap_cant').value) || 1,
     precio_acordado: num($('#ap_precio').value), anticipo: num($('#ap_ant').value),
-    fecha_limite: $('#ap_lim').value, notas: $('#ap_notas').value.trim(),
+    fecha_limite: $('#ap_lim').value, notas: $('#ap_notas').value.trim(), lugar_entrega: $('#ap_lugar').value.trim() || 'Balderas',
   };
   try {
     await accion(() => POST('/apartados', cuerpo),

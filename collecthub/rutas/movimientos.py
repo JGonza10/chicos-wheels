@@ -218,10 +218,11 @@ def apartar():
     id_ap = uid("AP")
     bd().execute(
         "INSERT INTO apartados (id,usuario_id,articulo_id,comprador_id,nombre_snap,cantidad,"
-        "precio_acordado,anticipo,fecha,fecha_limite,notas) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "precio_acordado,anticipo,fecha,fecha_limite,notas,lugar_entrega) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (id_ap, g.usuario_id, a["id"], texto(b.get("comprador_id"), 40) or None, a["nombre"],
          cantidad, precio, anticipo, hoy(),
-         fecha(b["fecha_limite"]) if b.get("fecha_limite") else "", texto(b.get("notas"), 300)))
+         fecha(b["fecha_limite"]) if b.get("fecha_limite") else "", texto(b.get("notas"), 300),
+         texto(b.get("lugar_entrega"), 80) or "Balderas"))
     bd().commit()
     return jsonify(uno("SELECT * FROM apartados WHERE id=?", (id_ap,))), 201
 

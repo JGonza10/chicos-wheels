@@ -50,6 +50,9 @@ def crear_esquema():
         if "fecha_entrega" not in cols:
             con.execute("ALTER TABLE ventas ADD COLUMN fecha_entrega TEXT NOT NULL DEFAULT ''")
             con.execute("UPDATE ventas SET fecha_entrega=fecha WHERE estatus_envio='Entregado'")
+        cols_ap = {f["name"] for f in con.execute("PRAGMA table_info(apartados)")}
+        if "lugar_entrega" not in cols_ap:
+            con.execute("ALTER TABLE apartados ADD COLUMN lugar_entrega TEXT NOT NULL DEFAULT 'Balderas'")
         # Canal de entrega en persona (Balderas) para cuentas que ya existían.
         con.execute("""INSERT INTO plataformas (id,usuario_id,codigo,nombre,com_pct,com_fija,ret_pct,notas)
             SELECT 'P-TG-' || u.id, u.id, 'TG', 'Balderas', 0, 0, 0,

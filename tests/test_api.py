@@ -525,6 +525,37 @@ class PruebasAPI(unittest.TestCase):
         self.assertEqual(self.c.post("/api/encargos/hoja-entrega", headers={"Authorization": f"Bearer {self.token2}"},
                                      json={"fecha": "2031-02-01"}).status_code, 400, "otra cuenta no ve estos encargos")
 
+    def test_38_apartado_lleva_lugar_de_entrega(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        a = self._pieza("Apartado lugar", 3, 10, 50)
+        r = self.c.post("/api/apartados", headers=h, json={"articulo_id": a["id"], "precio_acordado": 50, "anticipo": 10})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.get_json()["lugar_entrega"], "Balderas", "por defecto se entrega en Balderas")
+        r = self.c.post("/api/apartados", headers=h, json={"articulo_id": a["id"], "precio_acordado": 50, "lugar_entrega": "Punto de encuentro"})
+        self.assertEqual(r.get_json()["lugar_entrega"], "Punto de encuentro")
+
+    def test_39_migracion_agrega_lugar_de_entrega_a_bases_viejas(self):
+        import sqlite3
+        from collecthub import db as bd_mod
+        viejo = Path(tempfile.gettempdir()) / f"ch-vieja-{os.getpid()}.db"
+        sql = (Path(bd_mod.__file__).parent / "schema.sql").read_text(encoding="utf-8").replace(
+            "  lugar_entrega   TEXT NOT NULL DEFAULT 'Balderas',\n", "")
+        con = sqlite3.connect(viejo)
+        con.executescript(sql)
+        con.close()
+        try:
+            with patch.object(bd_mod, "RUTA_BD", viejo):
+                bd_mod.crear_esquema()
+                bd_mod.crear_esquema()   # idempotente
+            con = sqlite3.connect(viejo)
+            try:
+                self.assertIn("lugar_entrega", [r[1] for r in con.execute("PRAGMA table_info(apartados)")])
+            finally:
+                con.close()
+        finally:
+            for suf in ("", "-wal", "-shm"):
+                Path(str(viejo) + suf).unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

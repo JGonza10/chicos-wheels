@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS apartados (
   anticipo        REAL NOT NULL DEFAULT 0 CHECK (anticipo >= 0),
   fecha           TEXT NOT NULL,
   fecha_limite    TEXT NOT NULL DEFAULT '',
+  lugar_entrega   TEXT NOT NULL DEFAULT 'Balderas',
   estatus         TEXT NOT NULL DEFAULT 'Vigente'
                   CHECK (estatus IN ('Vigente','Liquidado','Vencido','Cancelado')),
   notas           TEXT NOT NULL DEFAULT '',
