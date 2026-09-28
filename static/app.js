@@ -1127,8 +1127,12 @@ MOD.pieza = function () {
     <button class="btn" data-a="escanear" data-target="f_codigo" style="flex:0 0 auto">⌗</button></div>`)}
   ${ui.fotoPendiente
     ? f('Foto', `<div style="display:flex;align-items:center;gap:10px"><img src="${previewUrlFoto}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--line)" alt="">
-        <span style="font-size:12.5px;color:var(--muted)">Se guarda la foto que acabas de tomar.</span></div>`)
-    : f('Foto (URL)', inp('f_foto', a.foto, 'url', 'https://…'))}
+        <span style="font-size:12.5px;color:var(--muted);flex:1">Se guarda esta foto al ${ed ? 'guardar los cambios' : 'registrar la pieza'}.</span>
+        <button class="btn gh sm" data-a="fotoquitar" style="flex:0 0 auto">Quitar</button></div>`)
+    : f('Foto', `<div style="display:flex;gap:8px">${inp('f_foto', a.foto, 'url', 'Pega una URL o sube una foto →')}
+        <label class="btn" for="fi_fotoform" style="flex:0 0 auto;cursor:pointer" title="Tomar o elegir una foto de tu celular o computadora">📷 Subir foto</label>
+        <input type="file" id="fi_fotoform" data-a="fotoform" accept="image/*" style="display:none"></div>`,
+        ed && a.foto && a.foto.startsWith('local:') ? 'Ya tiene una foto guardada; si subes otra, la reemplaza.' : '')}
   <div class="fld"><label class="lbl">Verificación de autenticidad</label>
     ${(CHECKS[t] || []).map((c, i) => `<label class="chk"><input type="checkbox" data-chk="${i}" ${(a.checks || []).includes(i) ? 'checked' : ''}><span>${esc(c)}</span></label>`).join('')}</div>
   ${f('Notas', `<textarea class="ta" id="f_notas" rows="2" placeholder="Defectos, procedencia, con quién la cambiaste…">${esc(a.notas || '')}</textarea>`)}
@@ -1514,6 +1518,7 @@ MOD.foto = function () {
       ? `<div class="note"><div class="spin" style="display:inline-block;margin-right:8px;vertical-align:middle;width:16px;height:16px"></div>Identificando con IA…</div>`
       : `<div style="display:flex;gap:9px;flex-wrap:wrap;justify-content:center">
            <button class="btn gh" data-a="fotoretomar">Elegir otra</button>
+           <button class="btn gh" data-a="fotosinia" title="Llenas tú los datos y se guarda esta foto">Usar sin IA</button>
            <button class="btn pri" data-a="fotoidentificar">✨ Identificar con IA</button>
          </div>`}
   `}
@@ -1619,6 +1624,10 @@ document.addEventListener('click', async (e) => {
     case 'fotoia': limpiarFotoSeleccionada(); abrir('foto', null); break;
     case 'fotoretomar': limpiarFotoSeleccionada(); render(); break;
     case 'fotoidentificar': await identificarFoto(); break;
+    case 'fotosinia':   // la foto se guarda con la pieza aunque no se identifique con IA
+      if (!fotoSeleccionada) break;
+      ui.fotoPendiente = fotoSeleccionada; ui.avisoIA = ''; abrir('pieza', null); break;
+    case 'fotoquitar': ui.ctx = snapPieza(); limpiarFotoSeleccionada(); ui.fotoPendiente = null; render(); break;
     case 'tipo': ui.ctx = snapPieza(); ui.formTipo = el.dataset.t; render(); break;
     case 'editpieza': ui.formTipo = art(id).tipo; abrir('pieza', art(id)); break;
     case 'qtipo': ui.qTipo = el.dataset.t; render(); break;
@@ -1778,6 +1787,14 @@ document.addEventListener('change', async (e) => {
     el.value = '';
     if (archivo) await prepararFoto(archivo);
   }
+  if (a === 'fotoform') {   // foto subida desde el formulario de la pieza (sin IA)
+    const archivo = el.files[0];
+    el.value = '';
+    if (!archivo) return;
+    ui.ctx = snapPieza();   // conserva lo ya capturado al volver a pintar
+    await prepararFoto(archivo);
+    if (fotoSeleccionada) { ui.fotoPendiente = fotoSeleccionada; render(); }
+  }
 });
 
 document.addEventListener('keydown', (e) => {
@@ -1829,7 +1846,8 @@ function leerPieza() {
     fuente: $('#f_fuente').value,
     ubicacion: $('#f_ubic').value.trim(),
     codigo: $('#f_codigo').value.trim(),
-    foto: $('#f_foto') ? $('#f_foto').value.trim() : '',
+    // Con una foto por subir no se manda: así la subida reemplaza (y borra) la anterior.
+    foto: $('#f_foto') ? $('#f_foto').value.trim() : undefined,
     notas: $('#f_notas').value.trim(),
     grail: $('#f_grail').checked,
     checks: $$('[data-chk]').filter((c) => c.checked).map((c) => num(c.dataset.chk)),
@@ -1843,7 +1861,7 @@ async function savePieza() {
   try {
     const r = await accion(() => (ed ? PATCH('/articulos/' + ed, datos) : POST('/articulos', datos)));
     if (fotoPendiente) {
-      try { await subirFotoArticulo(r.id, fotoPendiente); await cargarEstado(); }
+      try { await subirFotoArticulo(ed || r.id, fotoPendiente); await cargarEstado(); }
       catch (e) { toast('Se guardó la pieza, pero la foto no se pudo adjuntar: ' + e.message, true); }
     }
     cerrar();
