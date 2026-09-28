@@ -663,6 +663,56 @@ class PruebasAPI(unittest.TestCase):
         _, cons = self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": "Solo para mi", "estatus": "Conservar", "valor_estimado": 99})
         self.assertEqual(self.c.post("/api/articulos/catalogo-pdf", headers=h, json={"ids": [cons["id"]]}).status_code, 400)
 
+    def test_45_tienda_publica_sin_datos_internos(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        leer = lambda r: json.loads(r.get_data(as_text=True).split("window.CW_STOCK = ", 1)[1].rstrip().rstrip(";"))
+        # la página y sus archivos son públicos
+        self.assertEqual(self.c.get("/tienda").status_code, 301)
+        r = self.c.get("/tienda/"); self.assertEqual(r.status_code, 200); r.close()
+        r = self.c.get("/tienda/CW.js"); self.assertEqual(r.status_code, 200); r.close()
+        self.assertEqual(self.c.get("/tienda/LEEME.md").status_code, 404)
+        self.assertEqual(self.c.get("/tienda/../datos/collecthub.db").status_code, 404)
+        # sin LANDING_EMAIL: piezas de ejemplo
+        with patch.dict(os.environ, {"LANDING_EMAIL": ""}):
+            r = self.c.get("/tienda/stock.js")
+            self.assertTrue(leer(r)["muestra"]); r.close()
+
+        vende = self._pieza("Tienda se vende", 2, 30, 150)
+        self.c.post(f"/api/articulos/{vende['id']}/foto", data={"foto": (self._imagen(), "f.jpg")}, headers=h,
+                    content_type="multipart/form-data")
+        _, cons = self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": "Tienda conservar",
+                                                         "estatus": "Conservar", "valor_estimado": 99})
+        self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": "Tienda por recibir",
+                                              "ubicacion": "Por recibir", "valor_estimado": 99})
+        apartada = self._pieza("Tienda apartada", 1, 10, 50)
+        r = self.c.post("/api/encargos", headers=h, json={"cliente_nuevo": "Cliente tienda", "fecha_entrega": "2026-10-03",
+                                                          "items": [{"articulo_id": apartada["id"], "cantidad": 1}]})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        env = {"LANDING_EMAIL": "Chicos@Wheels.mx", "LANDING_FACEBOOK": "https://www.facebook.com/chicoswheels/",
+               "LANDING_INSTAGRAM": "@chicos.wheels"}
+        with patch.dict(os.environ, env):
+            r = self.c.get("/tienda/stock.js")        # sin sesión
+            self.assertEqual(r.status_code, 200)
+            texto = r.get_data(as_text=True)
+            datos = leer(r)
+            self.assertFalse(datos["muestra"])
+            self.assertEqual(datos["contacto"], {"facebook": "chicoswheels", "instagram": "chicos.wheels"})
+            nombres = {p["nombre"] for p in datos["piezas"]}
+            self.assertIn("Tienda se vende", nombres)
+            for fuera in ("Tienda conservar", "Tienda por recibir", "Tienda apartada"):
+                self.assertNotIn(fuera, nombres, "solo sale lo disponible que ya llegó")
+            p = next(x for x in datos["piezas"] if x["nombre"] == "Tienda se vende")
+            for secreto in ("precio_compra", "ganancia", "ubicacion", "notas", "fuente", "usuario_id", "codigo"):
+                self.assertNotIn(secreto, p)
+            self.assertNotIn(vende["id"], texto, "el id interno no se publica")
+            self.assertEqual((p["precio"], p["disponible"]), (150, 2))
+            r = self.c.get("/tienda/" + p["foto"])
+            self.assertEqual((r.status_code, r.mimetype), (200, "image/jpeg")); r.close()
+            # al dejar de venderse, su foto deja de servirse
+            s2, _ = self.pedir("PATCH", f"/api/articulos/{vende['id']}", {"estatus": "Conservar"})
+            self.assertEqual(s2, 200)
+            self.assertEqual(self.c.get("/tienda/" + p["foto"]).status_code, 404)
+            self.assertEqual(self.c.get("/tienda/foto/nada.jpg").status_code, 404)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

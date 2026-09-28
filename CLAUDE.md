@@ -113,3 +113,13 @@ El usuario aclaró que la app es **solo inventario + control de entregas**: comp
 - **Cerrar el día** (`encgrupo`): entrega y cobra en lote todos los pedidos activos de una fecha.
 - **Recontactar** clientes (>30 días sin comprar) y **💬 Novedades**; aviso de precio bajo piso/costo en el formulario de pedido. `enviarWhatsApp()` es el único punto que abre wa.me o copia el texto.
 - Pruebas 43-44.
+
+### Landing page para clientes (2026-09-28)
+- La app está desplegada en **Railway** (Dockerfile del repo; el volumen es `/app/datos`).
+- Carpeta **`landing page/`**: la página para clientes (basada en los borradores `CW.html`/`CW.css` de Gonza, que siguen en la raíz). Archivos estáticos propios, sin build. La app la sirve en **`/tienda/`** (`collecthub/rutas/tienda.py`, blueprint público fuera de `PROTEGIDOS`). También abre con doble clic usando las piezas de ejemplo de `landing page/stock.js`. Ver `landing page/LEEME.md`.
+- **Solo muestra stock**: sin carrito, cuenta, pagos ni suscripción. **El contacto con clientes es solo por Facebook (Messenger) e Instagram, nunca WhatsApp** (decisión de Gonza). "Me interesa" abre la ficha con el mensaje listo para copiar y botones `m.me/<fb>` e `ig.me/m/<ig>`.
+- `/tienda/stock.js` se genera **al momento** desde la base (`collecthub/landing.py`): mismo criterio que el catálogo PDF (Disponible, `disponible > 0` en `v_articulos`, no "Por recibir") y **lista blanca de campos** (`CAMPOS`): nunca costo, ganancia, fuente, ubicación, notas, código ni el id interno (se publica un hash, `id_publico`). Fotos locales por `/tienda/foto/<id>.jpg`, solo de piezas a la venta; externas solo de `HOSTS_FOTO`. Prueba 45.
+- Variables (en Railway): `LANDING_EMAIL` (cuenta a mostrar; sin ella, piezas de ejemplo), `LANDING_FACEBOOK`, `LANDING_INSTAGRAM` (usuario o URL).
+- `static/sw.js` no cachea `/tienda` (el stock debe verse siempre al día).
+- Diseño: logo con flamas propias (SVG `#flama`, inspiradas en Hot Wheels sin copiar su logo). Portada `img/portada.png` (la pone Gonza) con dos zonas clicables; si no existe, se ven las tarjetas de colores. Etiquetas de rareza en `rareza()` de `CW.js` (RLC/Red Line Club y HWC = oro).
+- Las piezas de ejemplo son modelos reales de Hot Wheels con fotos oficiales de Mattel Creations (`cdn.shopify.com`) y cartas de pokemontcg.io; créditos en `stock.js` → `creditos_fotos` (se muestran en el pie).

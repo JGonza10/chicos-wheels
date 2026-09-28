@@ -130,6 +130,10 @@ def crear_app() -> Flask:
     app.register_blueprint(bp_catalogos, url_prefix="/api")
     app.register_blueprint(bp_estado, url_prefix="/api")
 
+    # Landing page para clientes (/tienda): pública a propósito, fuera de PROTEGIDOS.
+    from .rutas.tienda import bp as bp_tienda
+    app.register_blueprint(bp_tienda)
+
     # Todo lo que no sea /auth ni /salud exige sesión. Envolver aquí, en un solo
     # lugar, evita el riesgo de olvidar el decorador al agregar una ruta nueva.
     PROTEGIDOS = ("articulos.", "movimientos.", "catalogos.", "estado.")

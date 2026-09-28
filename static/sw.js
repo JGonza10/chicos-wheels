@@ -3,7 +3,7 @@
  * verse siempre fresco, nunca una copia vieja servida "offline" por error.
  * Sube CACHE_VERSION cuando cambien app.js/styles.css para forzar a los
  * navegadores con la app ya instalada a bajar la versión nueva. */
-const CACHE_VERSION = 'chicoswheels-v20';
+const CACHE_VERSION = 'chicoswheels-v21';
 const ESTATICOS = ['/', '/app.js', '/styles.css', '/manifest.json'];
 
 self.addEventListener('install', (e) => {
@@ -21,7 +21,8 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (url.pathname.startsWith('/api/') || e.request.method !== 'GET') return;
+  // La tienda (/tienda) tampoco: su stock debe verse siempre al día.
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/tienda') || e.request.method !== 'GET') return;
   e.respondWith(
     caches.match(e.request).then((cacheado) => cacheado || fetch(e.request).then((resp) => {
       const copia = resp.clone();
