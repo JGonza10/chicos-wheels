@@ -407,12 +407,50 @@ class PruebasAPI(unittest.TestCase):
             self.assertEqual((d["nombre"], d["precio_usd"], d["precio_mxn"]), ("Hot Wheels Demo", 25.0, 500.0))
             self.assertEqual(d["imagen"], "https://cdn.shopify.com/x.jpg")
             self.assertEqual(d["descripcion"], "Pieza demo")
+        # Link con prefijo de país (/en-mx/): Shopify da el precio en pesos.
+        pedidos = []
+        def leer(url, timeout=10):
+            pedidos.append(url)
+            return ficha
+        with patch("collecthub.mattel._leer", side_effect=leer), patch("collecthub.mattel.tipo_de_cambio", return_value=20.0):
+            r = self.c.post("/api/articulos/desde-mattel", json={"url": "https://creations.mattel.com/en-mx/products/Demo-HCD19?variant=1"}, headers=h)
+            self.assertEqual(r.status_code, 200)
+            d = r.get_json()
+            self.assertEqual((d["precio_mxn"], d["precio_usd"], d["moneda"]), (25.0, 1.25, "MXN"))
+            self.assertEqual(pedidos[-1], "https://creations.mattel.com/en-mx/products/demo-hcd19.js")
+            self.assertEqual(d["url"], "https://creations.mattel.com/en-mx/products/demo-hcd19")
+            # Otro país: se consulta sin prefijo (dólares), nunca se mezcla su moneda.
+            r = self.c.post("/api/articulos/desde-mattel", json={"url": "https://creations.mattel.com/en-ca/products/demo-hcd19"}, headers=h)
+            self.assertEqual((r.get_json()["moneda"], pedidos[-1]), ("USD", "https://creations.mattel.com/products/demo-hcd19.js"))
         for malo in ("http://creations.mattel.com/products/x", "https://evil.com/products/x",
                      "https://mattel.com.evil.com/products/x", "https://creations.mattel.com/collections/x",
+                     "https://creations.mattel.com/en-mx/collections/x", "https://creations.mattel.com/../products/x",
                      "https://localhost:3000/products/x", ""):
             r = self.c.post("/api/articulos/desde-mattel", json={"url": malo}, headers=h)
             self.assertEqual(r.status_code, 400, malo)
         self.assertEqual(self.c.post("/api/articulos/desde-mattel", json={"url": "https://creations.mattel.com/products/x"}).status_code, 401)
+
+    def test_46_categorias_propias(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        cats = self.c.get("/api/estado", headers=h).get_json()["categorias"]
+        self.assertIn("Barbie", [c["nombre"] for c in cats])  # toda cuenta nueva la trae
+        r = self.c.post("/api/articulos", json={"tipo": "Barbie", "nombre": "Barbie Ellen Ochoa",
+                                                 "serie": "Barbie Signature"}, headers=h)
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(r.get_json()["id"].startswith("CO-"))
+        self.assertEqual(self.c.post("/api/articulos", json={"tipo": "Lego", "nombre": "x"}, headers=h).status_code, 400)
+        r = self.c.post("/api/categorias", json={"nombre": "Lego", "emoji": "🧱"}, headers=h)
+        self.assertEqual(r.status_code, 201)
+        id_lego = r.get_json()["id"]
+        self.assertEqual(self.c.post("/api/articulos", json={"tipo": "Lego", "nombre": "x"}, headers=h).status_code, 201)
+        self.assertEqual(self.c.post("/api/categorias", json={"nombre": "lego"}, headers=h).status_code, 409)
+        self.assertEqual(self.c.post("/api/categorias", json={"nombre": "Pokémon"}, headers=h).status_code, 409)
+        self.assertEqual(self.c.delete(f"/api/categorias/{id_lego}", headers=h).status_code, 409)  # tiene piezas
+        # Una cuenta no ve ni borra las categorías de otra.
+        h2 = {"Authorization": f"Bearer {self.token2}"}
+        self.assertNotIn("Lego", [c["nombre"] for c in self.c.get("/api/estado", headers=h2).get_json()["categorias"]])
+        self.assertEqual(self.c.delete(f"/api/categorias/{id_lego}", headers=h2).status_code, 404)
+        self.assertEqual(self.c.post("/api/articulos", json={"tipo": "Lego", "nombre": "x"}, headers=h2).status_code, 400)
 
     def test_34_respaldo_diario_conserva_solo_los_ultimos(self):
         from collecthub import respaldo

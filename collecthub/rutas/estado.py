@@ -49,6 +49,8 @@ def estado_completo(usuario_id: str) -> dict:
         "encargos": encargos_de(usuario_id),
         "pedidos": todos("SELECT * FROM pedidos_cliente WHERE usuario_id=? ORDER BY atendido, creado_en DESC",
                          (usuario_id,)),
+        "categorias": todos("SELECT id,nombre,emoji FROM categorias WHERE usuario_id=? "
+                            "ORDER BY creado_en, nombre", (usuario_id,)),
         "wishlist": todos("SELECT * FROM wishlist WHERE usuario_id=? ORDER BY prioridad DESC",
                           (usuario_id,)),
     }

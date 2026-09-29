@@ -7,13 +7,13 @@ import secrets
 import openpyxl
 from flask import Blueprint, g, jsonify, request, send_from_directory
 
+from ..categorias import prefijo_id, tipos_de
 from ..db import RUTA_BD, bd, todos, transaccion, uno
 from ..util import ErrorApp, entero, fecha, hoy, num, texto, uid
 from ..vision import buscar_precio_pokemon, identificar_foto, procesar_imagen
 
 bp = Blueprint("articulos", __name__)
 
-TIPOS = ("Hot Wheels", "Pokémon")
 ESTATUS = ("Disponible", "En negociación", "Conservar")
 
 # Fotos junto a la base de datos: mismo volumen persistente, sin
@@ -48,8 +48,8 @@ def limpiar(b: dict, parcial: bool = False) -> dict:
             o[clave] = valor
 
     if "tipo" in b or not parcial:
-        if b.get("tipo") not in TIPOS:
-            raise ErrorApp("El tipo debe ser Hot Wheels o Pokémon")
+        if b.get("tipo") not in tipos_de(g.usuario_id):
+            raise ErrorApp("Esa categoría no existe; agrégala primero en el formulario de la pieza")
         o["tipo"] = b["tipo"]
     if "nombre" in b or not parcial:
         nombre = texto(b.get("nombre"), 160)
@@ -107,7 +107,7 @@ def detalle(id_art):
 def _insertar_articulo(con, datos: dict) -> str:
     """Inserta un artículo ya validado por limpiar() y su valuación inicial.
     Reutilizada por crear() (un artículo) e importar() (un lote desde .xlsx)."""
-    nuevo_id = uid("PKM" if datos["tipo"] == "Pokémon" else "HW")
+    nuevo_id = uid(prefijo_id(datos["tipo"]))
     columnas = list(datos.keys())
     con.execute(
         f"INSERT INTO articulos (id,usuario_id,cant_inicial,{','.join(columnas)}) "

@@ -75,7 +75,7 @@ En esta máquina la app no arranca sola: se prende a pedido desde el hub local "
 
 El usuario final es un joven emprendedor: consigue Hot Wheels y cartas Pokémon (casi todo en Mattel Creations, vía el monitor/bot del proyecto 15), las publica en Facebook y las revende cada semana en la convención/tianguis de **Balderas**. Toda función nueva debe servir a ese ciclo: conseguir → recibir → publicar → vender en Balderas → reinvertir.
 
-- **Registro desde link de Mattel** (`collecthub/mattel.py`, `POST /api/articulos/desde-mattel`): lee `/products/<handle>.js` de Shopify (solo hosts `*.mattel.com` por https), convierte US$→MXN con tipo de cambio en vivo (fallback 20.0). Solo sugiere; el registro manual sigue igual para compras fuera de Mattel.
+- **Registro desde link de Mattel** (`collecthub/mattel.py`, `POST /api/articulos/desde-mattel`): lee `/products/<handle>.js` de Shopify (solo hosts `*.mattel.com` por https), convierte US$→MXN con tipo de cambio en vivo (fallback 20.0). Acepta links con prefijo de país (`/en-mx/products/...`, desde 2026-09-29): con `-mx` lee el precio directo en MXN (`moneda: "MXN"`); otros países se consultan sin prefijo (USD). Solo sugiere; el registro manual sigue igual para compras fuera de Mattel.
 - **Por recibir**: el puente deja las piezas con ubicación "Por recibir"; el Panel las lista con "Ya llegó" (una o todas) y quedan fuera de la lista de carga.
 - **✨ Sugerir carga** (Balderas): prioriza pedidos de clientes, piezas con tiempo guardadas y mejor margen; nunca las griales.
 - **Semana vs semana anterior** en el Corte; **descuento por combo** en la publicación en lote; **rendimiento por fuente** en el Panel.
@@ -123,3 +123,12 @@ El usuario aclaró que la app es **solo inventario + control de entregas**: comp
 - `static/sw.js` no cachea `/tienda` (el stock debe verse siempre al día).
 - Diseño: logo con flamas propias (SVG `#flama`, inspiradas en Hot Wheels sin copiar su logo). Portada `img/portada.png` (la pone Gonza) con dos zonas clicables; si no existe, se ven las tarjetas de colores. Etiquetas de rareza en `rareza()` de `CW.js` (RLC/Red Line Club y HWC = oro).
 - Las piezas de ejemplo son modelos reales de Hot Wheels con fotos oficiales de Mattel Creations (`cdn.shopify.com`) y cartas de pokemontcg.io; créditos en `stock.js` → `creditos_fotos` (se muestran en el pie).
+
+### Categorías propias (2026-09-29)
+- Además de **Hot Wheels** y **Pokémon** (fijas, cada una con su formulario), cada cuenta tiene categorías propias en la tabla `categorias` (`collecthub/categorias.py`: `tipos_de()`, `prefijo_id()` → ids `CO-`). Toda cuenta arranca con **Barbie 💖** (`INICIALES`; a las cuentas existentes se les agrega la primera vez que arranca la versión nueva).
+- `articulos.tipo` ya no tiene `CHECK`: la API valida contra `tipos_de(usuario)`. Bases viejas se migran solas al arrancar (`db._quitar_check_tipo`: reconstruye la tabla con las llaves foráneas apagadas y deja antes una copia `collecthub-antes-categorias.db` junto a la base; probado con datos: mismas filas, `foreign_key_check` limpio).
+- Rutas: `POST /api/categorias` (nombre, emoji; rechaza duplicados sin importar mayúsculas), `DELETE /api/categorias/<id>` (409 si tiene piezas). `/api/estado` trae `categorias`.
+- Interfaz: botones de categoría + "＋ Categoría" en el formulario de la pieza (también al editar, para cambiar una pieza de categoría). Las categorías propias usan el formulario general: `serie` = línea, `color` = variante, `sub` = empaque. En todo el código, "lo que no es Pokémon usa serie/color" (`a.tipo === 'Pokémon' ? expansion : serie`), nunca `=== 'Hot Wheels'`.
+- Un link de Mattel elige la categoría solo (`tipoMattel()`: Pokémon, o la categoría cuyo nombre aparece en el nombre/línea, ej. "Barbie Signature"). El puente del proyecto 15 manda `tipo: "Barbie"` igual y reintenta como Hot Wheels si la cuenta no la tiene.
+- Se restauraron `mmTraer()`/`mmGuardar()` (🛒 Compra Mattel de varios links): se habían borrado por accidente en el commit `0cdc1e0` y el botón no hacía nada.
+- `compradores.interes` sigue limitado a Hot Wheels/Pokémon/Ambas (no se tocó). La landing (`/tienda`) muestra las piezas de otras categorías en "todo", sin filtro propio.

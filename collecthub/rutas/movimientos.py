@@ -1,6 +1,7 @@
 """Ventas, lotes, apartados con anticipo e intercambios."""
 from flask import Blueprint, g, jsonify, request
 
+from ..categorias import prefijo_id, tipos_de
 from ..db import bd, todos, transaccion, uno
 from ..util import ErrorApp, entero, fecha, hoy, num, texto, uid
 
@@ -309,11 +310,11 @@ def intercambiar():
                                    num(a["valor_estimado"])))
             con.execute("UPDATE articulos SET cantidad=cantidad-1 WHERE id=?", (a["id"],))
         for r in recibe:
-            tipo = r.get("tipo") if r.get("tipo") in ("Hot Wheels", "Pokémon") else "Hot Wheels"
+            tipo = r.get("tipo") if r.get("tipo") in tipos_de(g.usuario_id, con) else "Hot Wheels"
             nombre = texto(r.get("nombre"), 160)
             if not nombre:
                 raise ErrorApp("Cada pieza que recibes necesita nombre")
-            nuevo = uid("PKM" if tipo == "Pokémon" else "HW")
+            nuevo = uid(prefijo_id(tipo))
             con.execute(
                 "INSERT INTO articulos (id,usuario_id,tipo,nombre,cantidad,cant_inicial,"
                 "precio_compra,valor_estimado,fecha_adq,fuente,estado,notas) "

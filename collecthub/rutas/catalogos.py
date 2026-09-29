@@ -3,6 +3,7 @@ import sqlite3
 
 from flask import Blueprint, g, jsonify, request
 
+from ..categorias import tipos_de
 from ..db import bd, todos, uno
 from ..util import ErrorApp, entero, num, texto, uid
 
@@ -128,6 +129,37 @@ def borrar_plataforma(id_p):
     return jsonify(ok=True)
 
 
+# ---------- Categorías ----------
+
+@bp.post("/categorias")
+def crear_categoria():
+    b = request.get_json(silent=True) or {}
+    nombre = texto(b.get("nombre"), 40)
+    if not nombre:
+        raise ErrorApp("Escribe el nombre de la categoría")
+    if nombre.lower() in (t.lower() for t in tipos_de(g.usuario_id)):
+        raise ErrorApp("Esa categoría ya existe", 409)
+    id_c = uid("CAT")
+    bd().execute("INSERT INTO categorias (id,usuario_id,nombre,emoji) VALUES (?,?,?,?)",
+                 (id_c, g.usuario_id, nombre, texto(b.get("emoji"), 8) or "📦"))
+    bd().commit()
+    return jsonify(uno("SELECT id,nombre,emoji FROM categorias WHERE id=?", (id_c,))), 201
+
+
+@bp.delete("/categorias/<id_c>")
+def borrar_categoria(id_c):
+    c = uno("SELECT * FROM categorias WHERE id=? AND usuario_id=?", (id_c, g.usuario_id))
+    if not c:
+        raise ErrorApp("Categoría no encontrada", 404)
+    n = uno("SELECT COUNT(*) n FROM articulos WHERE usuario_id=? AND tipo=?",
+            (g.usuario_id, c["nombre"]))["n"]
+    if n:
+        raise ErrorApp(f"Tiene {n} pieza{'s' if n != 1 else ''}; cámbialas de categoría antes de borrarla", 409)
+    bd().execute("DELETE FROM categorias WHERE id=?", (id_c,))
+    bd().commit()
+    return jsonify(ok=True)
+
+
 # ---------- Faltantes ----------
 
 def _limpiar_deseo(b):
@@ -136,7 +168,7 @@ def _limpiar_deseo(b):
         raise ErrorApp("Escribe qué pieza estás buscando")
     return {
         "nombre": nombre,
-        "tipo": b["tipo"] if b.get("tipo") in ("Hot Wheels", "Pokémon") else "Hot Wheels",
+        "tipo": b["tipo"] if b.get("tipo") in tipos_de(g.usuario_id) else "Hot Wheels",
         "tope": max(0.0, num(b.get("tope"))),
         "prioridad": min(5, max(1, entero(b.get("prioridad"), 3))),
         "detalle": texto(b.get("detalle"), 300),

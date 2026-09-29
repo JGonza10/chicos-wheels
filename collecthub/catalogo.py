@@ -143,7 +143,7 @@ def generar_catalogo(usuario_id: str, config: dict) -> bytes:
             pdf.set_xy(x + 2, ty)
             pdf.cell(ancho_card - 4, 3.6, linea)
             ty += 3.6
-        det = a["serie"] if a["tipo"] == "Hot Wheels" else a["expansion"]
+        det = a["expansion"] if a["tipo"] == "Pokémon" else a["serie"]
         pdf.set_font("Helvetica", "", 7)
         pdf.set_text_color(*GRIS)
         pdf.set_xy(x + 2, y + alto_card - 8.5)

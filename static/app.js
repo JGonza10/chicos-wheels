@@ -168,8 +168,13 @@ async function cargarEstado() {
 const plat = (id) => (db.plataformas.find((p) => p.id === id) || { id: '', nombre: '—', codigo: '', com_pct: 0, com_fija: 0, ret_pct: 0 });
 const art = (id) => db.articulos.find((a) => a.id === id);
 const cli = (id) => db.compradores.find((c) => c.id === id);
-const tono = (t) => (t === 'Pokémon' ? 'var(--yellow)' : 'var(--blue)');
-const emoji = (t) => (t === 'Pokémon' ? '🃏' : '🏎️');
+const tono = (t) => (t === 'Pokémon' ? 'var(--yellow)' : t === 'Hot Wheels' ? 'var(--blue)' : '#E0529C');
+/** Hot Wheels y Pokémon son fijas; las demás (Barbie, …) vienen de db.categorias. */
+const categorias = () => ['Hot Wheels', 'Pokémon'].concat(((db && db.categorias) || []).map((c) => c.nombre));
+const emoji = (t) => (t === 'Pokémon' ? '🃏' : t === 'Hot Wheels' ? '🏎️'
+  : ((((db && db.categorias) || []).find((c) => c.nombre === t) || {}).emoji || '📦'));
+/** Opciones de filtro por categoría: "todos" + las que tengan piezas o existan. */
+const filtrosTipo = () => [['todos', 'Todas']].concat(categorias().map((c) => [c, c]));
 const libre = (a) => num(a.libre);
 
 /** Fotos con URL externa se pintan directo; las locales ('local:archivo.jpg')
@@ -730,8 +735,8 @@ const COLS_INV = [
   { k: 'tipo', t: 'Tipo', txt: 1, v: (a) => a.tipo || '' },
   { k: 'numero', t: 'Número', txt: 1, v: (a) => a.numero || '' },
   { k: 'anio', t: 'Año', v: (a) => a.anio || 0 },
-  { k: 'detalle', t: 'Serie / Expansión', txt: 1, v: (a) => (a.tipo === 'Hot Wheels' ? a.serie : a.expansion) || '' },
-  { k: 'variante', t: 'Color / Rareza', txt: 1, v: (a) => (a.tipo === 'Hot Wheels' ? a.color : a.rareza) || '' },
+  { k: 'detalle', t: 'Serie / Expansión', txt: 1, v: (a) => (a.tipo === 'Pokémon' ? a.expansion : a.serie) || '' },
+  { k: 'variante', t: 'Color / Rareza', txt: 1, v: (a) => (a.tipo === 'Pokémon' ? a.rareza : a.color) || '' },
   { k: 'cantidad', t: 'Cant.', num: 1, v: (a) => num(a.cantidad) },
   { k: 'estatus', t: 'Estatus', txt: 1, v: (a) => semaforo(a).t },
   { k: 'ubicacion', t: 'Ubicación', txt: 1, v: (a) => a.ubicacion || '' },
@@ -749,7 +754,7 @@ function tablaInv(l) {
       const s = semaforo(a), dif = num(a.valor_estimado) - num(a.precio_compra), ago = !num(a.cantidad);
       return `<tr class="${ui.sel.includes(a.id) ? 'sel2' : ''} ${ago ? 'sold' : ''}" data-a="ver" data-id="${a.id}">
       <td class="rn">${i + 1}</td>
-      <td><b>${a.grail ? '👑 ' : ''}${esc(a.nombre)}</b></td><td>${esc(a.tipo)}</td><td class="mn">${esc(a.numero || '')}</td>
+      <td><span class="pz"><span class="mini ${a.foto ? 'con' : ''}">${imgFoto(a, 'loading="lazy"')}</span><b>${a.grail ? '👑 ' : ''}${esc(a.nombre)}</b></span></td><td>${esc(a.tipo)}</td><td class="mn">${esc(a.numero || '')}</td>
       <td class="mn">${esc(a.anio || '')}</td><td>${esc(COLS_INV[4].v(a))}</td><td>${esc(COLS_INV[5].v(a))}</td>
       <td class="num">${num(a.cantidad)}${a.apartadas ? ` <span class="mu">(${a.apartadas} ap.)</span>` : ''}</td>
       <td><span class="dt" style="background:${s.col}"></span>${s.t}</td><td>${esc(a.ubicacion || '—')}</td>
@@ -762,11 +767,11 @@ function tablaInv(l) {
 }
 function vInv() {
   const l = filtrar();
-  const tipos = [['todos', 'Ambas'], ['Hot Wheels', 'Hot Wheels'], ['Pokémon', 'Pokémon']];
+  const tipos = filtrosTipo();
   const est = [['todos', 'Todo'], ['disponible', 'Disponibles'], ['apartado', 'Apartadas'], ['estancado', 'Estancadas'], ['conservar', 'Conservar'], ['agotado', 'Agotadas']];
   return hdr('Inventario', `${l.length} de ${db.articulos.length} piezas${ui.sel.length ? ` · ${ui.sel.length} seleccionadas` : ''}`) + `
   <div class="chips">
-    ${tipos.map((t) => `<button class="chip ${ui.fTipo === t[0] ? 'on' : ''}" data-a="ftipo" data-v="${t[0]}">${t[1]}</button>`).join('')}
+    ${tipos.map((t) => `<button class="chip ${ui.fTipo === t[0] ? 'on' : ''}" data-a="ftipo" data-v="${esc(t[0])}">${esc(t[1])}</button>`).join('')}
     <span style="width:1px;height:22px;background:var(--line2)"></span>
     <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted)">Estatus
       <select class="sel" data-a="festatus_sel" style="width:auto;padding:7px 32px 7px 12px;font-size:12.5px">
@@ -795,21 +800,21 @@ function vInv() {
 }
 function ficha(a) {
   const s = semaforo(a), t = tono(a.tipo), ago = !num(a.cantidad);
-  const det = a.tipo === 'Hot Wheels' ? [a.serie, a.color].filter(Boolean).join(' · ') : [a.expansion, a.rareza].filter(Boolean).join(' · ');
+  const det = a.tipo === 'Pokémon' ? [a.expansion, a.rareza].filter(Boolean).join(' · ') : [a.serie, a.color].filter(Boolean).join(' · ');
   const dif = num(a.valor_estimado) - num(a.precio_compra);
   const tr = tendencia(a);
   return `<div class="pc ${ago ? 'sold' : ''} ${ui.sel.includes(a.id) ? 'sel2' : ''}" style="--tone:${t}" data-a="ver" data-id="${a.id}">
     <div class="strip"></div>${ago ? '<div class="rb">Vendida</div>' : (a.apartadas ? '<div class="rb ap">Apartada</div>' : '')}
     ${a.grail ? '<div class="crown" title="Pieza grial">👑</div>' : ''}
-    <div class="ph">${imgFoto(a, 'loading="lazy"')}</div>
+    <div class="ph ${a.foto ? 'con' : ''}">${imgFoto(a, 'loading="lazy"')}<span class="cat">${emoji(a.tipo)} ${esc(a.tipo)}</span></div>
     <div class="bd">
-      <div class="eb">${esc([a.numero, a.anio, det].filter(Boolean).join(' · ') || a.tipo)}</div>
-      <div class="nm">${esc(a.nombre)}</div>
-      <div class="row"><span><span class="dt" style="background:${s.col}"></span><span class="mu">${s.t}${num(a.cantidad) > 1 ? ' ×' + a.cantidad : ''}</span></span>
-        <b class="mn" style="color:${t}">${money(a.valor_estimado)}</b></div>
-      ${a.apartadas ? `<div class="mu" style="margin-top:5px;font-size:11px;color:var(--yellow)">${esc(reservasTxt(a))}</div>` : ''}
-      <div class="row" style="margin-top:6px"><span class="mu">${esc(a.ubicacion || 'Sin ubicar')}</span>
-        <span class="mu mn ${dif >= 0 ? 'pos' : 'neg'}">${dif >= 0 ? '+' : ''}${money(dif)}</span></div>
+      <div class="eb">${esc([a.numero, a.anio, det].filter(Boolean).join(' · ') || '\u00a0')}</div>
+      <div class="nm" title="${esc(a.nombre)}">${esc(a.nombre)}</div>
+      <div class="pr"><b class="mn" style="color:${t}">${money(a.valor_estimado)}</b>
+        <span class="mn ${dif >= 0 ? 'pos' : 'neg'}" title="Valor contra lo que pagaste">${dif >= 0 ? '+' : ''}${money(dif)}</span></div>
+      <div class="row"><span class="mu"><span class="dt" style="background:${s.col}"></span>${s.t}${num(a.cantidad) > 1 ? ' ×' + a.cantidad : ''}</span>
+        <span class="mu ub" title="${esc(a.ubicacion || 'Sin ubicar')}">📍 ${esc(a.ubicacion || 'Sin ubicar')}</span></div>
+      ${a.apartadas ? `<div class="mu" style="margin-top:6px;font-size:11px;color:var(--yellow)">${esc(reservasTxt(a))}</div>` : ''}
       ${tr ? chispa(tr.pts, tr.delta >= 0 ? 'var(--green)' : 'var(--red)') : ''}
     </div></div>`;
 }
@@ -1054,7 +1059,7 @@ function vDatos() {
         ${[['resumen', 'Resumen'], ['inventario', 'Inventario'], ['ventas', 'Ventas'], ['apartados', 'Apartados']].map((x) => `<button class="chip ${ui.rep.secciones.includes(x[0]) ? 'on' : ''}" data-a="repsec" data-v="${x[0]}">${x[1]}</button>`).join('')}</div></div>
       <div class="g2">
         <div class="fld"><label class="lbl">Categoría</label><select class="sel" data-a="repcfg" data-k="tipo">
-          ${[['todos', 'Ambas'], ['Hot Wheels', 'Hot Wheels'], ['Pokémon', 'Pokémon']].map((o) => `<option value="${o[0]}" ${ui.rep.tipo === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select></div>
+          ${filtrosTipo().map((o) => `<option value="${esc(o[0])}" ${ui.rep.tipo === o[0] ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select></div>
         <div class="fld"><label class="lbl">Estatus</label><select class="sel" data-a="repcfg" data-k="estatus">
           ${[['todos', 'Todos'], ['disponible', 'Disponibles'], ['apartado', 'Apartadas'], ['estancado', 'Estancadas'], ['conservar', 'Conservar'], ['agotado', 'Agotadas']].map((o) => `<option value="${o[0]}" ${ui.rep.estatus === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select></div>
       </div>
@@ -1084,6 +1089,20 @@ function vDatos() {
 
 /* ==================== Modales ==================== */
 const MOD = {};
+const EMPAQUES = ['En caja sellada', 'Caja abierta', 'Sin caja', 'Set / paquete'];
+MOD.categorias = function () {
+  const propias = (db.categorias || []);
+  return shell('Categorías', 'Hot Wheels y Pokémon siempre están', `
+  ${propias.length ? `<div class="pnl" style="padding:6px;margin-bottom:14px">${propias.map((c) => {
+    const n = db.articulos.filter((a) => a.tipo === c.nombre).length;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px"><span style="font-size:18px">${esc(c.emoji)}</span>
+      <b style="flex:1">${esc(c.nombre)}</b><span style="font-size:12px;color:var(--muted)">${n} pieza${n === 1 ? '' : 's'}</span>
+      <button class="btn sm gh" data-a="delcat" data-id="${c.id}" ${n ? 'disabled title="Tiene piezas: cámbialas de categoría antes"' : ''}>Quitar</button></div>`;
+  }).join('')}</div>` : ''}
+  <div class="g2" style="grid-template-columns:1fr 90px">${f('Nueva categoría', inp('cat_nom', '', 'text', 'Ej. Funko, Lego, Matchbox'))}${f('Emoji', inp('cat_emo', '📦', 'text'))}</div>
+  <div class="note">Las categorías nuevas usan un formulario general: línea, variante, empaque y estado.</div>
+  `, `<button class="btn gh" data-a="cerrarcat">Listo</button><button class="btn pri" data-a="savecat">Agregar</button>`, '460px');
+};
 function shell(t, sub, body, foot, w) {
   return `<div class="md" ${w ? `style="max-width:${w}"` : ''} role="dialog" aria-modal="true"><header><h3>${t}</h3>
     ${sub ? `<span class="sub">${esc(sub)}</span>` : ''}<button class="btn sm gh" data-a="cerrar" aria-label="Cerrar">✕</button></header>
@@ -1099,21 +1118,25 @@ MOD.pieza = function () {
   const a = ui.ctx || {}, t = ui.formTipo, ed = !!a.id;
   return shell(ed ? 'Editar pieza' : '¿Qué vas a registrar hoy?', ed ? a.id : '', `
   ${ui.avisoIA || ''}
-  ${ed ? '' : `<div class="seg" style="margin-bottom:18px">
-    <button data-a="tipo" data-t="Hot Wheels" class="${t === 'Hot Wheels' ? 'on' : ''}">🏎️ Hot Wheels</button>
-    <button data-a="tipo" data-t="Pokémon" class="${t === 'Pokémon' ? 'on y' : ''}">🃏 Pokémon</button></div>`}
-  ${ed || t === 'Pokémon' ? '' : f('¿La compraste en Mattel? Pega su link', `<div style="display:flex;gap:8px">${inp('f_mattel', '', 'url', 'https://creations.mattel.com/products/…')}
+  <div class="seg" style="margin-bottom:18px;flex-wrap:wrap">
+    ${categorias().map((c) => `<button data-a="tipo" data-t="${esc(c)}" class="${t === c ? (c === 'Pokémon' ? 'on y' : 'on') : ''}">${emoji(c)} ${esc(c)}</button>`).join('')}
+    <button data-a="categorias" title="Agregar o quitar categorías" style="flex:0 0 auto">＋ Categoría</button></div>
+  ${ed || t === 'Pokémon' ? '' : f('¿La compraste en Mattel? Pega su link', `<div style="display:flex;gap:8px">${inp('f_mattel', '', 'url', 'https://creations.mattel.com/en-mx/products/…')}
     <button class="btn" data-a="mattel" style="flex:0 0 auto">Traer datos</button></div>`, 'Llena nombre, foto y precio (convertido a pesos). Revisa lo que traiga antes de guardar.')}
-  ${f(t === 'Pokémon' ? 'Nombre de la carta' : 'Nombre del modelo', inp('f_nombre', a.nombre, 'text', t === 'Pokémon' ? 'Charizard ex' : 'Custom Datsun 240Z'))}
+  ${f(t === 'Pokémon' ? 'Nombre de la carta' : t === 'Hot Wheels' ? 'Nombre del modelo' : 'Nombre de la pieza',
+    inp('f_nombre', a.nombre, 'text', t === 'Pokémon' ? 'Charizard ex' : t === 'Hot Wheels' ? 'Custom Datsun 240Z' : t === 'Barbie' ? 'Barbie Inspiring Women Ellen Ochoa' : ''))}
   <div class="g2">${f('Número de colección', inp('f_numero', a.numero, 'text', t === 'Pokémon' ? '004/102' : '150/250'))}${f('Año', inp('f_anio', a.anio, 'number', '2024'))}</div>
   ${t === 'Hot Wheels'
     ? `<div class="g2">${f('Serie o segmento', sel('f_serie', a.serie, SERIES))}${f('Color', inp('f_color', a.color, 'text', 'Rojo metálico'))}</div>
        ${f('Tipo de tarjeta', sel('f_sub', a.sub, ['Tarjeta corta', 'Tarjeta larga', 'Blíster especial', 'Suelto / loose', 'Caja o set']))}`
+    : t !== 'Pokémon'
+    ? `<div class="g2">${f('Línea o serie', inp('f_serie', a.serie, 'text', t === 'Barbie' ? 'Barbie Signature' : ''))}${f('Variante o color', inp('f_color', a.color, 'text', ''))}</div>
+       ${f('Empaque', sel('f_sub', a.sub, EMPAQUES))}`
     : `<div class="g2">${f('Expansión', inp('f_expansion', a.expansion, 'text', 'Obsidian Flames'))}${f('Rareza', sel('f_rareza', a.rareza, RAREZAS))}</div>
        <div class="g2">${f('Idioma', sel('f_sub', a.sub, ['Español', 'Inglés', 'Japonés', 'Otro']))}${f('Graduación', sel('f_grado', a.grado, ['Sin graduar', 'PSA 10', 'PSA 9', 'PSA 8', 'BGS 9.5', 'CGC 10', 'Otra']))}</div>
        ${f('Número de certificado', inp('f_cert', a.cert, 'text', 'Solo si está graduada'), 'Guárdalo para verificarlo en el sitio de la graduadora')}`}
   <div class="g3">
-    ${f('Estado físico', sel('f_estado', a.estado, t === 'Pokémon' ? ['Mint', 'Near Mint', 'Excelente', 'Jugada', 'Dañada'] : ['Sellado / Mint', 'Excelente', 'Jugado / Desgastado', 'Suelto sin blíster']))}
+    ${f('Estado físico', sel('f_estado', a.estado, t === 'Pokémon' ? ['Mint', 'Near Mint', 'Excelente', 'Jugada', 'Dañada'] : t === 'Hot Wheels' ? ['Sellado / Mint', 'Excelente', 'Jugado / Desgastado', 'Suelto sin blíster'] : ['Sellada / nueva', 'Excelente', 'Abierta / usada', 'Con detalles']))}
     ${f('Cantidad', inp('f_cantidad', a.cantidad == null ? 1 : a.cantidad, 'number'))}
     ${f('Estatus', sel('f_estatus', a.estatus, ['Disponible', 'En negociación', 'Conservar']))}
   </div>
@@ -1133,8 +1156,8 @@ MOD.pieza = function () {
         <label class="btn" for="fi_fotoform" style="flex:0 0 auto;cursor:pointer" title="Tomar o elegir una foto de tu celular o computadora">📷 Subir foto</label>
         <input type="file" id="fi_fotoform" data-a="fotoform" accept="image/*" style="display:none"></div>`,
         ed && a.foto && a.foto.startsWith('local:') ? 'Ya tiene una foto guardada; si subes otra, la reemplaza.' : '')}
-  <div class="fld"><label class="lbl">Verificación de autenticidad</label>
-    ${(CHECKS[t] || []).map((c, i) => `<label class="chk"><input type="checkbox" data-chk="${i}" ${(a.checks || []).includes(i) ? 'checked' : ''}><span>${esc(c)}</span></label>`).join('')}</div>
+  ${(CHECKS[t] || []).length ? `<div class="fld"><label class="lbl">Verificación de autenticidad</label>
+    ${CHECKS[t].map((c, i) => `<label class="chk"><input type="checkbox" data-chk="${i}" ${(a.checks || []).includes(i) ? 'checked' : ''}><span>${esc(c)}</span></label>`).join('')}</div>` : ''}
   ${f('Notas', `<textarea class="ta" id="f_notas" rows="2" placeholder="Defectos, procedencia, con quién la cambiaste…">${esc(a.notas || '')}</textarea>`)}
   <label class="chk"><input type="checkbox" id="f_grail" ${a.grail ? 'checked' : ''}><span>👑 Es pieza grial — no se vende, solo se presume</span></label>
   `, `${ed ? `<button class="btn dgr" data-a="delpieza" data-id="${a.id}">Eliminar</button>` : ''}
@@ -1150,6 +1173,7 @@ MOD.ver = function () {
   const ap = db.apartados.filter((x) => x.id_articulo === a.id && x.estatus === 'Vigente');
   const inte = db.compradores.filter((c) => c.interes === a.tipo || c.interes === 'Ambas');
   const det = a.tipo === 'Hot Wheels' ? [['Serie', a.serie], ['Color', a.color], ['Tarjeta', a.sub]]
+    : a.tipo !== 'Pokémon' ? [['Categoría', a.tipo], ['Línea', a.serie], ['Variante', a.color], ['Empaque', a.sub]]
     : [['Expansión', a.expansion], ['Rareza', a.rareza], ['Idioma', a.sub], ['Graduación', a.grado], ['Certificado', a.cert]];
   const ck = CHECKS[a.tipo] || [], hechos = (a.checks || []).length;
   return shell(a.nombre, a.id, `
@@ -1335,7 +1359,7 @@ MOD.trade = function () {
   <div class="sec" style="margin:18px 0 10px"><h2>Recibes — ${money(vIn)}</h2><span class="ln"></span></div>
   <div class="g3">
     ${f('Qué recibes', inp('t_nom', '', 'text', 'Nombre de la pieza'))}
-    ${f('Colección', sel('t_tipo', '', ['Hot Wheels', 'Pokémon']))}
+    ${f('Colección', sel('t_tipo', '', categorias()))}
     ${f('Valor de mercado', inp('t_val', '', 'number', '0.00'))}
   </div>
   <button class="btn sm" data-a="tradein">Agregar a lo que recibes</button>
@@ -1375,7 +1399,7 @@ MOD.wish = function () {
   const w = ui.ctx || {};
   return shell('Pieza que buscas', '', `
   ${f('Qué buscas', inp('w_nombre', w.nombre, 'text', 'Super Treasure Hunt 2025 — Toyota Supra'))}
-  <div class="g3">${f('Colección', sel('w_tipo', w.tipo, ['Hot Wheels', 'Pokémon']))}${f('Precio tope', inp('w_tope', w.tope, 'number', '0.00'))}
+  <div class="g3">${f('Colección', sel('w_tipo', w.tipo, categorias()))}${f('Precio tope', inp('w_tope', w.tope, 'number', '0.00'))}
   ${f('Prioridad', sel('w_prio', w.prioridad ? String(w.prioridad) : '3', ['1', '2', '3', '4', '5']))}</div>
   ${f('Detalle', inp('w_detalle', w.detalle, 'text', 'Solo tarjeta larga, sin dobleces'))}
   `, `<button class="btn gh" data-a="cerrar">Cancelar</button><button class="btn pri" data-a="savewish">Guardar</button>`, '500px');
@@ -1455,7 +1479,7 @@ MOD.abono = function () {
 MOD.publote = function () {
   const l = ui.ctx || [];
   const txt = ['🏎🃏 PIEZAS DISPONIBLES', ''].concat(l.map((a) => {
-    const det = [a.numero, a.anio, a.tipo === 'Hot Wheels' ? a.serie : a.expansion, a.estado].filter(Boolean).join(' · ');
+    const det = [a.numero, a.anio, a.tipo === 'Pokémon' ? a.expansion : a.serie, a.estado].filter(Boolean).join(' · ');
     return `• ${a.nombre}${det ? ' (' + det + ')' : ''} — ${money(a.valor_estimado)}`;
   })).concat(ui.pubDesc > 0 && l.length > 1 ? ['', `🔥 Llévate las ${l.length} por ${money(suma(l, (a) => num(a.valor_estimado)) * (1 - ui.pubDesc / 100))} (${ui.pubDesc}% menos)`] : []).concat(['', `📍 Entrega en persona en ${LUGAR_ENTREGA}.`, 'Escríbeme por mensaje para apartar; manejo apartados con anticipo.']).join('\n');
   return shell('Publicación en lote', `${l.length} piezas`, `
@@ -1483,10 +1507,11 @@ MOD.publicacion = function () {
 };
 const LUGAR_ENTREGA = 'Balderas';
 function textoPub(a) {
-  const L = [], t = [a.tipo === 'Pokémon' ? 'Carta Pokémon' : 'Hot Wheels', a.nombre, a.numero, a.anio].filter(Boolean).join(' ');
+  const L = [], t = [a.tipo === 'Pokémon' ? 'Carta Pokémon' : a.tipo, a.nombre, a.numero, a.anio].filter(Boolean).join(' ');
   L.push(t.toUpperCase(), '');
   L.push(a.tipo === 'Pokémon'
     ? `Carta original de la expansión ${a.expansion || '—'}. Rareza ${a.rareza || '—'}, idioma ${a.sub || '—'}${a.grado && a.grado !== 'Sin graduar' ? `, graduada ${a.grado}${a.cert ? ` (cert. ${a.cert})` : ''}` : ''}.`
+    : a.tipo !== 'Hot Wheels' ? `Pieza original${a.serie ? `, línea ${a.serie}` : ''}${a.color ? `, ${a.color}` : ''}${a.sub ? `, ${String(a.sub).toLowerCase()}` : ''}.`
     : `Pieza original Mattel, línea ${a.serie || 'Mainline'}${a.color ? `, color ${a.color}` : ''}${a.sub ? `, ${String(a.sub).toLowerCase()}` : ''}.`);
   L.push('', `Estado: ${a.estado || '—'}`, `Número de colección: ${a.numero || '—'}`, `Año: ${a.anio || '—'}`, `Disponibles: ${libre(a) || a.cantidad || 1}`, '');
   if ((a.checks || []).length) L.push('Verificación de autenticidad:', ...(a.checks || []).map((i) => '· ' + (CHECKS[a.tipo] || [])[i]).filter(Boolean), '');
@@ -1629,6 +1654,10 @@ document.addEventListener('click', async (e) => {
       ui.fotoPendiente = fotoSeleccionada; ui.avisoIA = ''; abrir('pieza', null); break;
     case 'fotoquitar': ui.ctx = snapPieza(); limpiarFotoSeleccionada(); ui.fotoPendiente = null; render(); break;
     case 'tipo': ui.ctx = snapPieza(); ui.formTipo = el.dataset.t; render(); break;
+    case 'categorias': ui.ctxPieza = snapPieza(); ui.ctxPiezaTipo = ui.formTipo; abrir('categorias', ui.ctxPieza); break;
+    case 'savecat': await saveCategoria(); break;
+    case 'delcat': try { await accion(() => DEL('/categorias/' + id), 'Categoría quitada'); } catch (e) { /* ya reportado */ } break;
+    case 'cerrarcat': volverAPieza(); break;
     case 'editpieza': ui.formTipo = art(id).tipo; abrir('pieza', art(id)); break;
     case 'qtipo': ui.qTipo = el.dataset.t; render(); break;
     case 'qtipo2': ui.formTipo = el.dataset.t; render(); break;
@@ -1965,19 +1994,69 @@ async function savePlat() {
     cerrar();
   } catch (e) { /* error ya reportado */ }
 }
+/** Categoría sugerida para una pieza de Mattel: Pokémon, o la categoría propia
+ * cuyo nombre aparezca en el nombre o la línea (ej. "Barbie Signature"). */
+function tipoMattel(d, porDefecto) {
+  const txt = `${d.nombre || ''} ${d.linea || ''}`;
+  if (/pok[eé]mon/i.test(txt)) return 'Pokémon';
+  const c = (db.categorias || []).find((x) => new RegExp(`\\b${x.nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(txt));
+  return c ? c.nombre : (porDefecto || 'Hot Wheels');
+}
+async function mmTraer() {
+  const urls = ($('#mm_txt').value || '').split(/\s+/).map((x) => x.trim()).filter(Boolean);
+  ui.mm.texto = $('#mm_txt').value;
+  if (!urls.length) { toast('Pega al menos un link', true); return; }
+  ui.mm.filas = []; ui.mm.cargando = true; render();
+  for (const url of urls) {
+    try { const d = await POST('/articulos/desde-mattel', { url }); ui.mm.filas.push({ ok: true, url, cantidad: 1, ...d }); }
+    catch (e) { ui.mm.filas.push({ ok: false, url, error: e.message }); }
+  }
+  ui.mm.cargando = false; render();
+}
+async function mmGuardar() {
+  document.querySelectorAll('.mm_cant').forEach((el) => { ui.mm.filas[num(el.dataset.i)].cantidad = Math.max(1, num(el.value) || 1); });
+  document.querySelectorAll('.mm_pre').forEach((el) => { ui.mm.filas[num(el.dataset.i)].precio_mxn = num(el.value); });
+  const l = ui.mm.filas.filter((r) => r.ok);
+  try {
+    await accion(async () => {
+      for (const r of l) {
+        await POST('/articulos', { tipo: tipoMattel(r), nombre: r.nombre, serie: tipoMattel(r) === 'Hot Wheels' ? '' : (r.linea || ''),
+          cantidad: r.cantidad, precio_compra: r.precio_mxn, valor_estimado: r.precio_mxn, fecha_adq: hoy(), fuente: 'Mattel Creations',
+          ubicacion: 'Por recibir', foto: r.imagen || '', notas: `Mattel: ${r.url}\n${notaPrecioMattel(r)}` });
+      }
+    }, `${l.length} pieza(s) registradas como Por recibir`);
+    ui.mm = null; cerrar();
+  } catch (e) { /* error ya reportado */ }
+}
+const notaPrecioMattel = (d) => (d.moneda === 'MXN' ? `Precio en Mattel México: $${d.precio_mxn} MXN` : `Precio en Mattel: US$${d.precio_usd} (TC ${d.tipo_cambio})`);
+async function saveCategoria() {
+  const nombre = ($('#cat_nom').value || '').trim();
+  if (!nombre) { toast('Escribe el nombre de la categoría', true); return; }
+  try {
+    await accion(() => POST('/categorias', { nombre, emoji: ($('#cat_emo').value || '').trim() }), `Categoría ${nombre} agregada`);
+    ui.ctxPiezaTipo = nombre; volverAPieza();
+  } catch (e) { /* ya reportado */ }
+}
+/** Regresa al formulario de la pieza que se estaba llenando, sin perder lo escrito. */
+function volverAPieza() {
+  if (!ui.ctxPieza) { cerrar(); return; }
+  ui.formTipo = categorias().includes(ui.ctxPiezaTipo) ? ui.ctxPiezaTipo : 'Hot Wheels';
+  abrir('pieza', ui.ctxPieza); ui.ctxPieza = null;
+}
 /** Precarga el formulario con los datos de un link de Mattel (no guarda nada). */
 async function traerMattel() {
   const url = ($('#f_mattel').value || '').trim();
   if (!url) { toast('Pega el link de la pieza en Mattel', true); return; }
   try {
     const d = await POST('/articulos/desde-mattel', { url });
-    const b = snapPieza();
+    const b = snapPieza(), nt = tipoMattel(d, ui.formTipo);
     ui.ctx = Object.assign(b, {
       nombre: d.nombre, precio_compra: d.precio_mxn, valor_estimado: b.valor_estimado || d.precio_mxn,
       fuente: 'Mattel Creations', foto: d.imagen || b.foto,
-      notas: [b.notas, `Mattel: ${d.url}`, `Precio en Mattel: US$${d.precio_usd} (TC ${d.tipo_cambio})`].filter(Boolean).join('\n'),
+      serie: nt !== 'Hot Wheels' && d.linea ? d.linea : b.serie,
+      notas: [b.notas, `Mattel: ${d.url}`, notaPrecioMattel(d)].filter(Boolean).join('\n'),
     });
-    if (/\b(pokemon|pokémon)\b/i.test(d.nombre)) ui.formTipo = 'Pokémon';
+    ui.formTipo = nt;
     render();
     toast(d.disponible ? 'Datos traídos de Mattel' : 'Datos traídos (ojo: hoy aparece agotada en Mattel)');
   } catch (e) { toast(e.message, true); }

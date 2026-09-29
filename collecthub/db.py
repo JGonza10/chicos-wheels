@@ -6,6 +6,7 @@ permite compartir una conexión entre hilos, y el servidor atiende peticiones
 en paralelo, así que este es el patrón seguro.
 """
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -44,7 +45,17 @@ def crear_esquema():
     sql = (Path(__file__).resolve().parent / "schema.sql").read_text(encoding="utf-8")
     con = conectar()
     try:
+        _quitar_check_tipo(con)
+        habia_categorias = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='categorias'").fetchone()
         con.executescript(sql)
+        if not habia_categorias:
+            # Primera vez con categorías: toda cuenta existente recibe las iniciales.
+            from .categorias import INICIALES
+            for nombre, emoji in INICIALES:
+                con.execute("""INSERT OR IGNORE INTO categorias (id,usuario_id,nombre,emoji)
+                               SELECT 'CAT-' || lower(hex(randomblob(6))), id, ?, ? FROM usuarios""",
+                            (nombre, emoji))
         # Bases creadas antes de existir una columna: CREATE IF NOT EXISTS no la agrega.
         cols = {f["name"] for f in con.execute("PRAGMA table_info(ventas)")}
         if "fecha_entrega" not in cols:
@@ -68,6 +79,40 @@ def crear_esquema():
         con.commit()
     finally:
         con.close()
+
+
+def _quitar_check_tipo(con):
+    """Bases anteriores al 2026-09-29 limitaban `articulos.tipo` a Hot Wheels o
+    Pokémon con un CHECK. SQLite no permite quitar un CHECK: se reconstruye la
+    tabla (mismas columnas y datos) con las llaves foráneas apagadas mientras
+    tanto. Antes se deja una copia de la base junto a ella."""
+    fila = con.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='articulos'").fetchone()
+    if not fila or "CHECK (tipo IN" not in fila["sql"]:
+        return
+    respaldo = RUTA_BD.with_name(RUTA_BD.stem + "-antes-categorias.db")
+    if not respaldo.exists():
+        destino = sqlite3.connect(respaldo)
+        con.backup(destino)
+        destino.close()
+    nuevo = re.sub(r"\s*CHECK \(tipo IN \([^)]*\)\)", "", fila["sql"], count=1)
+    nuevo = nuevo.replace("CREATE TABLE articulos", "CREATE TABLE articulos_nueva", 1)
+    con.commit()
+    con.execute("PRAGMA foreign_keys = OFF")
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        con.execute("DROP VIEW IF EXISTS v_articulos")  # schema.sql la vuelve a crear
+        con.execute(nuevo)
+        con.execute("INSERT INTO articulos_nueva SELECT * FROM articulos")
+        con.execute("DROP TABLE articulos")
+        con.execute("ALTER TABLE articulos_nueva RENAME TO articulos")
+        if con.execute("PRAGMA foreign_key_check").fetchone():
+            raise RuntimeError("la migración de categorías dejó relaciones rotas")
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.execute("PRAGMA foreign_keys = ON")
 
 
 @contextmanager

@@ -46,7 +46,7 @@ CREATE INDEX IF NOT EXISTS ix_comp_usuario ON compradores(usuario_id);
 CREATE TABLE IF NOT EXISTS articulos (
   id             TEXT PRIMARY KEY,
   usuario_id     TEXT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-  tipo           TEXT NOT NULL CHECK (tipo IN ('Hot Wheels','Pokémon')),
+  tipo           TEXT NOT NULL,  -- Hot Wheels, Pokémon o una de `categorias` (se valida en la API)
   nombre         TEXT NOT NULL,
   numero         TEXT NOT NULL DEFAULT '',
   anio           INTEGER,
@@ -79,6 +79,17 @@ CREATE TABLE IF NOT EXISTS articulos (
   actualizado_en TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_art_usuario ON articulos(usuario_id);
+
+-- Categorías propias además de Hot Wheels y Pokémon (Barbie, etc.): usan el
+-- formulario general (serie = línea, color = variante, sub = empaque).
+CREATE TABLE IF NOT EXISTS categorias (
+  id         TEXT PRIMARY KEY,
+  usuario_id TEXT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  nombre     TEXT NOT NULL,
+  emoji      TEXT NOT NULL DEFAULT '📦',
+  creado_en  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (usuario_id, nombre)
+);
 CREATE INDEX IF NOT EXISTS ix_art_codigo  ON articulos(usuario_id, codigo);
 CREATE INDEX IF NOT EXISTS ix_art_ubic    ON articulos(usuario_id, ubicacion);
 

@@ -5,6 +5,7 @@ from flask import Blueprint, g, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..auth import firmar, requiere_sesion
+from ..categorias import INICIALES
 from ..db import transaccion, uno
 from ..util import ErrorApp, texto, uid
 
@@ -33,6 +34,9 @@ def _crear_cuenta(email: str, hash_pwd: str, nombre: str) -> dict:
                 "INSERT INTO plataformas (id,usuario_id,codigo,nombre,com_pct,com_fija,ret_pct,notas) "
                 "VALUES (?,?,?,?,?,?,?,?)",
                 (uid("P"), uid_usuario, codigo, nom, pct, fija, ret, nota))
+        for nom, emoji in INICIALES:
+            con.execute("INSERT INTO categorias (id,usuario_id,nombre,emoji) VALUES (?,?,?,?)",
+                        (uid("CAT"), uid_usuario, nom, emoji))
     return uno("SELECT id,email,nombre FROM usuarios WHERE id=?", (uid_usuario,))
 
 

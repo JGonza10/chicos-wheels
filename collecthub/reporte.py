@@ -12,7 +12,6 @@ from .util import ErrorApp
 
 SECCIONES = ("resumen", "inventario", "ventas", "apartados")
 ESTATUS_INV = ("todos", "disponible", "apartado", "conservar", "agotado", "estancado")
-TIPOS = ("todos", "Hot Wheels", "Pokémon")
 ORDENES = ("nombre", "valor", "reciente", "antiguedad")
 
 AZUL = (10, 31, 68)
@@ -46,7 +45,7 @@ def normalizar_config(b: dict) -> dict:
     tipo = b.get("tipo", "todos")
     estatus = b.get("estatus", "todos")
     orden = b.get("orden", "nombre")
-    if tipo not in TIPOS or estatus not in ESTATUS_INV or orden not in ORDENES:
+    if not isinstance(tipo, str) or len(tipo) > 40 or estatus not in ESTATUS_INV or orden not in ORDENES:
         raise ErrorApp("Configuración de reporte no válida")
     return {
         "titulo": _t((b.get("titulo") or "Reporte de inventario").strip())[:80] or "Reporte",
@@ -225,7 +224,7 @@ def generar_pdf(usuario_id: str, config: dict) -> bytes:
         if arts:
             filas = []
             for a in arts:
-                det = a["serie"] if a["tipo"] == "Hot Wheels" else a["expansion"]
+                det = a["expansion"] if a["tipo"] == "Pokémon" else a["serie"]
                 dif = (a["valor_estimado"] or 0) - (a["precio_compra"] or 0)
                 filas.append([a["nombre"], a["tipo"], a["numero"], det, str(a["cantidad"]),
                               "Agotada" if not a["cantidad"] else a["estatus"],
