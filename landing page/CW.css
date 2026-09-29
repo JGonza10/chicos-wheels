@@ -342,3 +342,6 @@ footer p { margin: 0; font-size: 13px; color: var(--tenue); }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   html { scroll-behavior: auto; }
 }
+
+/* Categorías propias (Barbie, …) sin foto: su emoji como respaldo. */
+.card-foto .sin-foto { font-size: 64px; opacity: .45; line-height: 1; }

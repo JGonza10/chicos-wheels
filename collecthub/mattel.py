@@ -62,6 +62,8 @@ def traer_producto(url: str) -> dict:
     imagen = d.get("featured_image") or (d.get("images") or [""])[0] or ""
     if imagen.startswith("//"):
         imagen = "https:" + imagen
+    elif imagen.startswith("http://"):
+        imagen = "https://" + imagen[7:]
     texto = re.sub(r"<[^>]+>", " ", d.get("description") or "")
     texto = re.sub(r"\s+", " ", texto).strip()
     return {

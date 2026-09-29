@@ -75,7 +75,10 @@ def limpiar(b: dict, parcial: bool = False) -> dict:
     poner("fuente", texto(b.get("fuente"), 60))
     poner("ubicacion", texto(b.get("ubicacion"), 80))
     poner("codigo", texto(b.get("codigo"), 60))
-    poner("foto", texto(b.get("foto"), 500))
+    foto = texto(b.get("foto"), 500)
+    # La app se sirve por https: una foto http:// sería contenido mixto (o la
+    # tienda la descartaría). Mattel/Shopify responden igual por https.
+    poner("foto", "https://" + foto[7:] if foto.lower().startswith("http://") else foto)
     poner("notas", texto(b.get("notas"), 1000))
     poner("grail", 1 if b.get("grail") else 0)
     checks = b.get("checks")

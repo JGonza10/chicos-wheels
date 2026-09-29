@@ -8,6 +8,15 @@
   const STOCK = window.CW_STOCK || { piezas: [], contacto: {}, muestra: true };
   const PIEZAS = Array.isArray(STOCK.piezas) ? STOCK.piezas : [];
   const CONTACTO = STOCK.contacto || {};
+  const FIJAS = ["Hot Wheels", "Pokémon"];
+  // Categorías del inventario (Barbie, …): las manda la app en stock.js. Si una
+  // pieza trae una categoría que no viene en la lista, también se incluye.
+  const CATS = (Array.isArray(STOCK.categorias) ? STOCK.categorias : []).filter((c) => c && c.nombre && !FIJAS.includes(c.nombre));
+  PIEZAS.forEach((p) => {
+    if (p.tipo && !FIJAS.includes(p.tipo) && !CATS.some((c) => c.nombre === p.tipo)) CATS.push({ nombre: p.tipo, emoji: "📦" });
+  });
+  const emojiDe = (tipo) => (CATS.find((c) => c.nombre === tipo) || {}).emoji || "📦";
+  const esPropia = (p) => !FIJAS.includes(p.tipo);
   const DIAS_NUEVO = 14;
 
   const S = { tipo: "", filtro: "todo", q: "", serie: "", orden: "reciente" };
@@ -62,7 +71,7 @@
     <rect x="6" y="68" width="44" height="4" rx="2" fill="#3d7dca" fill-opacity=".35"/></svg>`;
   const imagen = (p) => p.foto
     ? `<img src="${esc(p.foto)}" alt="${esc(p.nombre)}" loading="lazy">`
-    : (p.tipo === "Pokémon" ? SVG_CARTA : SVG_AUTO);
+    : (p.tipo === "Pokémon" ? SVG_CARTA : esPropia(p) ? `<span class="sin-foto" aria-hidden="true">${esc(emojiDe(p.tipo))}</span>` : SVG_AUTO);
 
   /* ---------- Fichas ---------- */
   function tarjeta(p, i) {
@@ -71,7 +80,7 @@
       ? `<span class="existencia ultima">Última pieza</span>`
       : `<span class="existencia">Quedan ${p.disponible}</span>`;
     const meta = [serieDe(p), p.anio].filter(Boolean).join(" · ");
-    return `<article class="card ${p.tipo === "Pokémon" ? "poke" : "hot"}" tabindex="0" data-id="${esc(p.id)}" style="--i:${i}">
+    return `<article class="card ${p.tipo === "Pokémon" ? "poke" : esPropia(p) ? "otra" : "hot"}" tabindex="0" data-id="${esc(p.id)}" style="--i:${i}">
       <div class="card-foto">${imagen(p)}
         <div class="etiquetas">${r ? `<span class="rareza ${r.c}">${esc(r.txt)}</span>` : ""}${existencia}</div>
       </div>
@@ -91,6 +100,7 @@
     { id: "todo", txt: "Todo", f: () => true },
     { id: "hw", txt: "Hot Wheels", f: (p) => p.tipo === "Hot Wheels" },
     { id: "pkm", txt: "Pokémon", f: (p) => p.tipo === "Pokémon" },
+    ...CATS.map((c) => ({ id: "cat:" + c.nombre, txt: `${c.emoji || "📦"} ${c.nombre}`, f: (p) => p.tipo === c.nombre })),
     { id: "raras", txt: "Rarezas", f: esRara },
     { id: "nuevas", txt: "Recién llegados", f: esNueva },
   ];
@@ -115,7 +125,7 @@
     $("#chips").innerHTML = FILTROS.map((x) => {
       const n = PIEZAS.filter(x.f).length;
       if (!n && x.id !== "todo") return "";
-      return `<button class="chip" type="button" data-filtro="${x.id}" aria-pressed="${S.filtro === x.id}">${x.txt}<small>${n}</small></button>`;
+      return `<button class="chip" type="button" data-filtro="${esc(x.id)}" aria-pressed="${S.filtro === x.id}">${esc(x.txt)}<small>${n}</small></button>`;
     }).join("");
   }
 
@@ -147,7 +157,9 @@
     const r = rareza(p);
     const filas = p.tipo === "Pokémon"
       ? [["Expansión", serieDe(p)], ["Número", p.numero], ["Rareza", p.rareza], ["Grado", graduada(p) ? p.grado : ""], ["Estado", p.estado], ["Año", p.anio]]
-      : [["Serie", serieDe(p)], ["Número", p.numero], ["Color", p.color], ["Año", p.anio], ["Estado", p.estado]];
+      : esPropia(p)
+        ? [["Categoría", p.tipo], ["Línea", serieDe(p)], ["Número", p.numero], ["Variante", p.color], ["Año", p.anio], ["Estado", p.estado]]
+        : [["Serie", serieDe(p)], ["Número", p.numero], ["Color", p.color], ["Año", p.anio], ["Estado", p.estado]];
     const m = $("#modal");
     m.innerHTML = `<div class="modal-caja">
       <div class="card-foto">${imagen(p)}

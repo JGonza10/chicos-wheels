@@ -452,6 +452,27 @@ class PruebasAPI(unittest.TestCase):
         self.assertEqual(self.c.delete(f"/api/categorias/{id_lego}", headers=h2).status_code, 404)
         self.assertEqual(self.c.post("/api/articulos", json={"tipo": "Lego", "nombre": "x"}, headers=h2).status_code, 400)
 
+    def test_47_tienda_con_categorias_y_fotos_https(self):
+        h = {"Authorization": f"Bearer {self.token}"}
+        leer = lambda r: json.loads(r.get_data(as_text=True).split("window.CW_STOCK = ", 1)[1].rstrip().rstrip(";"))
+        # Una foto http:// (así llegan algunas del bot) se guarda como https://
+        _, a = self.pedir("POST", "/api/articulos", {"tipo": "Barbie", "nombre": "Barbie tienda", "valor_estimado": 900,
+                                                     "foto": "http://creations.mattel.com/cdn/shop/files/x.jpg"})
+        self.assertEqual(a["foto"], "https://creations.mattel.com/cdn/shop/files/x.jpg")
+        # Una pieza vieja guardada con http:// también sale con https:// en la tienda
+        from collecthub.db import conectar
+        con = conectar()
+        con.execute("UPDATE articulos SET foto='http://cdn.shopify.com/y.jpg' WHERE id=?", (a["id"],))
+        con.commit(); con.close()
+        with patch.dict(os.environ, {"LANDING_EMAIL": "Chicos@Wheels.mx"}):
+            r = self.c.get("/tienda/stock.js")
+            d = leer(r); r.close()
+        self.assertIn({"nombre": "Barbie", "emoji": "💖"}, d["categorias"])
+        pieza = [p for p in d["piezas"] if p["nombre"] == "Barbie tienda"][0]
+        self.assertEqual((pieza["tipo"], pieza["foto"]), ("Barbie", "https://cdn.shopify.com/y.jpg"))
+        # El service worker no intercepta fotos de otros dominios
+        r = self.c.get("/sw.js"); self.assertIn("url.origin !== self.location.origin", r.get_data(as_text=True)); r.close()
+
     def test_34_respaldo_diario_conserva_solo_los_ultimos(self):
         from collecthub import respaldo
         with tempfile.TemporaryDirectory() as d, patch.object(respaldo, "carpeta", return_value=Path(d)):

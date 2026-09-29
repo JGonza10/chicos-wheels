@@ -61,6 +61,8 @@ def stock(usuario_id: str) -> dict:
         p["precio"] = a.get("valor_estimado") or 0
         p["fecha"] = (a.get("creado_en") or "")[:10]
         foto = a.get("foto") or ""
+        if foto.startswith("http://"):  # piezas guardadas antes de normalizar a https
+            foto = "https://" + foto[7:]
         if foto.startswith("local:"):
             p["foto"] = f"foto/{p['id']}.jpg"
         elif _host_permitido(foto):
@@ -68,8 +70,12 @@ def stock(usuario_id: str) -> dict:
         else:
             p["foto"] = ""
         piezas.append(p)
+    # Categorías propias de la cuenta (Barbie, …): la tienda arma sus filtros con
+    # ellas en automático y solo muestra las que tienen piezas a la venta.
+    categorias = todos("SELECT nombre, emoji FROM categorias WHERE usuario_id=? "
+                       "ORDER BY creado_en, nombre", (usuario_id,))
     return {"generado": datetime.now().strftime("%Y-%m-%d %H:%M"), "muestra": False,
-            "contacto": contacto(), "piezas": piezas}
+            "contacto": contacto(), "categorias": categorias, "piezas": piezas}
 
 
 def archivo_foto(usuario_id: str, pid: str) -> Path | None:

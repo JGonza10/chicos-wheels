@@ -3,7 +3,7 @@
  * verse siempre fresco, nunca una copia vieja servida "offline" por error.
  * Sube CACHE_VERSION cuando cambien app.js/styles.css para forzar a los
  * navegadores con la app ya instalada a bajar la versión nueva. */
-const CACHE_VERSION = 'chicoswheels-v25';
+const CACHE_VERSION = 'chicoswheels-v26';
 const ESTATICOS = ['/', '/app.js', '/styles.css', '/manifest.json'];
 
 self.addEventListener('install', (e) => {
@@ -21,6 +21,10 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+  // Solo archivos de la propia app. Las fotos de Mattel/Shopify y las fuentes de
+  // Google van directo: este worker hereda el CSP de la app (connect-src 'self')
+  // y su fetch() a otro dominio falla, dejando la imagen rota (ERR_FAILED).
+  if (url.origin !== self.location.origin) return;
   // La tienda (/tienda) tampoco: su stock debe verse siempre al día.
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/tienda') || e.request.method !== 'GET') return;
   e.respondWith(
