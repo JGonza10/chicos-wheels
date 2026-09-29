@@ -129,6 +129,15 @@ def borrar_plataforma(id_p):
     return jsonify(ok=True)
 
 
+@bp.post("/compradores/<id_c>/faltas")
+def quitar_faltas(id_c):
+    cur = bd().execute("UPDATE compradores SET faltas=0 WHERE id=? AND usuario_id=?", (id_c, g.usuario_id))
+    bd().commit()
+    if not cur.rowcount:
+        raise ErrorApp("Comprador no encontrado", 404)
+    return jsonify(uno("SELECT * FROM compradores WHERE id=?", (id_c,)))
+
+
 # ---------- Categorías ----------
 
 @bp.post("/categorias")

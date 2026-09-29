@@ -133,18 +133,19 @@ def sembrar(usuario_id: str):
                  envio, otros, costo, p["com_pct"], p["com_fija"], p["ret_pct"], f, adq,
                  "Entregado" if envio else "Sin envío"))
 
-        # Un apartado vigente y uno vencido, para ver ambos estados.
-        con.execute("INSERT INTO apartados (id,usuario_id,articulo_id,comprador_id,nombre_snap,"
-                    "cantidad,precio_acordado,anticipo,fecha,fecha_limite,notas) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                    (uid("AP"), usuario_id, skyline, compradores[1],
-                     "Nissan Skyline GT-R (BNR34)", 1, 140, 50, _dias(6), _dias(-9),
-                     "Paga el viernes de quincena"))
-        con.execute("INSERT INTO apartados (id,usuario_id,articulo_id,comprador_id,nombre_snap,"
-                    "cantidad,precio_acordado,anticipo,fecha,fecha_limite,estatus,notas) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,'Vencido',?)",
-                    (uid("AP"), usuario_id, pikachu, compradores[0], "Pikachu VMAX", 1, 380, 100,
-                     _dias(40), _dias(12), "Ya no contestó"))
+        # Dos pedidos por entregar: uno apartado con anticipo y uno que llegó de la tienda.
+        from .asistente import proximo_sabado
+        for comp, art_id, nombre, precio, anticipo, origen, nota in (
+                (compradores[1], skyline, "Nissan Skyline GT-R (BNR34)", 140, 50, "", "Paga el sábado"),
+                (compradores[0], pikachu, "Pikachu VMAX", 380, 0, "tienda", "Apartado desde la tienda (asistente)")):
+            id_e = uid("E")
+            con.execute("INSERT INTO encargos (id,usuario_id,comprador_id,fecha,fecha_entrega,anticipo,forma_anticipo,"
+                        "notas,origen,confirmado) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (id_e, usuario_id, comp, _dias(3), proximo_sabado(), anticipo,
+                         "Efectivo" if anticipo else "", nota, origen, 0 if origen else 1))
+            costo = con.execute("SELECT precio_compra FROM articulos WHERE id=?", (art_id,)).fetchone()[0]
+            con.execute("INSERT INTO encargo_items (id,encargo_id,articulo_id,nombre_snap,cantidad,precio_unit,costo_unit) "
+                        "VALUES (?,?,?,?,1,?,?)", (uid("EI"), id_e, art_id, nombre, precio, costo))
 
         # Un intercambio: entregó $320 de valor y recibió $420.
         id_t = uid("T")

@@ -100,6 +100,8 @@ def crear_app() -> Flask:
     def limitar():
         from flask import request
         ip = request.remote_addr or "desconocida"
+        if request.path == "/api/respaldo/restaurar":
+            request.max_content_length = 300 * 1024 * 1024  # el respaldo trae las fotos
 
         # Asistente de la tienda: público, así que con topes propios por IP.
         if request.path.startswith("/tienda/api/"):

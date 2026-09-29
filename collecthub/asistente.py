@@ -27,6 +27,7 @@ from .util import ErrorApp, num, texto, uid
 
 MODELO = os.environ.get("ASISTENTE_MODELO", "claude-haiku-4-5")
 MAX_PIEZAS = 6
+FALTAS_BLOQUEO = 2   # con 2 "no se presentó", apartar ya no es automático
 LUGAR = "Balderas"
 
 # Palabras que no ayudan a encontrar una pieza.
@@ -258,14 +259,18 @@ def apartar(usuario_id: str, b: dict) -> dict:
         raise ErrorApp("Esa pieza ya no está disponible", 409)
     entrega = proximo_sabado()
     id_enc = uid("E")
+    faltas = todos("SELECT MAX(faltas) f FROM compradores WHERE usuario_id=? AND lower(tel)=lower(?)",
+                   (usuario_id, contacto))[0]["f"] or 0
+    if faltas >= FALTAS_BLOQUEO:
+        raise ErrorApp("Para apartar esta pieza escríbenos por Facebook o Instagram 🙂", 403)
     with transaccion() as con:
         # Se revisa otra vez dentro de la transacción: dos clientes pueden pedir la última al mismo tiempo.
         libre = con.execute("SELECT disponible FROM v_articulos WHERE id=?", (fila["id"],)).fetchone()
         if not libre or libre["disponible"] < 1:
             raise ErrorApp("Alguien acaba de apartar la última pieza 😔", 409)
         id_c = _comprador(con, usuario_id, nombre, contacto)
-        con.execute("INSERT INTO encargos (id,usuario_id,comprador_id,fecha,fecha_entrega,anticipo,forma_anticipo,notas) "
-                    "VALUES (?,?,?,?,?,0,'',?)",
+        con.execute("INSERT INTO encargos (id,usuario_id,comprador_id,fecha,fecha_entrega,anticipo,forma_anticipo,notas,"
+                    "origen,confirmado) VALUES (?,?,?,?,?,0,'',?,'tienda',0)",
                     (id_enc, usuario_id, id_c, date.today().isoformat(), entrega,
                      f"Apartado desde la tienda (asistente), sin anticipo. Contacto: {contacto}"))
         con.execute("INSERT INTO encargo_items (id,encargo_id,articulo_id,nombre_snap,cantidad,precio_unit,costo_unit) "

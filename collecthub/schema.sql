@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS ajustes (
   usuario_id      TEXT PRIMARY KEY REFERENCES usuarios(id) ON DELETE CASCADE,
   moneda          TEXT    NOT NULL DEFAULT 'MXN',
   meta_mensual    REAL    NOT NULL DEFAULT 5000,
-  dias_estancado  INTEGER NOT NULL DEFAULT 120
+  dias_estancado  INTEGER NOT NULL DEFAULT 120,
+  ultimo_respaldo TEXT    NOT NULL DEFAULT ''   -- último respaldo descargado fuera del servidor
 );
 
 CREATE TABLE IF NOT EXISTS plataformas (
@@ -39,7 +40,8 @@ CREATE TABLE IF NOT EXISTS compradores (
   nombre     TEXT NOT NULL,
   tel        TEXT NOT NULL DEFAULT '',
   interes    TEXT NOT NULL DEFAULT 'Ambas' CHECK (interes IN ('Hot Wheels','Pokémon','Ambas')),
-  notas      TEXT NOT NULL DEFAULT ''
+  notas      TEXT NOT NULL DEFAULT '',
+  faltas     INTEGER NOT NULL DEFAULT 0   -- apartados a los que no se presentó
 );
 CREATE INDEX IF NOT EXISTS ix_comp_usuario ON compradores(usuario_id);
 
@@ -233,6 +235,8 @@ CREATE TABLE IF NOT EXISTS encargos (
   total_final     REAL,
   cobrado_entrega REAL NOT NULL DEFAULT 0,
   forma_entrega   TEXT NOT NULL DEFAULT '',
+  origen          TEXT NOT NULL DEFAULT '',     -- 'tienda' = apartado por el asistente
+  confirmado      INTEGER NOT NULL DEFAULT 1,   -- 0 = llegó de la tienda y falta confirmarlo
   creado_en       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_enc_usuario ON encargos(usuario_id, estatus, fecha_entrega);

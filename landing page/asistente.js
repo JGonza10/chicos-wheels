@@ -17,7 +17,8 @@
   const boton = document.createElement("button");
   boton.type = "button";
   boton.className = "asis-boton";
-  boton.innerHTML = `<span aria-hidden="true">💬</span> ¿Buscas una pieza?`;
+  boton.setAttribute("aria-label", "¿Buscas una pieza? Pregúntale al asistente");
+  boton.innerHTML = `<span aria-hidden="true">💬</span><span class="asis-etiqueta">¿Buscas una pieza?</span>`;
   const panel = document.createElement("section");
   panel.className = "asis-panel";
   panel.hidden = true;
@@ -151,6 +152,36 @@
     if (b && piezasVistas.has(b.dataset.pieza)) pedirApartado(piezasVistas.get(b.dataset.pieza));
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) cerrarPanel(); });
+
+  // ---------- "Avísenme de novedades" (sección de contacto) ----------
+  const nov = document.getElementById("novedades");
+  if (nov) {
+    const cats = ["Todas", "Hot Wheels", "Pokémon", ...(STOCK.categorias || []).map((c) => c.nombre).filter(Boolean)];
+    nov.hidden = false;
+    nov.innerHTML = `<form class="nov-form">
+      <b>🔔 ¿Quieres que te avisemos cuando lleguen piezas nuevas?</b>
+      <div class="nov-campos">
+        <input name="nombre" maxlength="60" placeholder="Tu nombre" required value="${esc(recordar("cw_asis_nombre"))}">
+        <input name="contacto" maxlength="80" placeholder="Tu Facebook o Instagram" required value="${esc(recordar("cw_asis_contacto"))}">
+        <select name="cat" aria-label="De qué">${cats.map((c) => `<option>${esc(c)}</option>`).join("")}</select>
+        <input name="sitio" class="asis-trampa" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <button type="submit">Avísenme</button>
+      </div>
+      <small class="nov-estado" role="status"></small></form>`;
+    const f = nov.querySelector("form");
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const d = Object.fromEntries(new FormData(f));
+      const estado = f.querySelector(".nov-estado"), btn = f.querySelector("button");
+      btn.disabled = true;
+      try {
+        const r = await llamar("avisame", { nombre: d.nombre, contacto: d.contacto, sitio: d.sitio, busqueda: `Novedades: ${d.cat}` });
+        recordar("cw_asis_nombre", d.nombre); recordar("cw_asis_contacto", d.contacto);
+        estado.textContent = r.texto.replace(/«Novedades: [^»]*»/, "algo nuevo");
+        f.querySelector(".nov-campos").hidden = true;
+      } catch (err) { estado.textContent = err.message; btn.disabled = false; }
+    });
+  }
 
   // Desde la ficha de una pieza ("Apartar aquí"): abre el chat con esa pieza.
   window.CWAsistente = {

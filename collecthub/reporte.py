@@ -180,8 +180,9 @@ def generar_pdf(usuario_id: str, config: dict) -> bytes:
     if c["tipo"] != "todos":
         ventas = [v for v in ventas if v["tipo_snap"] == c["tipo"]]
 
-    # Los apartados traen su propio estatus (Vigente/Vencido/...), no el del inventario.
-    ap = todos("SELECT * FROM apartados WHERE usuario_id=? ORDER BY fecha_limite", (usuario_id,))
+    # Sección "apartados" = pedidos por entregar (desde 2026-09-25 todo apartado es un pedido).
+    from .rutas.movimientos import encargos_de
+    ap = [e for e in encargos_de(usuario_id) if e["estatus"] in ("Pendiente", "Empacado")]
     nombres = {x["id"]: x["nombre"] for x in todos("SELECT id,nombre FROM compradores WHERE usuario_id=?", (usuario_id,))}
 
     pdf = _Pdf(c["titulo"], c["orientacion"])
@@ -251,15 +252,16 @@ def generar_pdf(usuario_id: str, config: dict) -> bytes:
             pdf.vacio("Sin ventas en el periodo.")
 
     if "apartados" in c["secciones"]:
-        pdf.titulo_seccion(f"Apartados ({len(ap)})")
+        pdf.titulo_seccion(f"Pedidos por entregar ({len(ap)})")
+        etq = {"Pendiente": "Apartado", "Empacado": "En proceso"}
         if ap:
-            filas = [[x["fecha"], nombres.get(x["comprador_id"]) or x.get("cliente_snap") or "-", x["nombre_snap"], x["estatus"], x["fecha_limite"] or "-",
-                      m(x["precio_acordado"]), m(x["anticipo"]),
-                      m(x["precio_acordado"] - x["anticipo"])] for x in ap]
-            pdf.tabla([("Fecha", 2, "L"), ("Cliente", 3.2, "L"), ("Pieza", 4.6, "L"), ("Estatus", 2, "L"), ("Limite", 2, "L"),
-                       ("Acordado", 2.2, "R"), ("Anticipo", 2.2, "R"), ("Pendiente", 2.2, "R")], filas)
+            filas = [[x["fecha"], nombres.get(x["comprador_id"]) or "-",
+                      ", ".join(f"{i['cantidad']}x {i['nombre_snap']}" for i in x["items"]), etq.get(x["estatus"], x["estatus"]),
+                      x["fecha_entrega"] or "-", m(x["total"]), m(x["anticipo"]), m(x["resta"])] for x in ap]
+            pdf.tabla([("Fecha", 2, "L"), ("Cliente", 3.2, "L"), ("Piezas", 4.6, "L"), ("Estatus", 2, "L"), ("Entrega", 2, "L"),
+                       ("Total", 2.2, "R"), ("Anticipo", 2.2, "R"), ("Resta", 2.2, "R")], filas)
         else:
-            pdf.vacio("No hay apartados.")
+            pdf.vacio("No hay pedidos por entregar.")
 
     return bytes(pdf.output())
 

@@ -522,6 +522,28 @@ def borrar_encargo(id_enc):
     return jsonify(ok=True)
 
 
+@bp.post("/encargos/<id_enc>/confirmar")
+def confirmar_encargo(id_enc):
+    """Apartado que llegó de la tienda: ya se confirmó con el cliente."""
+    _encargo_activo(id_enc)
+    bd().execute("UPDATE encargos SET confirmado=1 WHERE id=?", (id_enc,))
+    bd().commit()
+    return jsonify(encargos_de(g.usuario_id, id_enc)[0])
+
+
+@bp.post("/encargos/<id_enc>/no-show")
+def no_se_presento(id_enc):
+    """El cliente no llegó: se cancela (libera las piezas) y se le anota una falta.
+    Con 2 faltas el asistente de la tienda ya no le deja apartar solo."""
+    e = _encargo_activo(id_enc)
+    with transaccion() as con:
+        con.execute("UPDATE encargos SET estatus='Cancelado', notas=trim(notas || ' · No se presentó') WHERE id=?", (id_enc,))
+        if e["comprador_id"]:
+            con.execute("UPDATE compradores SET faltas=faltas+1 WHERE id=? AND usuario_id=?",
+                        (e["comprador_id"], g.usuario_id))
+    return jsonify(encargos_de(g.usuario_id, id_enc)[0])
+
+
 @bp.post("/encargos/<id_enc>/entregar")
 def entregar_encargo(id_enc):
     """Entrega en persona: cada pieza se vuelve una venta (con su costo congelado),

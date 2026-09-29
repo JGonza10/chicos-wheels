@@ -4,7 +4,9 @@ from datetime import datetime
 
 from flask import Blueprint, Response, g, jsonify, request
 
+from .. import respaldo_cuenta
 from ..db import todos, transaccion, uno, vencer_apartados
+from ..landing import id_publico
 from ..seed import sembrar
 from .movimientos import encargos_de
 from ..util import ErrorApp, precio_objetivo
@@ -25,6 +27,7 @@ def estado_completo(usuario_id: str) -> dict:
         a["grail"] = bool(a["grail"])
         a["valuaciones"] = todos(
             "SELECT * FROM valuaciones WHERE articulo_id=? ORDER BY fecha", (a["id"],))
+        a["pid"] = id_publico(a["id"])   # id que usa el link de la tienda (/tienda/p/<pid>)
 
     intercambios = todos("SELECT * FROM intercambios WHERE usuario_id=? ORDER BY fecha DESC",
                          (usuario_id,))
@@ -149,6 +152,26 @@ def exportar():
     return Response(json.dumps(datos, ensure_ascii=False, indent=2),
                     mimetype="application/json",
                     headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
+@bp.get("/respaldo")
+def respaldo_zip():
+    """Respaldo para guardar fuera del servidor: datos + fotos de esta cuenta."""
+    datos = respaldo_cuenta.generar_zip(g.usuario_id)
+    return Response(datos, mimetype="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="chicos-wheels-respaldo-{datetime.now():%Y-%m-%d}.zip"',
+        "Cache-Control": "no-store"})
+
+
+@bp.post("/respaldo/restaurar")
+def respaldo_restaurar():
+    """Reemplaza TODOS los datos de la cuenta por los del respaldo."""
+    if (request.form.get("confirmar") or "").strip().upper() != "RESTAURAR":
+        raise ErrorApp("Escribe RESTAURAR para confirmar")
+    archivo = request.files.get("archivo")
+    if not archivo:
+        raise ErrorApp("Elige el archivo de respaldo (.zip o .json)")
+    return jsonify(respaldo_cuenta.restaurar(g.usuario_id, archivo.read()))
 
 
 def _borrar_todo(usuario_id):

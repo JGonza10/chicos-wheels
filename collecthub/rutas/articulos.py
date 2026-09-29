@@ -8,6 +8,7 @@ import openpyxl
 from flask import Blueprint, g, jsonify, request, send_from_directory
 
 from ..categorias import prefijo_id, tipos_de
+from ..espera import avisar_si_esperan
 from ..db import RUTA_BD, bd, todos, transaccion, uno
 from ..util import ErrorApp, entero, fecha, hoy, num, texto, uid
 from ..vision import buscar_precio_pokemon, identificar_foto, procesar_imagen
@@ -129,7 +130,9 @@ def crear():
     datos = limpiar(request.get_json(silent=True) or {})
     with transaccion() as con:
         nuevo_id = _insertar_articulo(con, datos)
-    return jsonify(uno("SELECT * FROM v_articulos WHERE id=?", (nuevo_id,))), 201
+    nuevo = uno("SELECT * FROM v_articulos WHERE id=?", (nuevo_id,))
+    avisar_si_esperan(g.usuario_id, nuevo)
+    return jsonify(nuevo), 201
 
 
 def _valor_celda(v):

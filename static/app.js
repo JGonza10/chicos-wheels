@@ -137,6 +137,7 @@ function normalizar(e) {
     moneda: e.ajustes.moneda,
     metaMensual: num(e.ajustes.meta_mensual),
     diasEstancado: num(e.ajustes.dias_estancado),
+    ultimoRespaldo: e.ajustes.ultimo_respaldo || '',
   };
   e.articulos.forEach((a) => {
     a.historial = a.valuaciones || [];
@@ -245,7 +246,7 @@ function stats() {
     estancados: inv.filter((a) => a.estatus === 'Disponible' && a.fecha_adq && dias(a.fecha_adq) > db.ajustes.diasEstancado),
     sinValor: inv.filter((a) => !num(a.valor_estimado)).length,
     agotados: db.articulos.filter((a) => !num(a.cantidad)).length,
-    apartados: ap.length, anticipos: suma(ap, (x) => x.anticipo),
+    apartados: suma(inv, (a) => num(a.apartadas)), anticipos: suma(ap, (x) => x.anticipo),
     vencidos: db.apartados.filter((x) => x.estatus === 'Vencido').length,
     saldoMes: suma(db.ventas.filter((v) => (v.fecha || '').slice(0, 7) === hoy().slice(0, 7)), (v) => v.neto),
   };
@@ -356,7 +357,7 @@ function salir(silencioso) {
 
 /* ==================== Render ==================== */
 const NAV = [['panel', '◧', 'Panel'], ['inventario', '▦', 'Inventario'],
-  ['SEP1', '', 'Movimientos'], ['ventas', '⇄', 'Ventas'], ['encargos', '🛍', 'Pedidos'], ['apartados', '⏳', 'Apartados previos'], ['intercambios', '⇌', 'Intercambios'],
+  ['SEP1', '', 'Movimientos'], ['ventas', '⇄', 'Ventas'], ['encargos', '🛍', 'Pedidos'], ['intercambios', '⇌', 'Intercambios'],
   ['SEP2', '', 'Catálogos'], ['compradores', '☺', 'Compradores'], ['wishlist', '★', 'Faltantes'],
   ['etiquetas', '▩', 'Etiquetas QR'], ['datos', '⛃', 'Datos']];
 const CNT = {
@@ -519,10 +520,14 @@ function vPanel() {
   ${(() => { const rf = rendimientoFuentes(); return rf.length ? `<div class="pnl" style="margin-top:16px"><h2>De dónde salen tus mejores piezas</h2>
     <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Retorno = ganancia neta ÷ lo que costaron las piezas vendidas. Compra más donde el retorno es mayor.</p>
     ${rf.slice(0, 6).map((o) => bar(`${o.k} · ${o.n} vendidas`, `${pct(o.roi)} · ${money(o.neto)}`, Math.min(100, Math.max(0, o.roi) * 50), o.roi >= 0 ? 'var(--green)' : 'var(--red)')).join('')}</div>` : ''; })()}
+  ${tarjetaTienda()}
+  ${tarjetaEspera()}
+  ${tarjetaRespaldo()}
+  ${tarjetaRotacion()}
   <div class="sec"><h2>Qué necesita tu atención</h2><span class="ln"></span></div>
   <div class="g3">
-    ${alerta('Capital estancado', s.estancados.length, `piezas con más de ${db.ajustes.diasEstancado} días sin venderse`, 'var(--yellow)', 'inventario')}
-    ${alerta('Apartados vencidos', s.vencidos, 'anticipos que ya pasaron su fecha límite', 'var(--red)', 'apartados')}
+    ${alerta('Capital estancado', s.estancados.length, `piezas con más de ${db.ajustes.diasEstancado} días sin venderse · toca para armar ofertas`, 'var(--yellow)', 'inventario').replace('data-a="nav" data-v="inventario"', 'data-a="ofertas"')}
+    ${alerta('Clientes esperando', (() => { const con = new Set(esperandoConStock().map((x) => x.p.id)); return (db.pedidos || []).filter((p) => !p.atendido && !esNovedades(p) && !con.has(p.id)).length; })(), 'piezas que te pidieron y aún no tienes', 'var(--red)', 'compradores')}
     ${alerta('Sin precio de mercado', s.sinValor, 'piezas que no puedes valuar ni publicar', 'var(--blue)', 'inventario')}
   </div>
   <div class="g2" style="margin-top:16px">
@@ -542,6 +547,50 @@ function vPanel() {
   </div>`;
 }
 
+/* ---------- Tarjetas del Panel ---------- */
+const porConfirmar = () => encActivos().filter((e) => e.origen === 'tienda' && !e.confirmado);
+const tagFaltas = (c) => (c && num(c.faltas) ? ` <span class="tag r" title="Apartados a los que no llegó">${c.faltas} falta${num(c.faltas) === 1 ? '' : 's'}</span>` : '');
+function tarjetaTienda() {
+  const l = porConfirmar(); if (!l.length) return '';
+  return `<div class="pnl" style="margin-top:16px;border-color:var(--blue)"><h2>🛒 Apartados de la tienda por confirmar (${l.length})</h2>
+    <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Llegaron por el asistente de la tienda. Escríbele al cliente para confirmar; si no llega el sábado, márcalo con 🚫 y la pieza se libera.</p>
+    <div class="feed">${l.map((e) => { const c = cli(e.comprador_id) || {}; return `<div class="fi"><span class="dot" style="background:var(--blue)"></span>
+      <span class="tx"><b>${esc(c.nombre || 'Cliente')}${tagFaltas(c)}</b><span>${e.items.map((i) => esc(i.nombre_snap)).join(', ')} · ${money(e.total)} · ${esc(fmtDia(e.fecha_entrega))}${c.tel ? ' · ' + esc(c.tel) : ''}</span></span>
+      <span style="white-space:nowrap"><button class="btn sm gh" data-a="encwa" data-id="${e.id}" title="Escribirle para confirmar">💬</button>
+      <button class="btn sm grn" data-a="encconf" data-id="${e.id}">✓ Confirmar</button>
+      <button class="btn sm gh" data-a="encnoshow" data-id="${e.id}" title="No se presentó: libera la pieza y le anota una falta">🚫</button></span></div>`; }).join('')}</div></div>`;
+}
+function tarjetaEspera() {
+  const l = esperandoConStock(), subs = novedadesSubs(), nuevas = piezasNuevas(7);
+  if (!l.length && !(subs.length && nuevas.length)) return '';
+  return `<div class="pnl" style="margin-top:16px;border-color:var(--green)"><h2>🔔 Llegó lo que esperaban</h2>
+    ${l.length ? `<p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Clientes de tu lista de espera con una pieza que ya tienes. Avísales antes de publicarla.</p>
+    <div class="feed">${l.map(({ p, piezas }) => { const c = cli(p.comprador_id) || {}; return `<div class="fi"><span class="dot" style="background:var(--green)"></span>
+      <span class="tx"><b>${esc(c.nombre || 'Cliente')} buscaba “${esc(descEspera(p))}”</b><span>${piezas.slice(0, 3).map((a) => `${esc(a.nombre)} · ${money(a.valor_estimado)}`).join(' / ')}</span></span>
+      <span style="white-space:nowrap"><button class="btn sm grn" data-a="avisaesp" data-id="${p.id}">💬 Avisar</button>
+      <button class="btn sm gh" data-a="pedok" data-id="${p.id}" data-v="1" title="Ya le avisé">✓</button></span></div>`; }).join('')}</div>` : ''}
+    ${subs.length && nuevas.length ? `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;${l.length ? 'margin-top:12px;padding-top:12px;border-top:1px solid var(--line)' : ''}">
+      <span style="font-size:13px;flex:1">${subs.length} cliente(s) pidieron que les avises de novedades y tienes <b>${nuevas.length}</b> pieza(s) nueva(s) esta semana.</span>
+      <button class="btn sm grn" data-a="novsubs">Avisar novedades</button></div>` : ''}</div>`;
+}
+function tarjetaRespaldo() {
+  const ult = db.ajustes.ultimoRespaldo;
+  if (!db.articulos.length || (ult && dias(ult) <= 7)) return '';
+  return `<div class="pnl" style="margin-top:16px;border-color:var(--yellow);display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <div style="flex:1;min-width:220px"><h2 style="margin-bottom:4px">💾 Descarga tu respaldo</h2>
+      <div style="font-size:12.5px;color:var(--muted)">${ult ? `El último fue hace ${dias(ult)} días.` : 'Aún no descargas ninguno.'} Guárdalo en tu PC o en tu nube: si el servidor falla, con él recuperas todo (datos y fotos).</div></div>
+    <button class="btn pri sm" data-a="respzip">Descargar respaldo</button></div>`;
+}
+function tarjetaRotacion() {
+  const r = rotacionCategorias(); if (!r.length) return '';
+  return `<div class="pnl" style="margin-top:16px"><h2>Qué se vende más rápido</h2>
+    <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Por categoría: días que tarda una pieza en venderse y ganancia por semana (últimas 8 semanas). Compra más de lo que rota rápido y deja buena ganancia.</p>
+    <div class="wrap"><table class="tbl"><thead><tr><th>Categoría</th><th class="num">Vendidas</th><th class="num">Días para vender</th><th class="num">Ganancia total</th><th class="num">Por semana</th><th class="num">En stock</th></tr></thead><tbody>
+    ${r.map((o) => `<tr><td><b>${emoji(o.t)} ${esc(o.t)}</b></td><td class="num">${o.n}</td><td class="num">${o.prom === null ? '—' : o.prom + ' d'}</td>
+      <td class="num ${o.neto >= 0 ? 'pos' : 'neg'}">${money(o.neto)}</td><td class="num"><b>${money(o.semana)}</b></td><td class="num">${o.stock}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+}
+
 /* ---------- Precio mínimo para regatear ---------- */
 /** Piso de precio por pieza: el menor precio con el que aún ganas el margen mínimo elegido
  *  (costo + margen + comisiones del canal de Balderas o, en su defecto, Facebook). */
@@ -551,13 +600,84 @@ function precioMinimo(a) {
   if (div <= 0) return num(a.valor_estimado);
   return (num(a.precio_compra) * (1 + ui.margenMin / 100) + num(p.com_fija)) / div;
 }
-/** Pedidos de clientes (sin atender) que parecen coincidir con esta pieza. */
-function pedidosPara(a) {
-  const hay = [a.nombre, a.numero, a.serie, a.color, a.expansion].join(' ').toLowerCase();
-  return (db.pedidos || []).filter((p) => !p.atendido).filter((p) => {
-    const t = p.descripcion.toLowerCase().split(/[^a-z0-9áéíóúñ]+/).filter((x) => x.length >= 3);
-    return t.length && t.filter((x) => hay.includes(x)).length >= Math.min(2, t.length);
+/* ---------- Lista de espera: misma regla que collecthub/espera.py (si cambias una, cambia la otra) ---------- */
+const VACIAS = new Set(`hola buenas buenos dias tardes noches que tal tienes tienen tendras tendran hay habra busco buscando
+  quiero quisiera queria me interesa interesan necesito ando alguna alguno algun algo un una uno unos unas tiene
+  el la los las lo le les de del al en con sin por para y o u a mi tu su sus favor porfa gracias
+  es son esta estan este estos esa ese eso disponible disponibles venta vendes venden precio cuanto
+  cuesta cuestan vale valen stock pieza piezas modelo modelos coleccion si no ya aun todavia mas`.split(/\s+/));
+const plano = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const raiz = (p) => (p.length > 4 && p.endsWith('es') && !'aeiou'.includes(p[p.length - 3]) ? p.slice(0, -2) : p.length > 3 && p.endsWith('s') ? p.slice(0, -1) : p);
+const palabrasBusq = (t) => (plano(t).match(/[a-z0-9]+/g) || []).filter((p) => p.length >= 2 && !VACIAS.has(p)).map(raiz);
+/** 'Novedades: Barbie (desde la tienda)' → 'barbie' ('' = todas); null si no es de novedades. */
+function catNovedades(desc) {
+  const d = plano(desc).trim();
+  if (!d.startsWith('novedades')) return null;
+  const r = d.slice(9).replace(/\(.*?\)/g, '').replace(/^[\s:-]+|[\s:-]+$/g, '');
+  return ['', 'todas', 'todo', 'cualquiera'].includes(r) ? '' : r;
+}
+function coincideEspera(desc, a) {
+  const cat = catNovedades(desc);
+  if (cat !== null) return cat === '' || cat === plano(a.tipo);
+  const q = palabrasBusq(desc).filter((p) => p !== 'desde' && p !== 'tienda');
+  if (!q.length) return false;
+  const pal = [...new Set((plano([a.nombre, a.numero, a.serie, a.color, a.expansion, a.tipo].join(' ')).match(/[a-z0-9]+/g) || []).map(raiz))];
+  const n = q.filter((x) => pal.includes(x) || (x.length >= 3 && pal.some((p) => p.startsWith(x)))).length;
+  return n >= Math.min(2, q.length);
+}
+const esNovedades = (p) => catNovedades(p.descripcion) !== null;
+const descEspera = (p) => String(p.descripcion || '').replace(/\s*\(desde la tienda\)$/, '');
+/** Clientes de la lista de espera (sin atender) que esperan esta pieza. */
+const pedidosPara = (a) => (db.pedidos || []).filter((p) => !p.atendido && coincideEspera(p.descripcion, a));
+const vendible = (a) => libre(a) > 0 && a.estatus === 'Disponible' && !esPorRecibir(a);
+/** Link público de la pieza en la tienda (vista previa con foto al pegarlo en Facebook). */
+const linkTienda = (a) => (a && a.pid ? `${location.origin}/tienda/p/${a.pid}` : '');
+function esperandoConStock() {
+  const disp = db.articulos.filter(vendible);
+  return (db.pedidos || []).filter((p) => !p.atendido && !esNovedades(p))
+    .map((p) => ({ p, piezas: disp.filter((a) => coincideEspera(p.descripcion, a)) })).filter((x) => x.piezas.length);
+}
+const novedadesSubs = () => (db.pedidos || []).filter((p) => !p.atendido && esNovedades(p));
+const piezasNuevas = (d) => db.articulos.filter((a) => vendible(a) && dias(String(a.creado_en || '').slice(0, 10)) <= d);
+function avisarEspera(p, piezas) {
+  const c = cli(p.comprador_id) || { nombre: '' };
+  enviarWhatsApp(c, [`Hola ${c.nombre || ''} 👋 ¡Ya tengo lo que buscabas (${descEspera(p)})!`, '',
+    ...piezas.slice(0, 5).map((a) => `• ${a.nombre} — ${money(a.valor_estimado)}${linkTienda(a) ? '\n  ' + linkTienda(a) : ''}`), '',
+    `📍 Entrego en ${LUGAR_ENTREGA} los sábados. ¿Te la aparto?`].join('\n'));
+}
+function avisarNovedades(p) {
+  const c = cli(p.comprador_id) || { nombre: '' }, cat = catNovedades(p.descripcion);
+  const l = piezasNuevas(7).filter((a) => coincideEspera(p.descripcion, a)).slice(0, 6);
+  if (!l.length) { toast('No hay piezas nuevas de lo que pidió este cliente', true); return; }
+  enviarWhatsApp(c, [`Hola ${c.nombre || ''} 👋 Te aviso que llegaron piezas nuevas${cat ? ' de ' + (l[0].tipo || cat) : ''}:`, '',
+    ...l.map((a) => `• ${a.nombre} — ${money(a.valor_estimado)}${linkTienda(a) ? '\n  ' + linkTienda(a) : ''}`), '',
+    `📍 Entrego en ${LUGAR_ENTREGA} los sábados. ¿Te aparto alguna?`].join('\n'));
+}
+
+/* ---------- Rotación por categoría ---------- */
+function rotacionCategorias() {
+  const por = {}, lim = new Date(Date.now() - 56 * 864e5).toISOString().slice(0, 10);
+  db.ventas.forEach((v) => {
+    const t = v.tipo_snap || (art(v.articulo_id) || {}).tipo || 'Sin categoría';
+    const o = por[t] || (por[t] = { t, n: 0, dd: [], neto: 0, neto8: 0 });
+    o.n += num(v.cantidad) || 1; o.neto += num(v.neto);
+    if ((v.fecha || '') >= lim) o.neto8 += num(v.neto);
+    if (v.fecha_adq_snap) o.dd.push(dias(v.fecha_adq_snap, v.fecha));
   });
+  return Object.values(por).map((o) => Object.assign(o, {
+    prom: o.dd.length ? Math.round(suma(o.dd, (x) => x) / o.dd.length) : null, semana: o.neto8 / 8,
+    stock: suma(db.articulos.filter((a) => a.tipo === o.t), (a) => libre(a)),
+  })).sort((a, b) => b.semana - a.semana || b.neto - a.neto);
+}
+
+/* ---------- Ofertas para piezas estancadas ---------- */
+/** Rebaja sugerida: 10% (15% o 20% si lleva mucho más tiempo), nunca debajo del precio mínimo. */
+function rebajaSugerida(a) {
+  const d = dias(a.fecha_adq), lim = db.ajustes.diasEstancado || 120, valor = num(a.valor_estimado);
+  const pct = d > lim * 2 ? 0.2 : d > lim * 1.5 ? 0.15 : 0.1;
+  const piso = Math.ceil(precioMinimo(a) / 5) * 5;
+  const sug = Math.min(valor, Math.max(piso, Math.round(valor * (1 - pct) / 5) * 5));
+  return { d, pct, piso, sug, conviene: sug < valor };
 }
 const esPorRecibir = (a) => num(a.cantidad) > 0 && String(a.ubicacion || '').trim().toLowerCase() === 'por recibir';
 const porRecibir = () => db.articulos.filter(esPorRecibir);
@@ -615,22 +735,24 @@ function vEncargos() {
     <div class="pnl wrap" style="padding:6px"><table class="tbl"><thead><tr>
       <th>Cliente</th><th>Piezas</th><th class="num">Costo</th><th class="num">Precio</th><th class="num">Anticipo</th><th class="num">Por cobrar</th><th>Estatus</th><th></th></tr></thead><tbody>
       ${grupos[k].map((e) => { const c = cli(e.comprador_id) || {}; const act1 = e.estatus === 'Pendiente' || e.estatus === 'Empacado';
-        return `<tr class="${e.estatus === 'Cancelado' ? 'sold' : ''}"><td><b>${esc(c.nombre || 'Cliente')}</b><div style="font-size:11px;color:var(--muted)">${esc(c.tel || '')}${e.notas ? ' · ' + esc(e.notas) : ''}</div></td>
+        return `<tr class="${e.estatus === 'Cancelado' ? 'sold' : ''}"><td><b>${esc(c.nombre || 'Cliente')}</b>${tagFaltas(c)}${e.origen === 'tienda' ? ` <span class="tag ${e.confirmado ? 'b' : 'y'}">🛒 Tienda${e.confirmado ? '' : ' · por confirmar'}</span>` : ''}<div style="font-size:11px;color:var(--muted)">${esc(c.tel || '')}${e.notas ? ' · ' + esc(e.notas) : ''}</div></td>
         <td style="font-size:12.5px">${e.items.map((i) => `${i.cantidad}× ${esc(i.nombre_snap)} <span class="mu">@ ${money(i.precio_unit)}</span>`).join('<br>')}</td>
         <td class="num">${money(e.costo)}</td><td class="num"><b>${money(e.estatus === 'Entregado' && e.total_final != null ? e.total_final : e.total)}</b></td>
         <td class="num">${e.anticipo ? money(e.anticipo) + `<div class="mu" style="font-size:10.5px">${esc(e.forma_anticipo)}</div>` : '—'}</td>
         <td class="num ${e.resta ? '' : 'pos'}">${e.estatus === 'Entregado' ? `<span class="mu">cobrado ${money(e.cobrado_entrega)}</span>` : money(e.resta)}</td>
         <td><span class="tag ${claseEnc(e)}">${esc(etqEnc(e))}</span></td>
-        <td style="text-align:right;white-space:nowrap">${act1 ? `
+        <td style="text-align:right;min-width:230px"><div style="display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end">${act1 ? `
           <button class="btn sm gh" data-a="encempacar" data-id="${e.id}" data-v="${e.estatus === 'Empacado' ? 'Pendiente' : 'Empacado'}" title="${e.estatus === 'Empacado' ? 'Regresar a Apartado' : 'Ya está empacado y listo para llevar'}">${e.estatus === 'Empacado' ? '↩ Apartado' : '📦 En proceso'}</button>
           <button class="btn sm grn" data-a="encrapido" data-id="${e.id}" data-v="Efectivo" title="Entregado y cobrado el resto en efectivo">💵</button>
           <button class="btn sm grn" data-a="encrapido" data-id="${e.id}" data-v="Depósito" title="Entregado y cobrado el resto por depósito">🏦</button>
-          <button class="btn sm gh" data-a="encwa" data-id="${e.id}" title="Mensaje de WhatsApp al cliente">💬</button>
+          ${e.origen === 'tienda' && !e.confirmado ? `<button class="btn sm grn" data-a="encconf" data-id="${e.id}" title="Ya lo confirmaste con el cliente">✓</button>` : ''}
+          <button class="btn sm gh" data-a="encwa" data-id="${e.id}" title="Mensaje al cliente (Messenger o Instagram)">💬</button>
           <button class="btn sm gh" data-a="editenc" data-id="${e.id}">Editar</button>
           <button class="btn sm gh" data-a="encentregar" data-id="${e.id}" title="Entregar con otro monto o forma de pago">Entregar…</button>
+          <button class="btn sm gh" data-a="encnoshow" data-id="${e.id}" title="No se presentó: libera las piezas y le anota una falta al cliente">🚫</button>
           <button class="btn sm gh" data-a="enccancelar" data-id="${e.id}" title="Cancelar y liberar las piezas">✕</button>`
           : (e.estatus === 'Cancelado' ? `<button class="btn sm gh" data-a="encborrar" data-id="${e.id}">Borrar</button>`
-            : (encDebe(e) > 0.004 ? botonesCobro(e) : ''))}</td></tr>`; }).join('')}
+            : (encDebe(e) > 0.004 ? botonesCobro(e) : ''))}</div></td></tr>`; }).join('')}
     </tbody></table></div>`).join('')
     : vacio('🛍', 'Aún no hay encargos', 'Cuando un cliente te pida una o varias piezas, regístralo aquí: se reservan, se empacan y al entregar en Balderas se vuelven ventas.',
       '<button class="btn pri" data-a="nuevoenc">Nuevo encargo</button>')}
@@ -658,13 +780,32 @@ const botonesCobro = (e) => `<button class="btn sm grn" data-a="pagar" data-id="
   <button class="btn sm grn" data-a="pagar" data-id="${e.id}" data-v="Depósito" title="Pagó todo lo que debía, por depósito">🏦</button>
   <button class="btn sm gh" data-a="abono" data-id="${e.id}" title="Registrar un abono parcial">Abono…</button>
   <button class="btn sm gh" data-a="encdeuda" data-id="${e.id}" title="Recordatorio de pago por WhatsApp">💬</button>`;
-/** Abre WhatsApp con el texto (o lo copia si el cliente no tiene teléfono guardado). */
-function enviarWhatsApp(c, txt) {
-  const dig = String((c && c.tel) || '').replace(/\D/g, '');
-  if (dig.length >= 10) { window.open(`https://wa.me/${dig.length === 10 ? '52' + dig : dig}?text=${encodeURIComponent(txt)}`, '_blank', 'noopener'); return; }
-  const t = document.createElement('textarea'); t.value = txt; document.body.appendChild(t); t.select();
-  try { document.execCommand('copy'); toast('Mensaje copiado (el cliente no tiene teléfono guardado)'); } catch (x) { toast('No se pudo copiar', true); }
+/** Red por la que se le escribe al cliente, según lo que guardaste en su contacto. */
+function redDe(c) {
+  const t = String((c && c.tel) || '').trim();
+  const usr = (x) => x.split('?')[0].replace(/\/+$/, '').split('/').pop().replace(/^@/, '').replace(/[^A-Za-z0-9._-]/g, '');
+  if (/facebook\.com|fb\.com|fb\.me|m\.me\//i.test(t)) return { red: 'Messenger', url: 'https://m.me/' + usr(t) };
+  if (/instagram\.com|ig\.me\//i.test(t) || /^@/.test(t)) return { red: 'Instagram', url: 'https://ig.me/m/' + usr(t) };
+  const dig = t.replace(/\D/g, '');
+  if (dig.length >= 10 && !/[a-z]/i.test(t)) return { red: 'WhatsApp', url: `https://wa.me/${dig.length === 10 ? '52' + dig : dig}` };
+  return { red: '', url: '' };
+}
+function copiarTexto(txt) {
+  const t = document.createElement('textarea'); t.value = txt; t.style.position = 'fixed'; t.style.opacity = '0';
+  document.body.appendChild(t); t.select();
+  let ok = false; try { ok = document.execCommand('copy'); } catch (x) { /* sin permiso */ }
   t.remove();
+  if (!ok && navigator.clipboard) navigator.clipboard.writeText(txt).then(() => {}, () => {});
+  return true;
+}
+/** Mensaje al cliente: Chicos Wheels atiende por Messenger e Instagram (el texto se copia para
+ *  pegarlo en el chat que se abre). WhatsApp solo si lo único guardado es un teléfono. */
+function enviarWhatsApp(c, txt) {
+  const r = redDe(c);
+  if (r.red === 'WhatsApp') { window.open(`${r.url}?text=${encodeURIComponent(txt)}`, '_blank', 'noopener'); return; }
+  copiarTexto(txt);
+  if (r.url) { window.open(r.url, '_blank', 'noopener'); toast(`Mensaje copiado: pégalo en ${r.red}`); return; }
+  toast(c && c.tel ? `Mensaje copiado · búscalo como ${c.tel}` : 'Mensaje copiado (el cliente no tiene contacto guardado)');
 }
 function mensajeDeuda(e) {
   const c = cli(e.comprador_id) || {};
@@ -934,12 +1075,12 @@ function vComp() {
   return hdr('Compradores', 'A quién le avisas primero', `<button class="btn pri" data-a="nuevocomp">+ Agregar comprador</button>`) +
   (r.length ? `<div class="pnl wrap" style="padding:16px 6px"><table class="tbl"><thead><tr>
     <th>Cliente</th><th>Le interesa</th><th>Contacto</th><th class="num">Compras</th><th class="num">Gastado</th><th>Última</th><th></th></tr></thead><tbody>
-    ${r.map((x) => `<tr><td><b>${esc(x.c.nombre)}</b>${x.total > 2000 ? ' <span class="tag y">VIP</span>' : ''}${x.ap ? ` <span class="tag b">${x.ap} apartado</span>` : ''}
+    ${r.map((x) => `<tr><td><b>${esc(x.c.nombre)}</b>${x.total > 2000 ? ' <span class="tag y">VIP</span>' : ''}${tagFaltas(x.c)}${x.ap ? ` <span class="tag b">${x.ap} apartado</span>` : ''}
       <div style="font-size:11.5px;color:var(--muted)">${esc(x.c.notas || '')}</div></td>
       <td><span class="tag">${esc(x.c.interes)}</span></td><td class="mn" style="font-size:12.5px">${esc(x.c.tel || '—')}</td>
       <td class="num">${x.n}</td><td class="num">${money(x.total)}</td>
       <td class="mn" style="font-size:12.5px;color:var(--muted)">${x.ult || '—'}${x.ult && dias(x.ult) > 30 ? `<div style="color:var(--yellow);font-size:11px">🔔 hace ${dias(x.ult)} días: recontáctalo</div>` : ''}</td>
-      <td style="text-align:right;white-space:nowrap"><button class="btn sm gh" data-a="compwa" data-id="${x.c.id}" title="Avisarle de piezas nuevas por WhatsApp">💬 Novedades</button> <button class="btn sm gh" data-a="editcomp" data-id="${x.c.id}">Editar</button></td></tr>`).join('')}
+      <td style="text-align:right;white-space:nowrap">${num(x.c.faltas) ? `<button class="btn sm gh" data-a="quitafaltas" data-id="${x.c.id}" title="Perdonar sus faltas: podrá volver a apartar desde la tienda">Quitar faltas</button> ` : ''}<button class="btn sm gh" data-a="compwa" data-id="${x.c.id}" title="Avisarle de piezas nuevas">💬 Novedades</button> <button class="btn sm gh" data-a="editcomp" data-id="${x.c.id}">Editar</button></td></tr>`).join('')}
     </tbody></table></div>`
     : vacio('☺', 'Sin clientes registrados', 'Guarda a quien te compra. Cuando llegue una pieza de su interés sabrás a quién escribirle antes de publicarla.',
       '<button class="btn pri" data-a="nuevocomp">Agregar comprador</button>')) + vPedidos();
@@ -1030,9 +1171,12 @@ function vDatos() {
         <input class="in" type="number" value="${db.ajustes.diasEstancado}" data-a="set" data-k="dias_estancado"></div>
     </div>
     <div class="pnl"><h2>Respaldo e importación</h2>
-      <p style="font-size:12.5px;color:var(--muted);margin-bottom:15px">Tus datos viven en la base de datos del servidor. Descarga un respaldo antes de migrar o actualizar.</p>
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:15px">Tus datos viven en el servidor. Descarga el respaldo (datos y fotos) cada semana y guárdalo en tu PC o en tu nube: si el servidor falla, con él recuperas todo.
+        ${db.ajustes.ultimoRespaldo ? `<br><b>Último respaldo: ${esc(db.ajustes.ultimoRespaldo)}</b>` : ''}</p>
       <div style="display:flex;gap:9px;flex-wrap:wrap">
-        <button class="btn pri" data-a="export">Descargar respaldo</button>
+        <button class="btn pri" data-a="respzip">💾 Descargar respaldo (.zip)</button>
+        <label class="btn gh" for="archivo_restaurar" style="cursor:pointer" title="Reemplaza todos tus datos por los del respaldo">♻ Restaurar respaldo</label>
+        <input type="file" id="archivo_restaurar" data-a="restaurar" accept=".zip,.json" style="display:none">
         <button class="btn" data-a="csv">Inventario en CSV</button>
       </div>
 
@@ -1049,14 +1193,14 @@ function vDatos() {
         <button class="btn gh" data-a="demo">Cargar datos de ejemplo</button>
         <button class="btn dgr" data-a="wipe">Borrar todo</button></div>
       <div class="mn" style="font-size:11.5px;color:var(--muted);margin-top:16px;line-height:1.8">
-        ${db.articulos.length} artículos · ${db.ventas.length} ventas · ${db.apartados.length} apartados<br>
+        ${db.articulos.length} artículos · ${db.ventas.length} ventas · ${(db.encargos || []).length} pedidos<br>
         ${db.intercambios.length} intercambios · ${db.compradores.length} clientes · ${s.piezas} piezas físicas</div>
     </div>
     <div class="pnl"><h2>Reporte en PDF</h2>
       <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Elige qué incluir y filtra por categoría o estatus. Se recuerda tu configuración.</p>
       <div class="fld"><label class="lbl">Título</label><input class="in" data-a="repcfg" data-k="titulo" maxlength="80" value="${esc(ui.rep.titulo)}"></div>
       <div class="fld"><label class="lbl">Secciones</label><div class="chips">
-        ${[['resumen', 'Resumen'], ['inventario', 'Inventario'], ['ventas', 'Ventas'], ['apartados', 'Apartados']].map((x) => `<button class="chip ${ui.rep.secciones.includes(x[0]) ? 'on' : ''}" data-a="repsec" data-v="${x[0]}">${x[1]}</button>`).join('')}</div></div>
+        ${[['resumen', 'Resumen'], ['inventario', 'Inventario'], ['ventas', 'Ventas'], ['apartados', 'Pedidos por entregar']].map((x) => `<button class="chip ${ui.rep.secciones.includes(x[0]) ? 'on' : ''}" data-a="repsec" data-v="${x[0]}">${x[1]}</button>`).join('')}</div></div>
       <div class="g2">
         <div class="fld"><label class="lbl">Categoría</label><select class="sel" data-a="repcfg" data-k="tipo">
           ${filtrosTipo().map((o) => `<option value="${esc(o[0])}" ${ui.rep.tipo === o[0] ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select></div>
@@ -1089,6 +1233,40 @@ function vDatos() {
 
 /* ==================== Modales ==================== */
 const MOD = {};
+MOD.esperan = function () {
+  const a = ui.ctx; if (!a) return '';
+  const l = pedidosPara(a);
+  return shell('🔔 ¡Alguien esperaba esta pieza!', a.nombre, `
+  <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Estos clientes de tu lista de espera la pidieron. Avísales antes de publicarla.</p>
+  <div class="feed">${l.map((p) => { const c = cli(p.comprador_id) || {}; return `<div class="fi"><span class="dot" style="background:var(--green)"></span>
+    <span class="tx"><b>${esc(c.nombre || 'Cliente')}${tagFaltas(c)}</b><span>${esNovedades(p) ? 'Quiere novedades' : 'Buscaba “' + esc(descEspera(p)) + '”'}${c.tel ? ' · ' + esc(c.tel) : ''}</span></span>
+    <span style="white-space:nowrap"><button class="btn sm grn" data-a="avisaesp1" data-id="${p.id}">💬 Avisar</button>
+    ${esNovedades(p) ? '' : `<button class="btn sm gh" data-a="pedok" data-id="${p.id}" data-v="1" title="Ya le avisé">✓</button>`}</span></div>`; }).join('') || '<p style="color:var(--muted)">Ya no hay clientes pendientes.</p>'}</div>
+  `, `<button class="btn pri" data-a="cerrar">Listo</button>`, '560px');
+};
+MOD.novedades = function () {
+  const subs = novedadesSubs(), nuevas = piezasNuevas(7);
+  return shell('Avisar novedades', `${nuevas.length} pieza(s) nueva(s) esta semana`, `
+  <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Clientes que pidieron que les avises cuando lleguen piezas. Cada botón abre su chat con el mensaje listo para pegar.</p>
+  <div class="feed">${subs.map((p) => { const c = cli(p.comprador_id) || {}; const n = nuevas.filter((a) => coincideEspera(p.descripcion, a)).length;
+    return `<div class="fi"><span class="dot" style="background:${n ? 'var(--green)' : 'var(--muted2)'}"></span>
+    <span class="tx"><b>${esc(c.nombre || 'Cliente')}</b><span>${esc(descEspera(p))} · ${n} pieza(s) para él${c.tel ? ' · ' + esc(c.tel) : ''}</span></span>
+    <span style="white-space:nowrap">${n ? `<button class="btn sm grn" data-a="avisanov" data-id="${p.id}">💬 Avisar</button>` : ''}
+    <button class="btn sm gh" data-a="pedok" data-id="${p.id}" data-v="1" title="Ya no quiere avisos">Dar de baja</button></span></div>`; }).join('')}</div>
+  `, `<button class="btn pri" data-a="cerrar">Listo</button>`, '600px');
+};
+MOD.ofertas = function () {
+  const l = stats().estancados.map((a) => ({ a, r: rebajaSugerida(a) }));
+  return shell('🔥 Ofertas para piezas estancadas', `${l.length} pieza(s) con más de ${db.ajustes.diasEstancado} días`, l.length ? `
+  <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Rebaja sugerida: 10% (15% o 20% si lleva mucho más tiempo), nunca debajo de tu precio mínimo. Ajusta el precio si quieres, copia la publicación y aplica los precios nuevos.</p>
+  <div class="pnl wrap" style="padding:6px"><table class="tbl"><thead><tr><th></th><th>Pieza</th><th class="num">Días</th><th class="num">Precio hoy</th><th class="num">Mínimo</th><th class="num">Oferta</th></tr></thead><tbody>
+  ${l.map(({ a, r }) => `<tr><td><input type="checkbox" class="of_sel" data-id="${a.id}" ${r.conviene ? 'checked' : ''}></td>
+    <td><b>${esc(a.nombre)}</b>${r.conviene ? '' : '<div style="font-size:11px;color:var(--yellow)">Ya está en su mínimo: no conviene bajarla</div>'}</td>
+    <td class="num">${r.d}</td><td class="num">${money(a.valor_estimado)}</td><td class="num mu">${money(r.piso)}</td>
+    <td class="num"><input class="in of_pre" type="number" step="5" data-id="${a.id}" value="${r.sug}" style="width:96px;padding:4px 8px"></td></tr>`).join('')}
+  </tbody></table></div>` : '<p style="color:var(--muted)">No tienes piezas estancadas. 🎉</p>',
+  l.length ? `<button class="btn gh" data-a="cerrar">Cerrar</button><button class="btn" data-a="ofcopiar">📋 Copiar publicación</button><button class="btn pri" data-a="ofaplicar">Aplicar precios</button>` : `<button class="btn pri" data-a="cerrar">Listo</button>`, '720px');
+};
 const EMPAQUES = ['En caja sellada', 'Caja abierta', 'Sin caja', 'Set / paquete'];
 MOD.categorias = function () {
   const propias = (db.categorias || []);
@@ -1211,6 +1389,7 @@ MOD.ver = function () {
   `, `<button class="btn gh sm" data-a="editpieza" data-id="${a.id}">Editar</button>
      <button class="btn gh sm" data-a="valuar" data-id="${a.id}">Valuar</button>
      <button class="btn gh sm" data-a="publicacion" data-id="${a.id}">Publicación</button>
+     ${vendible(a) && a.pid ? `<button class="btn gh sm" data-a="linktienda" data-id="${a.id}" title="Link de la pieza en tu tienda: al pegarlo en Facebook sale con foto y precio">🔗 Link</button>` : ''}
      ${libre(a) ? `<button class="btn sm" data-a="apartar" data-id="${a.id}">Apartar</button>
      <button class="btn pri sm" data-a="vender" data-id="${a.id}">Registrar venta</button>` : ''}`);
 };
@@ -1481,7 +1660,7 @@ MOD.publote = function () {
   const txt = ['🏎🃏 PIEZAS DISPONIBLES', ''].concat(l.map((a) => {
     const det = [a.numero, a.anio, a.tipo === 'Pokémon' ? a.expansion : a.serie, a.estado].filter(Boolean).join(' · ');
     return `• ${a.nombre}${det ? ' (' + det + ')' : ''} — ${money(a.valor_estimado)}`;
-  })).concat(ui.pubDesc > 0 && l.length > 1 ? ['', `🔥 Llévate las ${l.length} por ${money(suma(l, (a) => num(a.valor_estimado)) * (1 - ui.pubDesc / 100))} (${ui.pubDesc}% menos)`] : []).concat(['', `📍 Entrega en persona en ${LUGAR_ENTREGA}.`, 'Escríbeme por mensaje para apartar; manejo apartados con anticipo.']).join('\n');
+  })).concat(ui.pubDesc > 0 && l.length > 1 ? ['', `🔥 Llévate las ${l.length} por ${money(suma(l, (a) => num(a.valor_estimado)) * (1 - ui.pubDesc / 100))} (${ui.pubDesc}% menos)`] : []).concat(['', `📍 Entrega en persona en ${LUGAR_ENTREGA}.`, 'Escríbeme por mensaje para apartar.']).join('\n');
   return shell('Publicación en lote', `${l.length} piezas`, `
   <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Un solo texto para tu grupo de Facebook con todas las piezas seleccionadas.</p>
   <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);margin-bottom:10px">Descuento por llevarse todo (%)
@@ -1516,7 +1695,8 @@ function textoPub(a) {
   L.push('', `Estado: ${a.estado || '—'}`, `Número de colección: ${a.numero || '—'}`, `Año: ${a.anio || '—'}`, `Disponibles: ${libre(a) || a.cantidad || 1}`, '');
   if ((a.checks || []).length) L.push('Verificación de autenticidad:', ...(a.checks || []).map((i) => '· ' + (CHECKS[a.tipo] || [])[i]).filter(Boolean), '');
   L.push(`Precio: ${money(a.valor_estimado)}`, '');
-  L.push(`📍 Entrega en persona en ${LUGAR_ENTREGA}.`, '· Acepto preguntas y fotos extra por mensaje.', '· Manejo apartados con anticipo.');
+  if (vendible(a) && linkTienda(a)) L.push(`🔗 ${linkTienda(a)}`, '');
+  L.push(`📍 Entrega en persona en ${LUGAR_ENTREGA}.`, '· Acepto preguntas y fotos extra por mensaje.', '· Te la aparto a tu nombre.');
   if (a.notas) L.push('', `Nota: ${a.notas}`);
   return L.join('\n');
 }
@@ -1625,6 +1805,18 @@ document.addEventListener('click', async (e) => {
       await accion(async () => { for (const e of lista) await POST(`/encargos/${e.id}/entregar`, { cobrado: e.resta, forma: el.dataset.v }); },
         `${lista.length} pedido(s) liquidados · ${money(suma(lista, (e) => e.resta))} en ${el.dataset.v.toLowerCase()}`); break; }
     case 'encwa': mensajeCliente(db.encargos.find((x) => x.id === id)); break;
+    case 'encconf': await accion(() => POST(`/encargos/${id}/confirmar`), 'Apartado confirmado'); break;
+    case 'encnoshow': if (confirm('¿El cliente no se presentó? Se cancela el pedido, las piezas quedan libres y se le anota una falta (con 2, la tienda ya no le deja apartar solo).')) await accion(() => POST(`/encargos/${id}/no-show`), 'Pedido cancelado · falta anotada'); break;
+    case 'quitafaltas': await accion(() => POST(`/compradores/${id}/faltas`), 'Faltas quitadas'); break;
+    case 'avisaesp': { const x = esperandoConStock().find((y) => y.p.id === id); if (x) avisarEspera(x.p, x.piezas); break; }
+    case 'avisaesp1': { const p = (db.pedidos || []).find((y) => y.id === id); if (p) (esNovedades(p) ? avisarNovedades(p) : avisarEspera(p, [ui.ctx])); break; }
+    case 'avisanov': { const p = (db.pedidos || []).find((y) => y.id === id); if (p) avisarNovedades(p); break; }
+    case 'novsubs': abrir('novedades', null); break;
+    case 'ofertas': abrir('ofertas', null); break;
+    case 'ofcopiar': copiarOfertas(); break;
+    case 'ofaplicar': await aplicarOfertas(); break;
+    case 'linktienda': copiarTexto(linkTienda(art(id))); toast('Link copiado: pégalo en Facebook y sale con foto y precio'); break;
+    case 'respzip': await bajarPDF('/respaldo', `chicos-wheels-respaldo-${hoy()}.zip`, 'GET'); await cargarEstado(); break;
     case 'enctab': ui.encTab = el.dataset.v; render(); break;
     case 'encempacar': await accion(() => PATCH('/encargos/' + id, { estatus: el.dataset.v }), el.dataset.v === 'Empacado' ? 'Marcado como empacado' : 'Desempacado'); break;
     case 'encentregar': abrir('encentregar', db.encargos.find((x) => x.id === id)); break;
@@ -1806,6 +1998,11 @@ document.addEventListener('change', async (e) => {
     const valor = el.type === 'number' ? num(el.value) : el.value;
     await accion(() => PATCH('/ajustes', { [el.dataset.k]: valor }), 'Ajuste guardado');
   }
+  if (a === 'restaurar') {
+    const archivo = el.files[0];
+    el.value = '';
+    if (archivo) restaurarRespaldo(archivo);
+  }
   if (a === 'importar') {
     const archivo = el.files[0];
     el.value = ''; // permite volver a elegir el mismo archivo después
@@ -1894,6 +2091,8 @@ async function savePieza() {
       catch (e) { toast('Se guardó la pieza, pero la foto no se pudo adjuntar: ' + e.message, true); }
     }
     cerrar();
+    const nueva = !ed && art(r.id);
+    if (nueva && pedidosPara(nueva).length) { abrir('esperan', nueva); toast('Pieza registrada'); return; }
     const int = db.compradores.filter((c) => c.interes === datos.tipo || c.interes === 'Ambas').map((c) => c.nombre);
     toast(int.length ? `Guardada. Avísale a ${int.slice(0, 2).join(' y ')}` : 'Pieza registrada');
   } catch (e) { /* el toast de error ya salió */ }
@@ -2242,6 +2441,43 @@ async function bajarPDF(ruta, nombre, metodo, cuerpo) {
     const a = document.createElement('a'); a.href = u; a.download = nombre; a.click();
     setTimeout(() => URL.revokeObjectURL(u), 400);
     toast('Archivo listo');
+  } catch (e) { toast(e.message, true); }
+}
+/* ---------- Ofertas de la semana ---------- */
+function filasOferta() {
+  return [...document.querySelectorAll('.of_sel')].filter((x) => x.checked).map((x) => {
+    const a = art(x.dataset.id), inp = document.querySelector(`.of_pre[data-id="${x.dataset.id}"]`);
+    return { a, precio: num(inp && inp.value) };
+  }).filter((o) => o.a && o.precio > 0);
+}
+function copiarOfertas() {
+  const l = filasOferta();
+  if (!l.length) { toast('Marca al menos una pieza', true); return; }
+  copiarTexto(['🔥 OFERTAS DE LA SEMANA 🔥', '',
+    ...l.map(({ a, precio }) => `• ${a.nombre} — antes ${money(a.valor_estimado)}, ahora ${money(precio)}${linkTienda(a) ? '\n  ' + linkTienda(a) : ''}`), '',
+    `📍 Entrega en ${LUGAR_ENTREGA} los sábados. Escríbeme para apartar.`].join('\n'));
+  toast('Publicación copiada: pégala en tu grupo de Facebook');
+}
+async function aplicarOfertas() {
+  const l = filasOferta().filter((o) => o.precio !== num(o.a.valor_estimado));
+  if (!l.length) { toast('No hay precios que cambiar', true); return; }
+  if (!confirm(`¿Cambiar el precio de ${l.length} pieza(s)?`)) return;
+  try {
+    await accion(async () => { for (const o of l) await PATCH('/articulos/' + o.a.id, { valor_estimado: o.precio }); }, `${l.length} precio(s) actualizados`);
+    cerrar();
+  } catch (e) { /* ya reportado */ }
+}
+/** Reemplaza todos los datos de la cuenta por los de un respaldo (.zip o .json). */
+async function restaurarRespaldo(archivo) {
+  const txt = prompt('Esto REEMPLAZA todos tus datos actuales por los del respaldo "' + archivo.name + '".\n\nEscribe RESTAURAR para confirmar:');
+  if ((txt || '').trim().toUpperCase() !== 'RESTAURAR') { toast('Restauración cancelada'); return; }
+  const fd = new FormData(); fd.append('archivo', archivo); fd.append('confirmar', 'RESTAURAR');
+  try {
+    const r = await fetch('/api/respaldo/restaurar', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: fd });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'No se pudo restaurar');
+    await cargarEstado();
+    toast(`Respaldo restaurado: ${d.articulos} piezas y ${d.fotos} fotos`);
   } catch (e) { toast(e.message, true); }
 }
 /** Reporte configurable del panel de Datos. */

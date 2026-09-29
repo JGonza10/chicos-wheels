@@ -252,14 +252,33 @@ class PruebasAPI(unittest.TestCase):
         self.assertEqual(s, 200)
         self.assertEqual(len(d["articulos"]), 7)
         self.assertEqual(len(d["ventas"]), 4)
-        self.assertEqual(len(d["apartados"]), 2)
+        self.assertEqual(len(d["apartados"]), 0)          # desde 2026-09-29 los ejemplos usan Pedidos
+        self.assertEqual(len(d["encargos"]), 2)
+        self.assertTrue(any(e["origen"] == "tienda" and not e["confirmado"] for e in d["encargos"]))
         self.assertEqual(len(d["intercambios"]), 1)
         self.assertTrue(any(len(a["valuaciones"]) >= 3 for a in d["articulos"]),
                         "debe haber historial de precios para ver la tendencia")
 
-    def test_22_apartado_vencido_se_marca_solo(self):
+    def test_22_apartados_viejos_pasan_a_pedidos(self):
+        from collecthub.db import conectar, crear_esquema
         _, est = self.pedir("GET", "/api/estado", token=self.token2)
-        self.assertTrue(any(a["estatus"] == "Vencido" for a in est["apartados"]))
+        art = next(a for a in est["articulos"] if a["disponible"] > 0)
+        antes = art["disponible"]
+        con = conectar()
+        con.execute("INSERT INTO apartados (id,usuario_id,articulo_id,comprador_id,nombre_snap,cantidad,precio_acordado,"
+                    "anticipo,fecha,fecha_limite,notas) VALUES ('AP-VIEJO',?,?,NULL,?,1,200,50,'2026-09-01','2026-10-10','Paga luego')",
+                    (art["usuario_id"], art["id"], art["nombre"]))
+        con.commit(); con.close()
+        crear_esquema(); crear_esquema()   # idempotente: no lo pasa dos veces
+        _, est = self.pedir("GET", "/api/estado", token=self.token2)
+        ap = next(x for x in est["apartados"] if x["id"] == "AP-VIEJO")
+        self.assertEqual(ap["estatus"], "Cancelado")
+        pasados = [e for e in est["encargos"] if "AP-VIEJO" in e["notas"]]
+        self.assertEqual(len(pasados), 1)
+        e = pasados[0]
+        self.assertEqual((e["estatus"], e["anticipo"], e["total"], e["fecha_entrega"]), ("Pendiente", 50, 200, "2026-10-10"))
+        # La pieza sigue reservada (ahora por el pedido)
+        self.assertEqual(next(a for a in est["articulos"] if a["id"] == art["id"])["disponible"], antes - 1)
 
     # ---------------- Foto → IA ----------------
     # identificar_foto()/buscar_precio_pokemon() se mockean: las pruebas no
@@ -534,6 +553,78 @@ class PruebasAPI(unittest.TestCase):
             codigos = [self.c.post("/tienda/api/asistente", json={"mensaje": "hola"},
                                    environ_base={"REMOTE_ADDR": "10.8.8.8"}).status_code for _ in range(45)]
         self.assertIn(429, codigos)
+
+    def test_49_faltas_confirmar_espera_link_y_respaldo(self):
+        from collecthub import espera, landing
+        h = {"Authorization": f"Bearer {self.token}"}
+        env = {"LANDING_EMAIL": "chicos@wheels.mx", "ASISTENTE_IA": ""}
+        post = lambda ruta, b: self.c.post("/tienda/api/" + ruta, json=b, environ_base={"REMOTE_ADDR": "10.7.7.7"})
+        pieza = self._pieza("Datsun 510 Wagon faltas", 3, 50, 180)
+        pid = landing.id_publico(pieza["id"])
+        with patch.dict(os.environ, env):
+            # Apartado de la tienda: queda por confirmar
+            r = post("apartar", {"pieza": pid, "nombre": "Cliente Faltón", "contacto": "@faltón"})
+            self.assertEqual(r.status_code, 201)
+            _, est = self.pedir("GET", "/api/estado")
+            e1 = next(e for e in est["encargos"] if "@faltón" in e["notas"])
+            self.assertEqual((e1["origen"], e1["confirmado"]), ("tienda", 0))
+            s, e1 = self.pedir("POST", f"/api/encargos/{e1['id']}/confirmar", {})
+            self.assertEqual((s, e1["confirmado"]), (200, 1))
+            # Dos veces "no se presentó": la pieza se libera y el cliente queda bloqueado en la tienda
+            libres = self._libres(pieza["id"])
+            s, e1 = self.pedir("POST", f"/api/encargos/{e1['id']}/no-show", {})
+            self.assertEqual((s, e1["estatus"]), (200, "Cancelado"))
+            self.assertEqual(self._libres(pieza["id"]), libres + 1)
+            r = post("apartar", {"pieza": pid, "nombre": "Cliente Faltón", "contacto": "@faltón"})
+            _, est = self.pedir("GET", "/api/estado")
+            e2 = next(e for e in est["encargos"] if "@faltón" in e["notas"] and e["estatus"] == "Pendiente")
+            self.pedir("POST", f"/api/encargos/{e2['id']}/no-show", {})
+            _, est = self.pedir("GET", "/api/estado")
+            comp = next(c for c in est["compradores"] if c["nombre"] == "Cliente Faltón")
+            self.assertEqual(comp["faltas"], 2)
+            self.assertEqual(post("apartar", {"pieza": pid, "nombre": "Cliente Faltón", "contacto": "@faltón"}).status_code, 403)
+            s, _ = self.pedir("POST", f"/api/compradores/{comp['id']}/faltas", {})
+            self.assertEqual(s, 200)
+            self.assertEqual(post("apartar", {"pieza": pid, "nombre": "Cliente Faltón", "contacto": "@faltón"}).status_code, 201)
+            # Link de la pieza con vista previa para Facebook
+            r = self.c.get(f"/tienda/p/{pid}")
+            html_ = r.get_data(as_text=True); r.close()
+            self.assertIn('<base href="/tienda/">', html_)
+            self.assertIn(f'<meta name="cw-pieza" content="{pid}">', html_)
+            self.assertIn('og:title" content="Datsun 510 Wagon faltas', html_)
+            r = self.c.get("/tienda/p/0000000000000000"); self.assertNotIn("cw-pieza", r.get_data(as_text=True)); r.close()
+        # Lista de espera: pieza concreta y novedades por categoría
+        a = {"nombre": "Nissan Skyline GT-R (BNR32)", "serie": "RLC", "tipo": "Hot Wheels"}
+        self.assertTrue(espera.coincide("Skyline R32? (desde la tienda)", {**a, "nombre": "Skyline R32 RLC"}))
+        self.assertTrue(espera.coincide("skylines", a))
+        self.assertFalse(espera.coincide("Porsche 911", a))
+        self.assertTrue(espera.coincide("Novedades: Todas (desde la tienda)", a))
+        self.assertTrue(espera.coincide("Novedades: Hot Wheels (desde la tienda)", a))
+        self.assertFalse(espera.coincide("Novedades: Barbie (desde la tienda)", a))
+        # Respaldo .zip de ida y vuelta (datos y fotos)
+        self.c.post(f"/api/articulos/{pieza['id']}/foto", data={"foto": (self._imagen(), "f.jpg")}, headers=h,
+                    content_type="multipart/form-data")
+        r = self.c.get("/api/respaldo", headers=h)
+        self.assertEqual(r.status_code, 200)
+        zip_ = r.data; r.close()
+        _, antes = self.pedir("GET", "/api/estado")
+        self.assertEqual(antes["ajustes"]["ultimo_respaldo"], str(__import__("datetime").date.today()))
+        r = self.c.post("/api/respaldo/restaurar", headers=h, content_type="multipart/form-data",
+                        data={"archivo": (io.BytesIO(zip_), "r.zip"), "confirmar": "no"})
+        self.assertEqual(r.status_code, 400)                       # sin la palabra no se toca nada
+        self.pedir("DELETE", f"/api/articulos/{self._pieza('Pieza que se va', 1, 1, 1)['id']}")
+        r = self.c.post("/api/respaldo/restaurar", headers=h, content_type="multipart/form-data",
+                        data={"archivo": (io.BytesIO(zip_), "r.zip"), "confirmar": "RESTAURAR"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertGreaterEqual(r.get_json()["fotos"], 1)
+        _, despues = self.pedir("GET", "/api/estado")
+        for k in ("articulos", "ventas", "encargos", "compradores", "pedidos", "categorias"):
+            self.assertEqual(len(despues[k]), len(antes[k]), k)
+        foto = next(x for x in despues["articulos"] if x["id"] == pieza["id"])["foto"]
+        r = self.c.get(f"/api/articulos/foto/{foto[6:]}", headers=h); self.assertEqual(r.status_code, 200); r.close()
+        r = self.c.post("/api/respaldo/restaurar", headers=h, content_type="multipart/form-data",
+                        data={"archivo": (io.BytesIO(b"no es un respaldo"), "x.zip"), "confirmar": "RESTAURAR"})
+        self.assertEqual(r.status_code, 400)
 
     def test_34_respaldo_diario_conserva_solo_los_ultimos(self):
         from collecthub import respaldo

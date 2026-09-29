@@ -70,6 +70,12 @@ def crear_esquema():
         con.execute("""UPDATE apartados SET cliente_snap=(SELECT c.nombre FROM compradores c
                         WHERE c.id=apartados.comprador_id)
                       WHERE cliente_snap='' AND comprador_id IS NOT NULL""")
+        _agregar_columnas(con, {
+            "compradores": [("faltas", "INTEGER NOT NULL DEFAULT 0")],
+            "encargos": [("origen", "TEXT NOT NULL DEFAULT ''"), ("confirmado", "INTEGER NOT NULL DEFAULT 1")],
+            "ajustes": [("ultimo_respaldo", "TEXT NOT NULL DEFAULT ''")],
+        })
+        _apartados_a_pedidos(con)
         # Canal de entrega en persona (Balderas) para cuentas que ya existían.
         con.execute("""INSERT INTO plataformas (id,usuario_id,codigo,nombre,com_pct,com_fija,ret_pct,notas)
             SELECT 'P-TG-' || u.id, u.id, 'TG', 'Balderas', 0, 0, 0,
@@ -79,6 +85,40 @@ def crear_esquema():
         con.commit()
     finally:
         con.close()
+
+
+def _agregar_columnas(con, por_tabla: dict):
+    for tabla, cols in por_tabla.items():
+        hay = {f["name"] for f in con.execute(f"PRAGMA table_info({tabla})")}
+        for nombre, tipo in cols:
+            if nombre not in hay:
+                con.execute(f"ALTER TABLE {tabla} ADD COLUMN {nombre} {tipo}")
+
+
+def _apartados_a_pedidos(con):
+    """Desde 2026-09-25 todo apartado es un Pedido (encargo). Los apartados viejos
+    que seguían vigentes pasan a Pedidos con su cliente, precio, anticipo y fecha;
+    el apartado queda Cancelado con la nota de a qué pedido pasó (el historial no se borra)."""
+    vigentes = con.execute("SELECT ap.*, a.precio_compra FROM apartados ap "
+                           "LEFT JOIN articulos a ON a.id = ap.articulo_id WHERE ap.estatus='Vigente'").fetchall()
+    if not vigentes:
+        return
+    from .util import uid
+    for ap in vigentes:
+        id_enc = uid("E")
+        cant = max(1, ap["cantidad"] or 1)
+        con.execute("INSERT INTO encargos (id,usuario_id,comprador_id,fecha,fecha_entrega,anticipo,forma_anticipo,notas) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (id_enc, ap["usuario_id"], ap["comprador_id"], ap["fecha"], ap["fecha_limite"] or "",
+                     ap["anticipo"] or 0, "Efectivo" if ap["anticipo"] else "",
+                     " ".join(x for x in (f"Pasado de Apartados ({ap['id']}).", ap["notas"] or "",
+                                          f"Cliente: {ap['cliente_snap']}" if ap["cliente_snap"] and not ap["comprador_id"] else "") if x)))
+        con.execute("INSERT INTO encargo_items (id,encargo_id,articulo_id,nombre_snap,cantidad,precio_unit,costo_unit) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (uid("EI"), id_enc, ap["articulo_id"], ap["nombre_snap"], cant,
+                     round((ap["precio_acordado"] or 0) / cant, 2), ap["precio_compra"] or 0))
+        con.execute("UPDATE apartados SET estatus='Cancelado', notas=? WHERE id=?",
+                    (f"[Pasado a Pedidos {id_enc}] {ap['notas'] or ''}".strip(), ap["id"]))
 
 
 def _quitar_check_tipo(con):

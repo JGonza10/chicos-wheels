@@ -176,6 +176,7 @@
           <div class="interes-botones">
             ${STOCK.asistente ? `<button class="btn-apartar" type="button" data-apartar>Apartar aquí</button>` : ""}
             <button class="btn-interes" type="button" data-copiar>Copiar mensaje</button>
+            <button class="btn-compartir" type="button" data-compartir>🔗 Compartir</button>
             ${FB ? `<a class="btn-fb" href="${linkMessenger(mensajePieza(p))}" target="_blank" rel="noopener">Messenger</a>` : ""}
             ${IG ? `<a class="btn-ig" href="${linkInstagram()}" target="_blank" rel="noopener">Instagram</a>` : ""}
           </div>
@@ -228,6 +229,15 @@
     const m = $("#modal");
     m.addEventListener("click", async (e) => {
       if (e.target === m || e.target.closest(".cerrar")) { m.close(); return; }
+      if (e.target.closest("[data-compartir]") && S.abierta) {
+        const url = `${location.origin}/tienda/p/${S.abierta.id}`;
+        const b = e.target.closest("[data-compartir]");
+        try {
+          if (navigator.share) await navigator.share({ title: S.abierta.nombre, url });
+          else { await navigator.clipboard.writeText(url); b.textContent = "¡Link copiado!"; setTimeout(() => { b.textContent = "🔗 Compartir"; }, 1800); }
+        } catch (_) { /* el usuario canceló */ }
+        return;
+      }
       if (e.target.closest("[data-apartar]") && window.CWAsistente && S.abierta) {
         m.close();
         window.CWAsistente.apartar(S.abierta);
@@ -278,6 +288,9 @@
     pintarRecien();
     render();
     eventos();
+    // Link de una pieza (/tienda/p/<id>): se abre su ficha al cargar.
+    const pid = document.querySelector('meta[name="cw-pieza"]');
+    if (pid && PIEZAS.some((p) => p.id === pid.content)) abrir(pid.content);
   }
 
   iniciar();
