@@ -473,6 +473,68 @@ class PruebasAPI(unittest.TestCase):
         # El service worker no intercepta fotos de otros dominios
         r = self.c.get("/sw.js"); self.assertIn("url.origin !== self.location.origin", r.get_data(as_text=True)); r.close()
 
+    def test_48_asistente_de_la_tienda(self):
+        from collecthub import asistente
+        env = {"LANDING_EMAIL": "chicos@wheels.mx", "ASISTENTE_IA": ""}
+        post = lambda ruta, b: self.c.post("/tienda/api/" + ruta, json=b, environ_base={"REMOTE_ADDR": "10.9.9.9"})
+        ultima = self._pieza("Nissan Skyline GT-R R32 asistente", 1, 300, 650)
+        with patch.dict(os.environ, env):
+            # Busca por palabras (singular/plural y sin acentos)
+            r = post("asistente", {"mensaje": "Hola, ¿tienes skylines R32?"})
+            self.assertEqual(r.status_code, 200)
+            d = r.get_json()
+            self.assertIn("Sí", d["texto"])
+            pieza = next(p for p in d["piezas"] if p["nombre"] == "Nissan Skyline GT-R R32 asistente")
+            self.assertEqual(pieza["precio"], 650)
+            self.assertNotIn("precio_compra", pieza)       # nunca el costo
+            self.assertFalse(d["avisame"])
+            # Solo un saludo: no busca
+            d = post("asistente", {"mensaje": "hola buenas tardes"}).get_json()
+            self.assertEqual((d["piezas"], d["avisame"]), ([], False))
+            # Aparta sin anticipo para el sábado
+            r = post("apartar", {"pieza": pieza["id"], "nombre": "Cliente Chat", "contacto": "fb.com/clientechat"})
+            self.assertEqual(r.status_code, 201, r.get_json())
+            self.assertEqual(r.get_json()["entrega"], asistente.proximo_sabado())
+            _, est = self.pedir("GET", "/api/estado")
+            enc = next(e for e in est["encargos"] if any(i["articulo_id"] == ultima["id"] for i in e["items"]))
+            self.assertEqual((enc["estatus"], enc["anticipo"], enc["total"]), ("Pendiente", 0, 650))
+            self.assertIn("fb.com/clientechat", enc["notas"])
+            self.assertEqual(self._libres(ultima["id"]), 0)
+            # La última ya no se puede apartar otra vez
+            r = post("apartar", {"pieza": pieza["id"], "nombre": "Otro", "contacto": "@otro"})
+            self.assertEqual(r.status_code, 409)
+            # Ahora aparece como agotada y ofrece avisar
+            d = post("asistente", {"mensaje": "skyline r32 asistente"}).get_json()
+            self.assertEqual((d["piezas"], d["avisame"]), ([], True))
+            self.assertIn("agotó", d["texto"])
+            # Lista de espera
+            r = post("avisame", {"busqueda": "Skyline R32", "nombre": "Cliente Chat", "contacto": "fb.com/clientechat"})
+            self.assertEqual(r.status_code, 201)
+            _, est = self.pedir("GET", "/api/estado")
+            self.assertTrue(any("Skyline R32" in p["descripcion"] for p in est["pedidos"]))
+            # El cliente no se duplica
+            self.assertEqual(sum(1 for c in est["compradores"] if c["nombre"] == "Cliente Chat"), 1)
+            # Datos incompletos y campo trampa
+            self.assertEqual(post("avisame", {"busqueda": "x", "nombre": "A", "contacto": "@a"}).status_code, 400)
+            self.assertEqual(post("apartar", {"pieza": pieza["id"], "nombre": "Bot", "contacto": "@bot",
+                                              "sitio": "spam"}).status_code, 400)
+            # Con IA (simulada): solo cuentan ids que existen en el stock
+            otra = self._pieza("Barbie astronauta asistente", 2, 400, 800)
+            from collecthub import landing
+            pid = landing.id_publico(otra["id"])
+            with patch.object(asistente, "_interpretar_con_ia",
+                              return_value={"intencion": "buscar", "busqueda": "muñeca astronauta", "ids": [pid, "inventado"]}):
+                d = post("asistente", {"mensaje": "¿tienen la muñeca que va al espacio?"}).get_json()
+            self.assertEqual([p["id"] for p in d["piezas"]], [pid])
+        # Sin LANDING_EMAIL el asistente no existe
+        with patch.dict(os.environ, {"LANDING_EMAIL": ""}):
+            self.assertEqual(post("asistente", {"mensaje": "hola"}).status_code, 503)
+        # Límite por IP
+        with patch.dict(os.environ, env):
+            codigos = [self.c.post("/tienda/api/asistente", json={"mensaje": "hola"},
+                                   environ_base={"REMOTE_ADDR": "10.8.8.8"}).status_code for _ in range(45)]
+        self.assertIn(429, codigos)
+
     def test_34_respaldo_diario_conserva_solo_los_ultimos(self):
         from collecthub import respaldo
         with tempfile.TemporaryDirectory() as d, patch.object(respaldo, "carpeta", return_value=Path(d)):

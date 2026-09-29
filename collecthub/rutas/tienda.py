@@ -7,9 +7,9 @@ permite `collecthub/landing.py`.
 import json
 import re
 
-from flask import Blueprint, Response, redirect, send_file, send_from_directory
+from flask import Blueprint, Response, jsonify, redirect, request, send_file, send_from_directory
 
-from .. import landing
+from .. import asistente, landing
 from ..util import ErrorApp
 
 bp = Blueprint("tienda", __name__)
@@ -50,6 +50,39 @@ def foto(pid):
     resp = send_file(ruta, mimetype="image/jpeg")
     resp.headers["Cache-Control"] = "public, max-age=600"
     return resp
+
+
+# ---------- Asistente (chat de la tienda) ----------
+# Públicas a propósito (las usa cualquier visitante). Con límite por IP en
+# crear_app(); solo existen con LANDING_EMAIL configurado.
+
+def _dueno_o_503():
+    dueno = landing.dueno()
+    if dueno is None:
+        raise ErrorApp("El asistente no está disponible en este momento", 503)
+    return dueno
+
+
+def _cuerpo():
+    b = request.get_json(silent=True) or {}
+    if b.get("sitio"):  # campo trampa invisible: solo lo llena un bot
+        raise ErrorApp("No se pudo procesar", 400)
+    return b
+
+
+@bp.post("/tienda/api/asistente")
+def asistente_responder():
+    return jsonify(asistente.responder(_dueno_o_503(), _cuerpo().get("mensaje")))
+
+
+@bp.post("/tienda/api/apartar")
+def asistente_apartar():
+    return jsonify(asistente.apartar(_dueno_o_503(), _cuerpo())), 201
+
+
+@bp.post("/tienda/api/avisame")
+def asistente_avisame():
+    return jsonify(asistente.avisame(_dueno_o_503(), _cuerpo())), 201
 
 
 @bp.get("/tienda/<path:recurso>")

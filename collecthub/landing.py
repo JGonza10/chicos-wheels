@@ -52,30 +52,34 @@ def contacto() -> dict:
             "instagram": _usuario_red(os.environ.get("LANDING_INSTAGRAM", ""))}
 
 
+def publica(a: dict) -> dict:
+    """Lo que un comprador puede ver de una pieza (lista blanca de campos)."""
+    p = {k: a.get(k) for k in CAMPOS}
+    p["id"] = id_publico(a["id"])
+    p["grail"] = int(a.get("grail") or 0)
+    p["precio"] = a.get("valor_estimado") or 0
+    p["fecha"] = (a.get("creado_en") or "")[:10]
+    foto = a.get("foto") or ""
+    if foto.startswith("http://"):  # piezas guardadas antes de normalizar a https
+        foto = "https://" + foto[7:]
+    if foto.startswith("local:"):
+        p["foto"] = f"foto/{p['id']}.jpg"
+    elif _host_permitido(foto):
+        p["foto"] = foto
+    else:
+        p["foto"] = ""
+    return p
+
+
 def stock(usuario_id: str) -> dict:
-    piezas = []
-    for a in todos(SQL_STOCK, (usuario_id,)):
-        p = {k: a.get(k) for k in CAMPOS}
-        p["id"] = id_publico(a["id"])
-        p["grail"] = int(a.get("grail") or 0)
-        p["precio"] = a.get("valor_estimado") or 0
-        p["fecha"] = (a.get("creado_en") or "")[:10]
-        foto = a.get("foto") or ""
-        if foto.startswith("http://"):  # piezas guardadas antes de normalizar a https
-            foto = "https://" + foto[7:]
-        if foto.startswith("local:"):
-            p["foto"] = f"foto/{p['id']}.jpg"
-        elif _host_permitido(foto):
-            p["foto"] = foto
-        else:
-            p["foto"] = ""
-        piezas.append(p)
+    piezas = [publica(a) for a in todos(SQL_STOCK, (usuario_id,))]
     # Categorías propias de la cuenta (Barbie, …): la tienda arma sus filtros con
     # ellas en automático y solo muestra las que tienen piezas a la venta.
     categorias = todos("SELECT nombre, emoji FROM categorias WHERE usuario_id=? "
                        "ORDER BY creado_en, nombre", (usuario_id,))
     return {"generado": datetime.now().strftime("%Y-%m-%d %H:%M"), "muestra": False,
-            "contacto": contacto(), "categorias": categorias, "piezas": piezas}
+            "contacto": contacto(), "categorias": categorias, "piezas": piezas,
+            "asistente": True}
 
 
 def archivo_foto(usuario_id: str, pid: str) -> Path | None:

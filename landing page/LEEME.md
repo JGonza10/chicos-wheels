@@ -27,6 +27,12 @@ Variables en Railway:
 - `LANDING_FACEBOOK`: tu página de Facebook (usuario o URL), para el botón de Messenger.
 - `LANDING_INSTAGRAM`: tu usuario de Instagram, para el botón de mensaje directo.
 
+### Asistente (chat) — 2026-09-29
+- Botón **"💬 ¿Buscas una pieza?"** (`asistente.js`) y **"Apartar aquí"** en la ficha. Solo aparece con `LANDING_EMAIL` (con piezas de ejemplo no).
+- Responde con el stock real. **"Lo quiero"** crea un pedido *Apartado* **sin anticipo** para el próximo sábado en Balderas (lo ves en Pedidos); si no hay, **"Avísenme"** deja al cliente en la lista de espera (Compradores). Pide solo nombre y Facebook/Instagram.
+- `ASISTENTE_IA=1` (+ `ANTHROPIC_API_KEY`) hace que Claude Haiku entienda mensajes libres; la disponibilidad y el precio siempre salen de la base. `ASISTENTE_IA_TOPE` limita las consultas diarias.
+- `CW_TELEGRAM_TOKEN` + `CW_TELEGRAM_CHAT_ID`: te avisa por Telegram de cada apartado (opcional).
+
 El contacto con clientes es solo por Facebook e Instagram.
 
 ## Verla en tu PC

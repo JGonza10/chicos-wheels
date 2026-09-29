@@ -20,6 +20,11 @@ ESTATICOS = RAIZ / "static"
 
 def crear_app() -> Flask:
     app = Flask(__name__, static_folder=None)
+    if os.environ.get("RAILWAY_ENVIRONMENT"):
+        # Detrás del proxy de Railway, remote_addr es el proxy (todos los visitantes
+        # compartirían el mismo límite). Se toma la IP que agrega ese único salto.
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     app.config["JSON_SORT_KEYS"] = False
 
     # Tope al tamaño de cualquier petición (también acota la carga de la
@@ -69,6 +74,8 @@ def crear_app() -> Flask:
     # (donde importa más), y uno amplio para el resto de la API.
     intentos_auth = defaultdict(lambda: {"n": 0, "desde": 0.0})
     peticiones_api = defaultdict(lambda: {"n": 0, "desde": 0.0})
+    peticiones_tienda = defaultdict(lambda: {"n": 0, "desde": 0.0})
+    altas_tienda = defaultdict(lambda: {"n": 0, "desde": 0.0})
     # Cada llamada a /identificar cuesta dinero real (API de Claude): límite
     # propio y más estricto para que un bug o abuso no se traduzca en un
     # cobro sorpresa, aparte del límite general de la API.
@@ -92,10 +99,23 @@ def crear_app() -> Flask:
     @app.before_request
     def limitar():
         from flask import request
-        if not request.path.startswith("/api/"):
+        ip = request.remote_addr or "desconocida"
+
+        # Asistente de la tienda: público, así que con topes propios por IP.
+        if request.path.startswith("/tienda/api/"):
+            if len(peticiones_tienda) > 5000:
+                _limpiar_viejos(peticiones_tienda, 600)
+                _limpiar_viejos(altas_tienda, 3600)
+            if _excedido(peticiones_tienda, ip, 600, 40):
+                return jsonify(error="Vas muy rápido 🙂 Espera unos minutos y vuelve a escribir."), 429
+            if request.path in ("/tienda/api/apartar", "/tienda/api/avisame") and \
+                    _excedido(altas_tienda, ip, 3600, 6):
+                return jsonify(error="Ya registraste varias piezas. Escríbenos por Facebook o "
+                                     "Instagram para apartar más."), 429
             return None
 
-        ip = request.remote_addr or "desconocida"
+        if not request.path.startswith("/api/"):
+            return None
 
         if request.path in ("/api/auth/login", "/api/auth/registro") and request.method == "POST":
             if len(intentos_auth) > 5000:

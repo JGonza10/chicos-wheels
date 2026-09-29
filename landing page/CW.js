@@ -154,6 +154,7 @@
   function abrir(id) {
     const p = PIEZAS.find((x) => x.id === id);
     if (!p) return;
+    S.abierta = p;
     const r = rareza(p);
     const filas = p.tipo === "Pokémon"
       ? [["Expansión", serieDe(p)], ["Número", p.numero], ["Rareza", p.rareza], ["Grado", graduada(p) ? p.grado : ""], ["Estado", p.estado], ["Año", p.anio]]
@@ -173,6 +174,7 @@
           <b>¿Te interesa? Mándanos este mensaje:</b>
           <textarea id="mensajePieza" readonly rows="3">${esc(mensajePieza(p))}</textarea>
           <div class="interes-botones">
+            ${STOCK.asistente ? `<button class="btn-apartar" type="button" data-apartar>Apartar aquí</button>` : ""}
             <button class="btn-interes" type="button" data-copiar>Copiar mensaje</button>
             ${FB ? `<a class="btn-fb" href="${linkMessenger(mensajePieza(p))}" target="_blank" rel="noopener">Messenger</a>` : ""}
             ${IG ? `<a class="btn-ig" href="${linkInstagram()}" target="_blank" rel="noopener">Instagram</a>` : ""}
@@ -226,6 +228,11 @@
     const m = $("#modal");
     m.addEventListener("click", async (e) => {
       if (e.target === m || e.target.closest(".cerrar")) { m.close(); return; }
+      if (e.target.closest("[data-apartar]") && window.CWAsistente && S.abierta) {
+        m.close();
+        window.CWAsistente.apartar(S.abierta);
+        return;
+      }
       const b = e.target.closest("[data-copiar]");
       if (!b) return;
       const caja = $("#mensajePieza");
