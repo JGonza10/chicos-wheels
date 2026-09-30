@@ -3,6 +3,7 @@ Chicos Wheels (CollectHub) · aplicación Flask.
 
 Sirve la API bajo /api y el frontend (HTML, CSS y JS planos) desde /static.
 """
+import mimetypes
 import os
 import time
 from collections import defaultdict
@@ -13,6 +14,10 @@ from flask import Flask, jsonify, send_from_directory
 from .auth import requiere_sesion
 from .db import cerrar_bd, crear_esquema
 from .util import ErrorApp
+
+# La imagen de Docker no trae /etc/mime.types: sin esto, los logos .webp salen
+# como application/octet-stream.
+mimetypes.add_type("image/webp", ".webp")
 
 RAIZ = Path(__file__).resolve().parent.parent
 ESTATICOS = RAIZ / "static"
