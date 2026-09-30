@@ -626,6 +626,17 @@ class PruebasAPI(unittest.TestCase):
                         data={"archivo": (io.BytesIO(b"no es un respaldo"), "x.zip"), "confirmar": "RESTAURAR"})
         self.assertEqual(r.status_code, 400)
 
+    def test_50_por_llegar_fecha_de_llegada(self):
+        s, a = self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": "En camino", "ubicacion": "Por recibir",
+                                                     "fecha_llegada": "2026-10-12"})
+        self.assertEqual((s, a["fecha_llegada"]), (201, "2026-10-12"))
+        s, a = self.pedir("PATCH", f"/api/articulos/{a['id']}", {"fecha_llegada": "mañana"})
+        self.assertEqual((s, a["fecha_llegada"]), (200, ""))          # fecha inválida → vacía
+        s, a = self.pedir("PATCH", f"/api/articulos/{a['id']}", {"fecha_llegada": "2026-10-20"})
+        self.assertEqual(a["fecha_llegada"], "2026-10-20")
+        s, a = self.pedir("PATCH", f"/api/articulos/{a['id']}", {"nombre": "En camino (renombrada)"})
+        self.assertEqual(a["fecha_llegada"], "2026-10-20")             # un cambio parcial no la borra
+
     def test_34_respaldo_diario_conserva_solo_los_ultimos(self):
         from collecthub import respaldo
         with tempfile.TemporaryDirectory() as d, patch.object(respaldo, "carpeta", return_value=Path(d)):

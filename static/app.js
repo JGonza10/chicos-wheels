@@ -12,7 +12,8 @@ const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
-const hoy = () => new Date().toISOString().slice(0, 10);
+/** Fecha local (no UTC): en México, después de las 6 pm toISOString() ya da el día siguiente. */
+const hoy = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
 const dias = (a, b) => (a ? Math.max(0, Math.round((new Date(b || hoy()) - new Date(a)) / 864e5)) : 0);
 const suma = (a, f) => a.reduce((s, x) => s + num(f(x)), 0);
 let CUR = 'MXN';
@@ -310,7 +311,7 @@ function movimientos() {
 function vistaAuth() {
   const esLogin = ui.authTab === 'login';
   return `<div class="auth"><div class="authbox">
-    <div class="logo">CHICOS<i>WHEELS</i></div>
+    <div class="logo"><img src="/logo.webp" alt="Chicos Wheels" class="logo-img"></div>
     <div class="sub">Inventario, valuación y venta de coleccionables</div>
     <div class="pnl">
       <div class="authtabs">
@@ -356,15 +357,15 @@ function salir(silencioso) {
 }
 
 /* ==================== Render ==================== */
-const NAV = [['panel', '◧', 'Panel'], ['inventario', '▦', 'Inventario'],
+const NAV = [['panel', '◧', 'Panel'], ['inventario', '▦', 'Inventario'], ['porllegar', '📦', 'Por llegar'],
   ['SEP1', '', 'Movimientos'], ['ventas', '⇄', 'Ventas'], ['encargos', '🛍', 'Pedidos'], ['intercambios', '⇌', 'Intercambios'],
-  ['SEP2', '', 'Catálogos'], ['compradores', '☺', 'Compradores'], ['wishlist', '★', 'Faltantes'],
+  ['SEP2', '', 'Catálogos'], ['compradores', '☺', 'Compradores'],
   ['etiquetas', '▩', 'Etiquetas QR'], ['datos', '⛃', 'Datos']];
 const CNT = {
   inventario: () => db.articulos.length, ventas: () => db.ventas.length,
   apartados: () => db.apartados.filter((x) => x.estatus === 'Vigente').length,
   encargos: () => encActivos().length,  intercambios: () => db.intercambios.length, compradores: () => db.compradores.length,
-  wishlist: () => db.wishlist.length,
+  porllegar: () => porRecibir().length,
 };
 
 function render() {
@@ -372,11 +373,11 @@ function render() {
   if (!db) { $('#app').innerHTML = '<div class="cargando"><div><div class="spin"></div>Cargando tu colección…</div></div>'; return; }
   /* Modo bazar deshabilitado (2026-09-24): vBazar sigue definida, solo sin acceso desde el menú */
   const V = { panel: vPanel, inventario: vInv, ventas: vVentas, apartados: vApart,
-    intercambios: vTrade, encargos: vEncargos, compradores: vComp, wishlist: vWish, etiquetas: vQR, datos: vDatos }[ui.vista] || vPanel;
+    intercambios: vTrade, encargos: vEncargos, compradores: vComp, wishlist: vWish, porllegar: vPorLlegar, etiquetas: vQR, datos: vDatos }[ui.vista] || vPanel;
   $('#app').innerHTML = `
   <div class="shell">
     <aside class="side">
-      <div class="logo">CHICOS<i>WHEELS</i><small>${esc((usuario && (usuario.nombre || usuario.email)) || '')}</small></div>
+      <div class="logo"><img src="/logo.webp" alt="Chicos Wheels" class="logo-img"><small>${esc((usuario && (usuario.nombre || usuario.email)) || '')}</small></div>
       <nav class="nav">${NAV.filter((n) => n[0] !== 'apartados' || db.apartados.length).map((n) => (n[0].startsWith('SEP')
         ? `<div class="navsep">${n[2]}</div>`
         : `<button data-a="nav" data-v="${n[0]}" class="${ui.vista === n[0] ? 'on' : ''}"><span class="ic">${n[1]}</span>${n[2]}<span class="cnt">${CNT[n[0]] ? (CNT[n[0]]() || '') : ''}</span></button>`)).join('')}
@@ -505,12 +506,12 @@ function vPanel() {
   ${(() => { const ea = encActivos(); return ea.length ? `<div class="pnl" style="margin-top:16px;cursor:pointer" data-a="nav" data-v="encargos"><h2>Pedidos por entregar (${ea.length})</h2>
     <div style="font-size:13px;color:var(--muted)">${suma(ea, (e) => e.piezas)} piezas para ${new Set(ea.map((e) => e.comprador_id)).size} cliente(s) · por cobrar <b class="mn" style="color:var(--text)">${money(suma(ea, (e) => e.resta))}</b> · ganancia esperada <b class="mn pos">${money(suma(ea, (e) => e.ganancia))}</b></div>
     <div style="font-size:12.5px;margin-top:8px">🗓 Próximo sábado <b>${esc(fmtDia(proximoSabado()))}</b>: ${ea.filter((e) => e.fecha_entrega === proximoSabado()).length} pedido(s), ${ea.filter((e) => e.estatus === 'Empacado').length} ya en proceso.</div></div>` : ''; })()}
-  ${(() => { const pr = porRecibir(); return pr.length ? `<div class="pnl" style="margin-top:16px;border-color:var(--yellow)"><h2>Por recibir (${pr.length})</h2>
+  ${(() => { const pr = porRecibir(); return pr.length ? `<div class="pnl" style="margin-top:16px;border-color:var(--yellow)"><h2 style="cursor:pointer" data-a="nav" data-v="porllegar">Por llegar (${pr.length}) ›</h2>
     <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Piezas que compraste y aún no llegan. Cuando lleguen, escribe dónde las guardas y márcalas.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><input class="in" id="ub_llegada" placeholder="Ubicación, ej. Caja A" value="${esc(ui.ubLlegada)}" style="max-width:240px">
       <button class="btn sm grn" data-a="yallegotodas">Ya llegaron todas</button></div>
     <div class="feed">${pr.map((a) => `<div class="fi"><span class="dot" style="background:var(--yellow)"></span>
-      <span class="tx"><b>${esc(a.nombre)}</b><span>${a.cantidad > 1 ? '×' + a.cantidad + ' · ' : ''}${esc(a.fuente || '')} · ${a.fecha_adq || ''}</span></span>
+      <span class="tx"><b>${esc(a.nombre)}</b><span>${a.cantidad > 1 ? '×' + a.cantidad + ' · ' : ''}${esc(a.fuente || '')} · llega ${enDias(llegada(a).f) < 0 ? '<b style="color:var(--red)">retrasada</b>' : 'aprox. ' + esc(fmtDia(llegada(a).f))}</span></span>
       <button class="btn sm grn" data-a="yallego" data-id="${a.id}">Ya llegó</button></div>`).join('')}</div></div>` : ''; })()}
   ${(() => { const cp = cambiosPrecio(); return cp.length ? `<div class="pnl" style="margin-top:16px"><h2>Movimientos de precio</h2>
     <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Piezas cuyo valor cambió 15% o más en su última valuación. Si subió, es buen momento de publicarla; si bajó, revisa antes de vender.</p>
@@ -1096,6 +1097,44 @@ function vPedidos() {
     : '<p style="color:var(--muted);font-size:13px">Cuando un cliente te pida algo que no tienes, anótalo aquí: al registrar o abrir una pieza parecida verás a quién avisarle.</p>'}`;
 }
 
+/* ---------- Por llegar: compras en camino ---------- */
+const DIAS_ENVIO = 14;   // si no se anotó cuándo llega, se estima a 14 días de la compra
+/** Fecha estimada de llegada: la anotada o, si no hay, compra + DIAS_ENVIO. */
+function llegada(a) {
+  if (a.fecha_llegada) return { f: a.fecha_llegada, aprox: false };
+  const d = new Date((a.fecha_adq || hoy()) + 'T12:00:00'); d.setDate(d.getDate() + DIAS_ENVIO);
+  return { f: d.toISOString().slice(0, 10), aprox: true };
+}
+const enDias = (f) => Math.round((new Date(f + 'T12:00:00') - new Date(hoy() + 'T12:00:00')) / 864e5);
+function vPorLlegar() {
+  const l = porRecibir().map((a) => ({ a, ll: llegada(a) })).sort((x, y) => x.ll.f.localeCompare(y.ll.f));
+  const enCamino = l.filter((x) => enDias(x.ll.f) >= 0), tarde = l.filter((x) => enDias(x.ll.f) < 0);
+  const fila = ({ a, ll }) => { const n = enDias(ll.f); return `<tr>
+    <td><span class="pz"><span class="mini ${a.foto ? 'con' : ''}">${imgFoto(a, 'loading="lazy"')}</span><span><b>${esc(a.nombre)}</b>
+      <div style="font-size:11.5px;color:var(--muted)">${esc(a.tipo)}${a.fuente ? ' · ' + esc(a.fuente) : ''}</div></span></span></td>
+    <td class="num">${num(a.cantidad)}</td><td class="num">${money(num(a.precio_compra) * num(a.cantidad))}</td>
+    <td class="mn">${esc(a.fecha_adq || '—')}</td>
+    <td><input class="in" type="date" value="${ll.f}" data-a="fllegada" data-id="${a.id}" style="width:auto;padding:5px 8px;font-size:12.5px" title="Cuándo llega aprox. (se guarda al cambiarla)">
+      ${ll.aprox ? '<div style="font-size:10.5px;color:var(--muted)">estimada</div>' : ''}</td>
+    <td>${n > 0 ? `<span class="tag b">faltan ${n} día${n === 1 ? '' : 's'}</span>` : n === 0 ? '<span class="tag y">llega hoy</span>' : `<span class="tag r">retrasado ${-n} día${n === -1 ? '' : 's'}</span>`}</td>
+    <td style="text-align:right"><button class="btn sm grn" data-a="yallego" data-id="${a.id}">Ya llegó</button></td></tr>`; };
+  const tabla = (xs) => `<div class="pnl wrap hoja" style="padding:0;max-height:none"><table class="tbl hoja-t" style="min-width:760px"><thead><tr>
+    <th>Pieza</th><th class="num">Cant.</th><th class="num">Costo</th><th>Comprada</th><th>Llega aprox.</th><th>Estado</th><th></th></tr></thead>
+    <tbody>${xs.map(fila).join('')}</tbody></table></div>`;
+  return hdr('Por llegar', l.length ? `${suma(l, (x) => num(x.a.cantidad))} pieza(s) en camino · ${money(suma(l, (x) => num(x.a.precio_compra) * num(x.a.cantidad)))} invertidos` : 'Compras en camino',
+    `<button class="btn sm" data-a="compramattel" title="Pega los links de lo que compraste en Mattel">🛒 Compra Mattel</button>`) +
+  (l.length ? `<div class="pnl" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:13px 16px">
+      <span style="font-size:13px;color:var(--muted)">Cuando lleguen, escribe dónde las guardas y márcalas:</span>
+      <input class="in" id="ub_llegada" placeholder="Ubicación, ej. Caja A" value="${esc(ui.ubLlegada)}" style="max-width:240px">
+      <button class="btn sm grn" data-a="yallegotodas">Ya llegaron todas</button></div>
+    ${enCamino.length ? `<div class="sec"><h2>En camino (${enCamino.length})</h2><span class="ln"></span></div>${tabla(enCamino)}` : ''}
+    ${tarde.length ? `<div class="sec" style="margin-top:18px"><h2 style="color:var(--red)">Ya debieron llegar (${tarde.length})</h2><span class="ln"></span></div>
+      <div class="note" style="margin-top:0">Pasó su fecha y siguen sin llegar: revisa la guía o escribe a la tienda. Si ya llegaron, márcalas; si llegan después, cambia la fecha.</div>${tabla(tarde)}` : ''}`
+    : vacio('📦', 'Nada en camino', 'Las piezas que compres y registres como <b>Por recibir</b> (desde Compra Mattel, el bot o el formulario) aparecen aquí hasta que lleguen.',
+      '<button class="btn pri" data-a="compramattel">🛒 Registrar compra Mattel</button>')) +
+  (db.wishlist.length ? `<details style="margin-top:22px"><summary style="cursor:pointer;color:var(--muted);font-size:13px">Faltantes anotados antes (${db.wishlist.length})</summary>${vWish()}</details>` : '');
+}
+
 /* ---------- Faltantes ---------- */
 function vWish() {
   const l = db.wishlist;
@@ -1323,7 +1362,8 @@ MOD.pieza = function () {
     ${f('Valor de mercado', inp('f_valor', a.valor_estimado, 'number', '0.00'), 'Lo que piden hoy por una igual')}
     ${f('Fecha de adquisición', inp('f_fadq', a.fecha_adq || hoy(), 'date'))}
   </div>
-  <div class="g2">${f('Dónde la conseguiste', sel('f_fuente', a.fuente, FUENTES))}${f('Ubicación física', inp('f_ubic', a.ubicacion, 'text', 'Caja A · Vitrina 2 · Carpeta azul'))}</div>
+  <div class="g2">${f('Dónde la conseguiste', sel('f_fuente', a.fuente, FUENTES))}${f('Ubicación física', inp('f_ubic', a.ubicacion, 'text', 'Caja A · Vitrina 2 · Carpeta azul'), 'Escribe <b>Por recibir</b> si aún viene en camino')}</div>
+  ${esPorRecibir({ cantidad: 1, ubicacion: a.ubicacion }) ? f('Llega aprox.', inp('f_llegada', a.fecha_llegada || llegada(a).f, 'date'), 'Aparece en Por llegar hasta que la marques como recibida') : ''}
   ${f('Código de barras o SKU', `<div style="display:flex;gap:8px">${inp('f_codigo', a.codigo, 'text', 'Escanéalo o tecléalo')}
     <button class="btn" data-a="escanear" data-target="f_codigo" style="flex:0 0 auto">⌗</button></div>`)}
   ${ui.fotoPendiente
@@ -1640,7 +1680,9 @@ MOD.mattelmulti = function () {
       <td class="num"><input class="in mm_cant" type="number" min="1" value="${r.cantidad}" data-i="${i}" style="width:64px;padding:4px 8px"></td>
       <td class="num"><input class="in mm_pre" type="number" step="0.01" value="${r.precio_mxn}" data-i="${i}" style="width:100px;padding:4px 8px"></td></tr>`
       : `<tr><td colspan="3" style="color:var(--red);font-size:12.5px">${esc(r.url)} — ${esc(r.error)}</td></tr>`).join('')}</tbody></table></div>
-    <div class="note">Se registran como <b>Por recibir</b> con fuente Mattel Creations y el precio ya convertido a pesos. Cuando lleguen, márcalas desde el Panel.</div>` : ''}
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap"><label class="lbl" style="margin:0">Llegan aprox.</label>
+      <input class="in" type="date" id="mm_llegada" value="${esc(m.llegada || llegada({ fecha_adq: hoy() }).f)}" style="width:auto"></div>
+    <div class="note">Se registran como <b>Por recibir</b> con fuente Mattel Creations y el precio ya convertido a pesos. Las ves en <b>Por llegar</b> hasta que lleguen.</div>` : ''}
   `, `<button class="btn gh" data-a="cerrar">Cerrar</button>${ok.length ? `<button class="btn pri" data-a="mmguardar">Registrar ${ok.length} pieza${ok.length === 1 ? '' : 's'}</button>` : ''}`, '640px');
 };
 MOD.abono = function () {
@@ -1998,6 +2040,9 @@ document.addEventListener('change', async (e) => {
     const valor = el.type === 'number' ? num(el.value) : el.value;
     await accion(() => PATCH('/ajustes', { [el.dataset.k]: valor }), 'Ajuste guardado');
   }
+  if (a === 'fllegada') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(el.value)) await accion(() => PATCH('/articulos/' + el.dataset.id, { fecha_llegada: el.value }), 'Fecha de llegada guardada');
+  }
   if (a === 'restaurar') {
     const archivo = el.files[0];
     el.value = '';
@@ -2044,7 +2089,7 @@ function snapPieza() {
     rareza: g('f_rareza', b.rareza), grado: g('f_grado', b.grado), cert: g('f_cert', b.cert),
     cantidad: g('f_cantidad', b.cantidad), precio_compra: g('f_compra', b.precio_compra),
     valor_estimado: g('f_valor', b.valor_estimado), fecha_adq: g('f_fadq', b.fecha_adq),
-    fuente: g('f_fuente', b.fuente), estatus: g('f_estatus', b.estatus), ubicacion: g('f_ubic', b.ubicacion),
+    fuente: g('f_fuente', b.fuente), estatus: g('f_estatus', b.estatus), ubicacion: g('f_ubic', b.ubicacion), fecha_llegada: g('f_llegada', b.fecha_llegada),
     codigo: g('f_codigo', b.codigo), foto: g('f_foto', b.foto), notas: g('f_notas', b.notas), grail: g('f_grail', b.grail),
   });
 }
@@ -2071,6 +2116,7 @@ function leerPieza() {
     fecha_adq: $('#f_fadq').value,
     fuente: $('#f_fuente').value,
     ubicacion: $('#f_ubic').value.trim(),
+    fecha_llegada: $('#f_llegada') ? $('#f_llegada').value : undefined,
     codigo: $('#f_codigo').value.trim(),
     // Con una foto por subir no se manda: así la subida reemplaza (y borra) la anterior.
     foto: $('#f_foto') ? $('#f_foto').value.trim() : undefined,
@@ -2221,7 +2267,7 @@ async function mmGuardar() {
       for (const r of l) {
         await POST('/articulos', { tipo: tipoMattel(r), nombre: r.nombre, serie: tipoMattel(r) === 'Hot Wheels' ? '' : (r.linea || ''),
           cantidad: r.cantidad, precio_compra: r.precio_mxn, valor_estimado: r.precio_mxn, fecha_adq: hoy(), fuente: 'Mattel Creations',
-          ubicacion: 'Por recibir', foto: r.imagen || '', notas: `Mattel: ${r.url}\n${notaPrecioMattel(r)}` });
+          ubicacion: 'Por recibir', fecha_llegada: ($('#mm_llegada') || {}).value || '', foto: r.imagen || '', notas: `Mattel: ${r.url}\n${notaPrecioMattel(r)}` });
       }
     }, `${l.length} pieza(s) registradas como Por recibir`);
     ui.mm = null; cerrar();

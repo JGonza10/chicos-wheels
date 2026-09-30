@@ -40,7 +40,7 @@ def _pagina(pieza: dict | None = None) -> Response:
     else:
         titulo = "Chicos Wheels · Hot Wheels, Pokémon y más"
         desc = "Piezas de colección en stock. Aparta y recoge el sábado en Balderas."
-        imagen = f"{raiz}/tienda/img/portada.png" if (landing.CARPETA_LANDING / "img" / "portada.png").exists() else ""
+        imagen = f"{raiz}/tienda/img/portada.jpg" if (landing.CARPETA_LANDING / "img" / "portada.jpg").exists() else ""
         extra = ""
     e = lambda v: html.escape(str(v), quote=True)
     metas = [f'<base href="/tienda/">', extra,

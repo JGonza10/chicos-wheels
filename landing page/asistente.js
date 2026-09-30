@@ -11,7 +11,10 @@
 
   const pesos = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 });
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const recordar = (k, v) => { try { if (v === undefined) return localStorage.getItem(k) || ""; localStorage.setItem(k, v); } catch (_) { return ""; } return ""; };
+  // No se guardan los datos del cliente en el navegador: en un celular o compu compartida,
+  // el siguiente cliente vería el nombre y el Facebook/Instagram del anterior. Se borra lo
+  // que haya quedado de versiones anteriores.
+  try { localStorage.removeItem("cw_asis_nombre"); localStorage.removeItem("cw_asis_contacto"); } catch (_) { /* sin almacenamiento */ }
 
   // ---------- Estructura ----------
   const boton = document.createElement("button");
@@ -82,8 +85,8 @@
     const f = burbuja(`
       <form class="asis-form">
         <b>${esc(titulo)}</b>
-        <input name="nombre" maxlength="60" placeholder="Tu nombre" required value="${esc(recordar("cw_asis_nombre"))}">
-        <input name="contacto" maxlength="80" placeholder="Tu Facebook o Instagram" required value="${esc(recordar("cw_asis_contacto"))}">
+        <input name="nombre" maxlength="60" placeholder="Tu nombre" required>
+        <input name="contacto" maxlength="80" placeholder="Tu Facebook o Instagram" required>
         <input name="sitio" class="asis-trampa" tabindex="-1" autocomplete="off" aria-hidden="true">
         <button type="submit">Enviar</button>
         <small>Solo lo usamos para confirmarte por Facebook o Instagram.</small>
@@ -95,7 +98,6 @@
       btn.disabled = true; btn.textContent = "Enviando…";
       try {
         const r = await alEnviar(datos);
-        recordar("cw_asis_nombre", datos.nombre); recordar("cw_asis_contacto", datos.contacto);
         f.closest(".asis-msg").remove();
         bot(r.texto);
       } catch (err) {
@@ -103,9 +105,8 @@
         bot(err.message);
       }
     });
-    f.querySelector(datosIniciales(f) ? "button" : "input").focus();
+    f.querySelector("input").focus();
   }
-  const datosIniciales = (f) => f.nombre.value && f.contacto.value;
 
   function pedirApartado(p) {
     formulario(`Para apartarte «${p.nombre}» (${pesos.format(p.precio)}) necesito:`,
@@ -159,10 +160,10 @@
     const cats = ["Todas", "Hot Wheels", "Pokémon", ...(STOCK.categorias || []).map((c) => c.nombre).filter(Boolean)];
     nov.hidden = false;
     nov.innerHTML = `<form class="nov-form">
-      <b>🔔 ¿Quieres que te avisemos cuando lleguen piezas nuevas?</b>
+      <b>🔔 Te avisamos cuando lleguen piezas nuevas</b>
       <div class="nov-campos">
-        <input name="nombre" maxlength="60" placeholder="Tu nombre" required value="${esc(recordar("cw_asis_nombre"))}">
-        <input name="contacto" maxlength="80" placeholder="Tu Facebook o Instagram" required value="${esc(recordar("cw_asis_contacto"))}">
+        <input name="nombre" maxlength="60" placeholder="Tu nombre" required>
+        <input name="contacto" maxlength="80" placeholder="Tu Facebook o Instagram" required>
         <select name="cat" aria-label="De qué">${cats.map((c) => `<option>${esc(c)}</option>`).join("")}</select>
         <input name="sitio" class="asis-trampa" tabindex="-1" autocomplete="off" aria-hidden="true">
         <button type="submit">Avísenme</button>
@@ -176,7 +177,6 @@
       btn.disabled = true;
       try {
         const r = await llamar("avisame", { nombre: d.nombre, contacto: d.contacto, sitio: d.sitio, busqueda: `Novedades: ${d.cat}` });
-        recordar("cw_asis_nombre", d.nombre); recordar("cw_asis_contacto", d.contacto);
         estado.textContent = r.texto.replace(/«Novedades: [^»]*»/, "algo nuevo");
         f.querySelector(".nov-campos").hidden = true;
       } catch (err) { estado.textContent = err.message; btn.disabled = false; }

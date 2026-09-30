@@ -144,10 +144,25 @@
          ${PIEZAS.length ? "Prueba con otra búsqueda o categoría. Si buscas algo en especial, escríbenos." : "Muy pronto verás aquí las piezas disponibles."}</div>`;
   }
 
+  /* Recién llegados: por páginas (las que caben a lo ancho), sin barra de desplazamiento. */
+  const RECIEN = PIEZAS.filter(esNueva).sort(ORDENES.reciente).slice(0, 20);
+  function porPagina() {
+    const w = $("#tiraRecien").clientWidth || window.innerWidth;
+    const min = window.innerWidth <= 560 ? 150 : 200, gap = window.innerWidth <= 560 ? 10 : 16;
+    return Math.max(2, Math.floor((w + gap) / (min + gap)));
+  }
   function pintarRecien() {
-    const nuevas = PIEZAS.filter(esNueva).sort(ORDENES.reciente).slice(0, 10);
-    $("#recien").hidden = nuevas.length < 2;
-    $("#tiraRecien").innerHTML = nuevas.map(tarjeta).join("");
+    $("#recien").hidden = RECIEN.length < 2;
+    if (RECIEN.length < 2) return;
+    const n = porPagina(), paginas = Math.ceil(RECIEN.length / n);
+    S.pagRecien = Math.min(Math.max(0, S.pagRecien || 0), paginas - 1);
+    const tira = $("#tiraRecien");
+    tira.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+    tira.innerHTML = RECIEN.slice(S.pagRecien * n, S.pagRecien * n + n).map(tarjeta).join("");
+    $("#pagRecien").hidden = paginas < 2;
+    $("#pagRecienTxt").textContent = `${S.pagRecien + 1} / ${paginas}`;
+    $('#pagRecien [data-pag="-1"]').disabled = S.pagRecien === 0;
+    $('#pagRecien [data-pag="1"]').disabled = S.pagRecien >= paginas - 1;
   }
 
   /* ---------- Ficha ampliada ---------- */
@@ -210,6 +225,12 @@
       cont.addEventListener("click", alTocarFicha);
       cont.addEventListener("keydown", alTeclear);
     }
+    $("#pagRecien").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-pag]");
+      if (b) { S.pagRecien = (S.pagRecien || 0) + Number(b.dataset.pag); pintarRecien(); }
+    });
+    let alto;
+    window.addEventListener("resize", () => { clearTimeout(alto); alto = setTimeout(pintarRecien, 150); });
     $("#chips").addEventListener("click", (e) => {
       const b = e.target.closest(".chip");
       if (b) { S.filtro = b.dataset.filtro; render(); }

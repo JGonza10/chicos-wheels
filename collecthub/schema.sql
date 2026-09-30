@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS articulos (
   precio_compra  REAL NOT NULL DEFAULT 0 CHECK (precio_compra >= 0),
   valor_estimado REAL NOT NULL DEFAULT 0 CHECK (valor_estimado >= 0),
   fecha_adq      TEXT NOT NULL DEFAULT '',
+  fecha_llegada  TEXT NOT NULL DEFAULT '',  -- compras en camino ("Por recibir"): cuándo llega aprox.
   fuente         TEXT NOT NULL DEFAULT '',
   ubicacion      TEXT NOT NULL DEFAULT '',
   codigo         TEXT NOT NULL DEFAULT '',

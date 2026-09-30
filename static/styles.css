@@ -208,6 +208,8 @@ h1,h2,h3{font-family:var(--d);font-weight:700;letter-spacing:.04em;line-height:1
 .side::-webkit-scrollbar{width:5px}.side::-webkit-scrollbar-thumb{background:var(--yellow);border-radius:0}
 .logo{font-family:var(--d);font-weight:700;font-size:20px;letter-spacing:.14em;padding:2px 8px 16px;color:#DCE6F2}
 .logo i{font-style:normal;color:var(--yellow)}
+.logo-img{display:block;width:100%;max-width:190px;height:auto;margin:0 auto;filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))}
+.authbox .logo-img{max-width:280px}
 .logo small{display:block;font-family:var(--m);font-size:9px;letter-spacing:.24em;color:#8C9DB2;font-weight:400;margin-top:5px;text-transform:uppercase}
 .nav{display:flex;flex-direction:column;gap:2px}
 #ch .nav button{background:none;border:0;text-align:left;padding:9px 11px;border-radius:var(--r);color:#8C9DB2;

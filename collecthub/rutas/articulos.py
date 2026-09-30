@@ -67,6 +67,8 @@ def limpiar(b: dict, parcial: bool = False) -> dict:
     poner("grado", texto(b.get("grado"), 40))
     poner("cert", texto(b.get("cert"), 40))
     poner("sub", texto(b.get("sub"), 60))
+    fl = str(b.get("fecha_llegada") or "")
+    poner("fecha_llegada", fl if re.fullmatch(r"\d{4}-\d{2}-\d{2}", fl) else "")
     poner("estado", texto(b.get("estado"), 60))
     poner("cantidad", max(0, entero(b.get("cantidad"), 1)))
     poner("estatus", b["estatus"] if b.get("estatus") in ESTATUS else "Disponible")
