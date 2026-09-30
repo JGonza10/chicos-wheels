@@ -271,6 +271,18 @@
       b.textContent = "¡Copiado!";
       setTimeout(() => { b.textContent = "Copiar mensaje"; }, 1800);
     });
+    // Menú del celular (☰): se cierra al elegir una sección, al tocar fuera o con Esc.
+    const menu = $("#menuSecciones"), menuBtn = $("#menuBtn");
+    const abrirMenu = (si) => {
+      menu.classList.toggle("abierto", si);
+      menuBtn.setAttribute("aria-expanded", String(si));
+      menuBtn.setAttribute("aria-label", si ? "Cerrar menú" : "Abrir menú");
+      menuBtn.textContent = si ? "✕" : "☰";
+    };
+    menuBtn.addEventListener("click", (e) => { e.stopPropagation(); abrirMenu(!menu.classList.contains("abierto")); });
+    menu.addEventListener("click", (e) => { if (e.target.closest("a")) abrirMenu(false); });
+    document.addEventListener("click", (e) => { if (menu.classList.contains("abierto") && !e.target.closest("#menuSecciones")) abrirMenu(false); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && menu.classList.contains("abierto")) { abrirMenu(false); menuBtn.focus(); } });
     $("#darkModeToggle").addEventListener("click", () => {
       const nuevo = document.documentElement.getAttribute("data-tema") === "oscuro" ? "claro" : "oscuro";
       document.documentElement.setAttribute("data-tema", nuevo);

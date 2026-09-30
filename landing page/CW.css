@@ -94,6 +94,7 @@ nav a {
 }
 nav a:hover { background: var(--superficie-2); color: var(--azul); }
 .header-right { display: flex; align-items: center; gap: 10px; }
+.menu-btn { display: none; color: var(--texto); font-size: 20px; line-height: 1; cursor: pointer; }
 .icono {
   width: 42px; height: 42px; border-radius: 50%;
   border: 1px solid var(--linea); background: var(--superficie); font-size: 18px;
@@ -321,6 +322,17 @@ footer p { margin: 0; font-size: 13px; color: var(--tenue); }
 @media (max-width: 860px) {
   .barra { padding: 12px 16px; }
   nav { display: none; }
+  /* Menú del celular: el botón ☰ lo despliega bajo la barra. */
+  .menu-btn { display: inline-grid; place-items: center; }
+  nav.abierto {
+    display: flex; flex-direction: column; gap: 2px;
+    position: absolute; top: 100%; left: 0; right: 0;
+    padding: 8px 16px 14px; background: var(--superficie);
+    border-top: 1px solid var(--linea); box-shadow: var(--sombra);
+  }
+  nav.abierto a { padding: 12px 14px; font-size: 16px; }
+  /* Flechas de Recién llegados en su propio renglón, a la izquierda: el globo del chat (abajo a la derecha) ya no las tapa. */
+  .titulo-seccion .pag { flex-basis: 100%; margin-left: 0; }
   .hero { grid-template-columns: 1fr; padding: 20px 16px; gap: 14px; }
   .hero > button { min-height: 0; padding: 22px 22px 24px; }
   .hero > button > .hero-conteo { position: static; align-self: flex-start; margin-bottom: 8px; }
