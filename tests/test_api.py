@@ -472,7 +472,6 @@ class PruebasAPI(unittest.TestCase):
         self.assertEqual(self.c.post("/api/articulos", json={"tipo": "Lego", "nombre": "x"}, headers=h2).status_code, 400)
 
     def test_47_tienda_con_categorias_y_fotos_https(self):
-        h = {"Authorization": f"Bearer {self.token}"}
         leer = lambda r: json.loads(r.get_data(as_text=True).split("window.CW_STOCK = ", 1)[1].rstrip().rstrip(";"))
         # Una foto http:// (así llegan algunas del bot) se guarda como https://
         _, a = self.pedir("POST", "/api/articulos", {"tipo": "Barbie", "nombre": "Barbie tienda", "valor_estimado": 900,
@@ -863,7 +862,6 @@ class PruebasAPI(unittest.TestCase):
         self.assertEqual(self.c.post(f"/api/encargos/{e['id']}/pago", headers=h, json={"monto": 1}).status_code, 409, "ya liquidado")
 
     def test_44_catalogo_pdf_con_fotos(self):
-        from unittest.mock import MagicMock
         h = {"Authorization": f"Bearer {self.token}"}
         self.assertEqual(self.c.post("/api/articulos/catalogo-pdf", json={}).status_code, 401)
         a = self._pieza("Catalogo con foto", 1, 10, 55)

@@ -43,13 +43,13 @@ def _pagina(pieza: dict | None = None) -> Response:
         imagen = f"{raiz}/tienda/img/portada.jpg" if (landing.CARPETA_LANDING / "img" / "portada.jpg").exists() else ""
         extra = ""
     e = lambda v: html.escape(str(v), quote=True)
-    metas = [f'<base href="/tienda/">', extra,
-             f'<meta property="og:type" content="website">',
-             f'<meta property="og:site_name" content="Chicos Wheels">',
+    metas = ['<base href="/tienda/">', extra,
+             '<meta property="og:type" content="website">',
+             '<meta property="og:site_name" content="Chicos Wheels">',
              f'<meta property="og:title" content="{e(titulo)}">',
              f'<meta property="og:description" content="{e(desc)}">',
              f'<meta property="og:url" content="{e(request.url)}">',
-             f'<meta name="twitter:card" content="summary_large_image">']
+             '<meta name="twitter:card" content="summary_large_image">']
     if imagen:
         metas.append(f'<meta property="og:image" content="{e(imagen)}">')
     texto = texto.replace("<head>", "<head>\n  " + "\n  ".join(m for m in metas if m), 1)

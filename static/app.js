@@ -477,7 +477,6 @@ function vPanel() {
   const maxP = Math.max(1, ...Object.values(porPlat).map(Math.abs));
   const meta = db.ajustes.metaMensual;
   const movs = movimientos().slice(0, 9);
-  const vendibles = db.articulos.filter((a) => libre(a) > 0);
   return hdr(titulo, 'Inventario, valuación y venta de coleccionables') + `
   <div class="kpis">
     ${kpi('Valor total', money(s.mercado), `${s.piezas} piezas · ${s.skus} modelos`, 'var(--blue)')}
@@ -2019,7 +2018,6 @@ document.addEventListener('input', (e) => {
   if (el.dataset.a === 'recalcLote') pintarLote();
 });
 
-const id0 = (el) => el.dataset.id;
 document.addEventListener('change', async (e) => {
   const el = e.target.closest('[data-a]'); if (!el) return;
   const a = el.dataset.a;
