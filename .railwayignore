@@ -1,0 +1,7 @@
+# Lo que no se sube con "railway up" (además de .gitignore)
+datos/
+venv/
+.venv/
+.env
+*.zip
+MANUAL.pdf
