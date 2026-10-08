@@ -28,7 +28,7 @@
   panel.hidden = true;
   panel.setAttribute("aria-label", "Asistente de la tienda");
   panel.innerHTML = `
-    <header><div><b>Asistente Erick G</b><small>Te digo si la tenemos y te la aparto</small></div>
+    <header><div><b>Asistente Erik G</b><small>Te digo si la tenemos y te la aparto</small></div>
       <button type="button" class="asis-cerrar" aria-label="Cerrar">×</button></header>
     <div class="asis-msgs" role="log" aria-live="polite"></div>
     <form class="asis-entrada" autocomplete="off">

@@ -159,7 +159,7 @@ def respaldo_zip():
     """Respaldo para guardar fuera del servidor: datos + fotos de esta cuenta."""
     datos = respaldo_cuenta.generar_zip(g.usuario_id)
     return Response(datos, mimetype="application/zip", headers={
-        "Content-Disposition": f'attachment; filename="chicos-wheels-respaldo-{datetime.now():%Y-%m-%d}.zip"',
+        "Content-Disposition": f'attachment; filename="erik-g-respaldo-{datetime.now():%Y-%m-%d}.zip"',
         "Cache-Control": "no-store"})
 
 

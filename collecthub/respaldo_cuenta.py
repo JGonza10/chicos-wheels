@@ -41,7 +41,7 @@ def generar_zip(usuario_id: str) -> bytes:
     salida = io.BytesIO()
     with zipfile.ZipFile(salida, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("datos.json", json.dumps(datos, ensure_ascii=False, indent=1))
-        z.writestr("LEEME.txt", "Respaldo de Chicos Wheels. Guárdalo en tu PC o en tu nube.\n"
+        z.writestr("LEEME.txt", "Respaldo de Erik G. Guárdalo en tu PC o en tu nube.\n"
                                 "Para recuperarlo: menú Datos → Restaurar respaldo.\n")
         carpeta = carpeta_fotos(usuario_id)
         if carpeta.exists():
@@ -69,7 +69,7 @@ def _leer(archivo: bytes) -> tuple:
         if len(infos) > MAX_ARCHIVOS or sum(i.file_size for i in infos) > MAX_DESCOMPRIMIDO:
             raise ErrorApp("El respaldo es demasiado grande")
         if "datos.json" not in z.namelist():
-            raise ErrorApp("Ese .zip no es un respaldo de Chicos Wheels")
+            raise ErrorApp("Ese .zip no es un respaldo de Erik G")
         datos = json.loads(z.read("datos.json"))
         fotos = {}
         for i in infos:
@@ -80,7 +80,7 @@ def _leer(archivo: bytes) -> tuple:
     try:
         return json.loads(archivo.decode("utf-8")), {}
     except (UnicodeDecodeError, json.JSONDecodeError):
-        raise ErrorApp("Ese archivo no es un respaldo de Chicos Wheels")
+        raise ErrorApp("Ese archivo no es un respaldo de Erik G")
 
 
 def _filas(datos: dict) -> dict:
@@ -105,7 +105,7 @@ def _filas(datos: dict) -> dict:
 def restaurar(usuario_id: str, archivo: bytes) -> dict:
     datos, fotos = _leer(archivo)
     if not isinstance(datos, dict) or not isinstance(datos.get("articulos"), list):
-        raise ErrorApp("Ese archivo no es un respaldo de Chicos Wheels")
+        raise ErrorApp("Ese archivo no es un respaldo de Erik G")
     filas = _filas(datos)
     with transaccion() as con:
         columnas = {tb: [c["name"] for c in con.execute(f"PRAGMA table_info({tb})")] for tb in TABLAS}

@@ -1,5 +1,5 @@
 """
-Chicos Wheels (CollectHub) · aplicación Flask.
+Erik G (CollectHub) · aplicación Flask.
 
 Sirve la API bajo /api y el frontend (HTML, CSS y JS planos) desde /static.
 """

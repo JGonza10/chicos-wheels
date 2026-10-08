@@ -1,4 +1,4 @@
-# Landing page de Chicos Wheels
+# Landing page de Erik G
 
 Página para que los clientes vean **lo que hay en stock**. Vive en esta carpeta, aparte
 del resto de la app, y la app la publica en **`/tienda/`** (por ejemplo

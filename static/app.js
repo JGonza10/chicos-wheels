@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Chicos Wheels · cliente
+   Erik G · cliente
    Habla con la API por HTTP. La única fuente de verdad es el servidor:
    aquí solo se guarda una copia para pintar rápido, y después de cada
    cambio se vuelve a pedir el estado completo.
@@ -40,11 +40,11 @@ const TEMAS = [
     bg: '#F6F7F9', muestra: ['#F6F7F9', '#1F6FEB', '#FFD24D', '#1B2433', '#D32F2F'] },
   { id: 'grafito', nombre: 'Grafito', descripcion: 'Gris neutro, sin brillos. Para sesiones largas.',
     bg: '#121417', muestra: ['#121417', '#E7EAEE', '#7FB2D9', '#C9A66B', '#E0645F'] },
-  // 'clasico' (azul y dorado sobre marino, el original de Chicos Wheels) se
+  // 'clasico' (azul y dorado sobre marino, el original de Erik G) se
   // desactivó a petición: los colores todavía no son definitivos. Cuando se
   // decidan, actualiza los valores aquí y en styles.css (#ch[data-tema="clasico"],
   // hoy comentado) y descomenta esta entrada para que reaparezca en Apariencia.
-  // { id: 'clasico', nombre: 'Clásico', descripcion: 'Azul y dorado sobre marino — el estilo original de Chicos Wheels.',
+  // { id: 'clasico', nombre: 'Clásico', descripcion: 'Azul y dorado sobre marino — el estilo original de Erik G.',
   //   bg: '#0A1120', muestra: ['#0A1120', '#FFD84D', '#38D6F0', '#A78BFA', '#FF4B4B'] },
 ];
 const TEMA_KEY = 'collecthub_tema';
@@ -311,7 +311,7 @@ function movimientos() {
 function vistaAuth() {
   const esLogin = ui.authTab === 'login';
   return `<div class="auth"><div class="authbox">
-    <div class="logo"><img src="/logo.webp" alt="Chicos Wheels" class="logo-img"></div>
+    <div class="logo"><img src="/logo.webp" alt="Erik G" class="logo-img"></div>
     <div class="sub">Inventario, valuación y venta de coleccionables</div>
     <div class="pnl">
       <div class="authtabs">
@@ -319,7 +319,7 @@ function vistaAuth() {
         <button data-a="authtab" data-v="registro" class="${!esLogin ? 'on' : ''}">Crear cuenta</button>
       </div>
       ${ui.authErr ? `<div class="autherr">${esc(ui.authErr)}</div>` : ''}
-      ${esLogin ? '' : `<div class="fld"><label class="lbl">Tu nombre</label><input class="in" id="au_nombre" placeholder="Chicos Wheels" autocomplete="name"></div>`}
+      ${esLogin ? '' : `<div class="fld"><label class="lbl">Tu nombre</label><input class="in" id="au_nombre" placeholder="Erik G" autocomplete="name"></div>`}
       <div class="fld"><label class="lbl">Correo</label><input class="in" id="au_email" type="email" placeholder="tucorreo@ejemplo.com" autocomplete="email"></div>
       <div class="fld"><label class="lbl">Contraseña</label>
         <input class="in" id="au_pass" type="password" placeholder="${esLogin ? 'Tu contraseña' : 'Mínimo 8 caracteres'}" autocomplete="${esLogin ? 'current-password' : 'new-password'}"></div>
@@ -377,7 +377,7 @@ function render() {
   $('#app').innerHTML = `
   <div class="shell">
     <aside class="side">
-      <div class="logo"><img src="/logo.webp" alt="Chicos Wheels" class="logo-img"><small>${esc((usuario && (usuario.nombre || usuario.email)) || '')}</small></div>
+      <div class="logo"><img src="/logo.webp" alt="Erik G" class="logo-img"><small>${esc((usuario && (usuario.nombre || usuario.email)) || '')}</small></div>
       <nav class="nav">${NAV.filter((n) => n[0] !== 'apartados' || db.apartados.length).map((n) => (n[0].startsWith('SEP')
         ? `<div class="navsep">${n[2]}</div>`
         : `<button data-a="nav" data-v="${n[0]}" class="${ui.vista === n[0] ? 'on' : ''}"><span class="ic">${n[1]}</span>${n[2]}<span class="cnt">${CNT[n[0]] ? (CNT[n[0]]() || '') : ''}</span></button>`)).join('')}
@@ -463,7 +463,7 @@ function cambiosPrecio() {
 /* ---------- Panel ---------- */
 function vPanel() {
   const s = stats();
-  const titulo = 'CHICOS<i style="color:var(--yellow);font-style:normal">WHEELS</i>';
+  const titulo = 'ERIK<i style="color:var(--yellow);font-style:normal"> G</i>';
   if (!db.articulos.length && !db.ventas.length) {
     return hdr(titulo, 'Inventario, valuación y venta de coleccionables') +
       vacio('🏎️', 'Tu vitrina está vacía', 'Registra tu primera pieza y el panel empieza a calcular capital, plusvalía y ganancias solo.',
@@ -798,7 +798,7 @@ function copiarTexto(txt) {
   if (!ok && navigator.clipboard) navigator.clipboard.writeText(txt).then(() => {}, () => {});
   return true;
 }
-/** Mensaje al cliente: Chicos Wheels atiende por Messenger e Instagram (el texto se copia para
+/** Mensaje al cliente: Erik G atiende por Messenger e Instagram (el texto se copia para
  *  pegarlo en el chat que se abre). WhatsApp solo si lo único guardado es un teléfono. */
 function enviarWhatsApp(c, txt) {
   const r = redDe(c);
@@ -1188,7 +1188,7 @@ function pintarQR() {
   $$('.qrbox').forEach((b) => {
     const t = b.dataset.txt; b.innerHTML = '';
     if (window.QRCode) {
-      try { new window.QRCode(b, { text: 'Chicos Wheels · ' + t, width: 78, height: 78, colorDark: '#0A1120', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M }); return; } catch (e) { /* sin red */ }
+      try { new window.QRCode(b, { text: 'Erik G · ' + t, width: 78, height: 78, colorDark: '#0A1120', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M }); return; } catch (e) { /* sin red */ }
     }
     b.innerHTML = `<div style="width:78px;height:78px;display:grid;place-items:center;border:2px dashed #999;border-radius:6px;font-size:9px;color:#555;text-align:center;padding:4px">${esc(t)}</div>`;
   });
@@ -1857,7 +1857,7 @@ document.addEventListener('click', async (e) => {
     case 'ofcopiar': copiarOfertas(); break;
     case 'ofaplicar': await aplicarOfertas(); break;
     case 'linktienda': copiarTexto(linkTienda(art(id))); toast('Link copiado: pégalo en Facebook y sale con foto y precio'); break;
-    case 'respzip': await bajarPDF('/respaldo', `chicos-wheels-respaldo-${hoy()}.zip`, 'GET'); await cargarEstado(); break;
+    case 'respzip': await bajarPDF('/respaldo', `erik-g-respaldo-${hoy()}.zip`, 'GET'); await cargarEstado(); break;
     case 'enctab': ui.encTab = el.dataset.v; render(); break;
     case 'encempacar': await accion(() => PATCH('/encargos/' + id, { estatus: el.dataset.v }), el.dataset.v === 'Empacado' ? 'Marcado como empacado' : 'Desempacado'); break;
     case 'encentregar': abrir('encentregar', db.encargos.find((x) => x.id === id)); break;
@@ -2532,7 +2532,7 @@ async function reportePDF() {
 async function exportar() {
   try {
     const datos = await GET('/exportar');
-    bajar(`chicos-wheels-${hoy()}.json`, JSON.stringify(datos, null, 2), 'application/json');
+    bajar(`erik-g-${hoy()}.json`, JSON.stringify(datos, null, 2), 'application/json');
     toast('Respaldo descargado');
   } catch (e) { toast(e.message, true); }
 }

@@ -17,7 +17,7 @@ from .util import ErrorApp
 HOST_VALIDO = re.compile(r"^([a-z0-9-]+\.)*mattel\.com$")
 HANDLE_VALIDO = re.compile(r"^(?:/([a-z]{2}(?:-[a-z]{2})?))?/products/([a-z0-9][a-z0-9_-]{0,200})/?$")
 MAX_BYTES = 2 * 1024 * 1024
-_UA = {"User-Agent": "Mozilla/5.0 (ChicosWheels)", "Accept": "application/json"}
+_UA = {"User-Agent": "Mozilla/5.0 (ErikG)", "Accept": "application/json"}
 
 
 def _leer(url: str, timeout: int = 10) -> bytes:

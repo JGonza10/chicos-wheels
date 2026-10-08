@@ -1,4 +1,4 @@
-# Manual de Chicos Wheels (CollectHub)
+# Manual de Erik G (CollectHub)
 
 _Manual de usuario del sistema de inventario y venta de coleccionables. Refleja el estado del código al 2026-09-25. Regenera los formatos imprimibles con `python generar_manual.py`._
 

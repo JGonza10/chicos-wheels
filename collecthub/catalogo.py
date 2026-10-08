@@ -21,7 +21,7 @@ from .util import ErrorApp
 MAX_PIEZAS = 60
 MAX_BYTES = 2 * 1024 * 1024
 HOSTS_FOTO = ("cdn.shopify.com", "creations.mattel.com", "shop.mattel.com", "images.pokemontcg.io", "assets.tcgdex.net")
-_UA = {"User-Agent": "Mozilla/5.0 (ChicosWheels)"}
+_UA = {"User-Agent": "Mozilla/5.0 (ErikG)"}
 
 
 def _host_permitido(url: str) -> bool:
@@ -109,7 +109,7 @@ def generar_catalogo(usuario_id: str, config: dict) -> bytes:
         pdf.set_font("Helvetica", "B", 20)
         pdf.set_text_color(*AZUL)
         pdf.set_xy(10, 10)
-        pdf.cell(0, 9, "Catalogo Chicos Wheels", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 9, "Catalogo Erik G", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(*GRIS)
         pdf.set_x(10)
