@@ -29,4 +29,5 @@ if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 3000))
     print(f"\n  Erik G corriendo en http://localhost:{puerto}")
     print(f"  Base de datos: {RUTA_BD}\n")
-    app.run(host="0.0.0.0", port=puerto, debug=os.environ.get("FLASK_ENV") == "development")
+    # Solo esta PC por defecto; producción usa gunicorn (Dockerfile), no esta línea.
+    app.run(host=os.environ.get("HOST", "127.0.0.1"), port=puerto, debug=os.environ.get("FLASK_ENV") == "development")
