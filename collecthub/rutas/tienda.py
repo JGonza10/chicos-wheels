@@ -31,21 +31,21 @@ def _pagina(pieza: dict | None = None) -> Response:
     texto = (landing.CARPETA_LANDING / "index.html").read_text(encoding="utf-8")
     raiz = request.url_root.rstrip("/")
     if pieza:
-        titulo = f"{pieza['nombre']} · ${pieza['precio']:,.0f} MXN · Chicos Wheels"
+        titulo = f"{pieza['nombre']} · ${pieza['precio']:,.0f} MXN · Erick G"
         desc = " · ".join(str(x) for x in (pieza.get("serie") or pieza.get("expansion"), pieza.get("anio"),
                                              "Entrega los sábados en Balderas") if x)
         foto = pieza.get("foto") or ""
         imagen = f"{raiz}/tienda/{foto}" if foto.startswith("foto/") else foto
         extra = f'<meta name="cw-pieza" content="{html.escape(pieza["id"])}">'
     else:
-        titulo = "Chicos Wheels · Hot Wheels, Pokémon y más"
+        titulo = "Erick G · Hot Wheels, Pokémon y más"
         desc = "Piezas de colección en stock. Aparta y recoge el sábado en Balderas."
         imagen = f"{raiz}/tienda/img/portada.jpg" if (landing.CARPETA_LANDING / "img" / "portada.jpg").exists() else ""
         extra = ""
     e = lambda v: html.escape(str(v), quote=True)
     metas = ['<base href="/tienda/">', extra,
              '<meta property="og:type" content="website">',
-             '<meta property="og:site_name" content="Chicos Wheels">',
+             '<meta property="og:site_name" content="Erick G">',
              f'<meta property="og:title" content="{e(titulo)}">',
              f'<meta property="og:description" content="{e(desc)}">',
              f'<meta property="og:url" content="{e(request.url)}">',

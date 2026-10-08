@@ -206,7 +206,7 @@
             ${FB ? `<a class="btn-fb" href="${linkMessenger(mensajePieza(p))}" target="_blank" rel="noopener">Messenger</a>` : ""}
             ${IG ? `<a class="btn-ig" href="${linkInstagram()}" target="_blank" rel="noopener">Instagram</a>` : ""}
           </div>
-          <p class="nota">${FB || IG ? "Copia el mensaje y pégalo en el chat." : "Cópialo y búscanos en Facebook o Instagram como Chicos Wheels."} ${porLlegar(p) ? "Viene en camino: apártala ya y la recoges el primer sábado después de que llegue, en Balderas." : "Entrega los sábados en Balderas."}</p>
+          <p class="nota">${FB || IG ? "Copia el mensaje y pégalo en el chat." : "Cópialo y búscanos en Facebook o Instagram como Erick G."} ${porLlegar(p) ? "Viene en camino: apártala ya y la recoges el primer sábado después de que llegue, en Balderas." : "Entrega los sábados en Balderas."}</p>
         </div>
       </div>
       <button class="cerrar" type="button" aria-label="Cerrar">×</button>
@@ -311,7 +311,7 @@
     $("#avisoMuestra").hidden = !STOCK.muestra;
     if (STOCK.generado) $("#actualizado").textContent = `Actualizado: ${STOCK.generado}`;
 
-    if (FB) { $("#btnMessenger").href = linkMessenger("Hola, vi tu página de Chicos Wheels y quiero preguntar por una pieza."); $("#btnMessenger").hidden = false; }
+    if (FB) { $("#btnMessenger").href = linkMessenger("Hola, vi tu página de Erick G y quiero preguntar por una pieza."); $("#btnMessenger").hidden = false; }
     if (IG) { $("#btnInstagram").href = linkInstagram(); $("#btnInstagram").hidden = false; }
     $("#sinRedes").hidden = !!(FB || IG);
 
