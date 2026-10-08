@@ -3,15 +3,16 @@
 La landing solo muestra lo que hay a la venta. Este módulo arma ese stock al
 momento desde la base, con una lista blanca de campos (lo que ve un comprador):
 nunca costo, ganancia, fuente, ubicación, notas, código, id interno ni nada de
-clientes. Mismo criterio de venta que el catálogo PDF: Disponible, con
-existencias libres y ya recibida.
+clientes. Sale lo Disponible con existencias libres; lo que viene en camino
+(ubicación "Por recibir") sale también, marcado "Por llegar" con su fecha
+aproximada de llegada, para que se pueda apartar antes de que llegue.
 
 Se enciende con LANDING_EMAIL (la cuenta cuyo inventario se muestra). Sin esa
 variable, la landing usa las piezas de ejemplo de `landing page/stock.js`.
 """
 import hashlib
 import os
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from .catalogo import _host_permitido
@@ -23,7 +24,26 @@ CAMPOS = ("tipo", "nombre", "numero", "anio", "serie", "color", "expansion",
           "rareza", "grado", "estado", "grail", "disponible")
 
 SQL_STOCK = ("SELECT * FROM v_articulos WHERE usuario_id=? AND estatus='Disponible' "
-             "AND disponible > 0 AND ubicacion <> 'Por recibir' ORDER BY creado_en DESC")
+             "AND disponible > 0 ORDER BY creado_en DESC")
+
+DIAS_ENVIO = 14   # sin fecha anotada, se estima compra + 14 días (igual que DIAS_ENVIO en app.js)
+
+
+def por_llegar(a: dict) -> bool:
+    return (a.get("ubicacion") or "").strip().lower() == "por recibir"
+
+
+def llegada(a: dict) -> str:
+    """Fecha aproximada de llegada (YYYY-MM-DD): la anotada o compra + DIAS_ENVIO.
+    Si ya pasó y sigue sin llegar, se da por hoy (no se publica una fecha vencida)."""
+    f = a.get("fecha_llegada") or ""
+    if not f:
+        base = (a.get("fecha_adq") or a.get("creado_en") or "")[:10]
+        try:
+            f = (date.fromisoformat(base) + timedelta(days=DIAS_ENVIO)).isoformat()
+        except ValueError:
+            f = (date.today() + timedelta(days=DIAS_ENVIO)).isoformat()
+    return max(f, date.today().isoformat())
 
 
 def id_publico(id_art: str) -> str:
@@ -59,6 +79,8 @@ def publica(a: dict) -> dict:
     p["grail"] = int(a.get("grail") or 0)
     p["precio"] = a.get("valor_estimado") or 0
     p["fecha"] = (a.get("creado_en") or "")[:10]
+    p["por_llegar"] = por_llegar(a)
+    p["llega"] = llegada(a) if p["por_llegar"] else ""
     foto = a.get("foto") or ""
     if foto.startswith("http://"):  # piezas guardadas antes de normalizar a https
         foto = "https://" + foto[7:]

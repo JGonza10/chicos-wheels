@@ -1,13 +1,14 @@
 /* Asistente de la tienda: el cliente pregunta por una pieza y el servidor
  * responde con el stock real (/tienda/api/asistente). "Lo quiero" la aparta
- * (sin anticipo, entrega el sábado en Balderas) y "Avísame" deja al cliente en
- * la lista de espera. Solo aparece cuando la app sirve el stock en vivo
- * (STOCK.asistente); con las piezas de ejemplo no se muestra. */
+ * (sin anticipo, entrega el sábado en Balderas; si viene en camino, el sábado
+ * después de que llegue) y "Avísame" deja al cliente en la lista de espera.
+ * Con las piezas de ejemplo (sin stock en vivo) también aparece, en modo vista
+ * previa: busca en esas piezas aquí mismo y no guarda nada. */
 (() => {
   "use strict";
 
   const STOCK = window.CW_STOCK || {};
-  if (!STOCK.asistente) return;
+  const DEMO = !STOCK.asistente;   // vista previa: sin servidor, nada se guarda
 
   const pesos = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 });
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -21,7 +22,7 @@
   boton.type = "button";
   boton.className = "asis-boton";
   boton.setAttribute("aria-label", "¿Buscas una pieza? Pregúntale al asistente");
-  boton.innerHTML = `<span aria-hidden="true">💬</span><span class="asis-etiqueta">¿Buscas una pieza?</span>`;
+  boton.innerHTML = `<span class="asis-icono" aria-hidden="true">💬</span><span class="asis-etiqueta" aria-hidden="true"><b>Pregúntame</b><small>¿Buscas una pieza?</small></span>`;
   const panel = document.createElement("section");
   panel.className = "asis-panel";
   panel.hidden = true;
@@ -56,17 +57,44 @@
   function abrirPanel() {
     panel.hidden = false;
     boton.hidden = true;
-    if (!saludado) { saludado = true; bot("¡Hola! 👋 Dime qué pieza buscas y te digo si la tenemos en stock."); }
+    if (!saludado) {
+      saludado = true;
+      bot("¡Hola! 👋 Dime qué pieza buscas y te digo si la tenemos en stock o si viene en camino.");
+      if (DEMO) burbuja(`${esc("Vista previa con las piezas de ejemplo.")}<span class="asis-demo">Al publicar el stock real, aquí se aparta de verdad.</span>`, "bot");
+    }
     setTimeout(() => entrada.focus(), 50);
   }
   function cerrarPanel() { panel.hidden = true; boton.hidden = false; }
 
   async function llamar(ruta, cuerpo) {
+    if (DEMO) return local(ruta, cuerpo);
     const r = await fetch(`api/${ruta}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) });
     let d = {};
     try { d = await r.json(); } catch (_) { /* respuesta vacía */ }
     if (!r.ok) throw new Error(d.error || "No pude responder ahora. Intenta de nuevo en un momento.");
     return d;
+  }
+
+  // ---------- Vista previa (sin servidor) ----------
+  // Misma idea que la búsqueda por palabras del servidor (collecthub/asistente.py), en corto.
+  const plano = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const VACIAS = new Set("hola buenas tienes tienen hay busco quiero me interesa un una el la los las de del en con por para y o a mi es son esta este esa ese disponible precio cuanto cuesta pieza piezas modelo si no".split(" "));
+  const raiz = (w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w);
+  const palabras = (t) => (plano(t).match(/[a-z0-9]+/g) || []).filter((w) => w.length >= 2 && !VACIAS.has(w)).map(raiz);
+  function local(ruta, cuerpo) {
+    const piezas = Array.isArray(STOCK.piezas) ? STOCK.piezas : [];
+    if (ruta === "apartar") return { texto: `Así funciona: con la tienda publicada, aquí quedaría apartada a nombre de ${cuerpo.nombre} para el sábado en Balderas. (Vista previa: no se guardó nada.)` };
+    if (ruta === "avisame") return { texto: `Así funciona: con la tienda publicada, le avisaríamos a ${cuerpo.contacto} cuando llegue. (Vista previa: no se guardó nada.)` };
+    const q = palabras(cuerpo.mensaje);
+    if (!q.length) return { texto: "Dime qué pieza buscas (Hot Wheels, Pokémon…) y te digo si la tenemos." };
+    const puntos = piezas.map((p) => {
+      const pal = palabras([p.nombre, p.serie, p.expansion, p.color, p.numero, p.anio, p.tipo].join(" "));
+      return [q.filter((w) => pal.some((x) => x === w || (w.length >= 3 && x.startsWith(w)))).length, p];
+    }).filter(([n]) => n);
+    const mejor = Math.max(0, ...puntos.map(([n]) => n));
+    const hallas = puntos.filter(([n]) => n === mejor && n >= (q.length > 1 ? Math.ceil(q.length / 2) : 1)).map(([, p]) => p).slice(0, 6);
+    if (!hallas.length) return { texto: "Por el momento no la tenemos en stock 😔, pero cada semana llegan piezas nuevas. ¿Te avisamos cuando llegue?", avisame: true, busqueda: cuerpo.mensaje };
+    return { texto: hallas.length === 1 ? "¡Sí la tenemos! Toca «Lo quiero» y te la aparto." : `¡Tenemos ${hallas.length} piezas que coinciden! Toca «Lo quiero» en la que te guste.`, piezas: hallas };
   }
 
   // ---------- Piezas y formularios ----------
@@ -76,7 +104,7 @@
       <div class="asis-pieza">
         <div class="asis-foto">${p.foto ? `<img src="${esc(p.foto)}" alt="" loading="lazy">` : esc(EMOJIS[p.tipo] || "📦")}</div>
         <div class="asis-info"><b>${esc(p.nombre)}</b>
-          <span>${pesos.format(p.precio)} · ${p.disponible === 1 ? "última pieza" : `quedan ${p.disponible}`}</span>
+          <span>${pesos.format(p.precio)} · ${p.por_llegar ? `🚚 por llegar${p.llega ? ` (aprox. ${esc(p.llega.split("-").reverse().slice(0, 2).join("/"))})` : ""}` : p.disponible === 1 ? "última pieza" : `quedan ${p.disponible}`}</span>
           <button type="button" class="asis-quiero" data-pieza="${esc(p.id)}">Lo quiero</button></div>
       </div>`).join(""), "bot piezas");
   }
@@ -109,7 +137,7 @@
   }
 
   function pedirApartado(p) {
-    formulario(`Para apartarte «${p.nombre}» (${pesos.format(p.precio)}) necesito:`,
+    formulario(`Para apartarte «${p.nombre}» (${pesos.format(p.precio)})${p.por_llegar ? ", que viene en camino," : ""} necesito:`,
       (d) => llamar("apartar", { ...d, pieza: p.id }));
   }
   function pedirAviso(busqueda) {

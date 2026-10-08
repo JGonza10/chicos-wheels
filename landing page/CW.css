@@ -245,6 +245,11 @@ nav a:hover { background: var(--superficie-2); color: var(--azul); }
 .rareza.r-plata { background: linear-gradient(135deg, #f1f3f5, #a9b0b9); color: #222; }
 .existencia { background: rgba(255, 255, 255, .92); color: #333; margin-left: auto; }
 .existencia.ultima { background: var(--rojo); color: #fff; }
+/* Por llegar: viene en camino, se puede apartar antes. */
+.existencia.llega { background: var(--amarillo); color: #222; }
+.card.en-camino .card-foto img { filter: saturate(.85); }
+.dd-llega { color: var(--azul); }
+:root[data-tema="oscuro"] .dd-llega { color: var(--amarillo); }
 
 .vacio { grid-column: 1 / -1; text-align: center; padding: 50px 16px; color: var(--tenue); }
 .vacio b { display: block; font-size: 1.3rem; color: var(--texto); margin-bottom: 4px; }
@@ -378,23 +383,29 @@ footer p { margin: 0; font-size: 13px; color: var(--tenue); }
   padding: 8px 14px; border-radius: 999px; cursor: pointer;
 }
 .btn-apartar:hover { filter: brightness(.95); }
-/* Globo chico (solo el ícono) para no tapar las fichas; el texto sale al pasar el mouse. */
+/* Botón del chat: píldora con texto, siempre a la vista (antes era un globo de 48 px sin texto
+   y no se notaba). Late tres veces al cargar para que el cliente lo vea. */
 .asis-boton {
-  position: fixed; right: 16px; bottom: 16px; z-index: 60; border: 0; cursor: pointer;
-  width: 48px; height: 48px; padding: 0; border-radius: 999px;
-  background: var(--rojo); color: #fff; font-family: inherit; font-size: 21px; line-height: 1;
-  box-shadow: 0 6px 16px rgba(230, 0, 18, .35); opacity: .92;
-  display: flex; align-items: center; justify-content: center; gap: 8px; overflow: hidden;
-  transition: width .2s, opacity .2s, transform .2s;
+  position: fixed; right: 18px; bottom: 18px; z-index: 60; border: 0; cursor: pointer;
+  height: 56px; padding: 0 22px 0 18px; border-radius: 999px;
+  background: var(--rojo); color: #fff; font-family: inherit; line-height: 1;
+  box-shadow: 0 8px 22px rgba(230, 0, 18, .45), 0 0 0 3px #fff;
+  display: flex; align-items: center; gap: 10px;
+  transition: transform .2s, box-shadow .2s;
+  animation: asis-late 1.6s ease-out .8s 3;
 }
-.asis-etiqueta { display: none; font-size: 13px; font-weight: 700; white-space: nowrap; }
-@media (hover: hover) {
-  .asis-boton:hover, .asis-boton:focus-visible { width: auto; padding: 0 16px 0 13px; opacity: 1; }
-  .asis-boton:hover .asis-etiqueta, .asis-boton:focus-visible .asis-etiqueta { display: inline; }
+.asis-boton:hover, .asis-boton:focus-visible { transform: translateY(-2px) scale(1.03); }
+.asis-icono { font-size: 24px; }
+.asis-etiqueta { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; white-space: nowrap; }
+.asis-etiqueta b { font-size: 15px; font-weight: 800; }
+.asis-etiqueta small { font-size: 11.5px; font-weight: 500; opacity: .9; }
+@keyframes asis-late {
+  0% { box-shadow: 0 8px 22px rgba(230, 0, 18, .45), 0 0 0 3px #fff, 0 0 0 3px rgba(230, 0, 18, .55); }
+  100% { box-shadow: 0 8px 22px rgba(230, 0, 18, .45), 0 0 0 3px #fff, 0 0 0 22px rgba(230, 0, 18, 0); }
 }
 .asis-panel {
   position: fixed; right: 18px; bottom: 18px; z-index: 61; width: min(380px, calc(100vw - 32px));
-  height: min(560px, calc(100vh - 36px)); display: flex; flex-direction: column;
+  height: min(560px, calc(100vh - 36px)); height: min(560px, calc(100dvh - 36px)); display: flex; flex-direction: column;
   background: var(--superficie); color: var(--texto); border: 1px solid var(--linea);
   border-radius: 18px; box-shadow: 0 18px 48px rgba(0, 0, 0, .25); overflow: hidden;
 }
@@ -444,7 +455,8 @@ footer p { margin: 0; font-size: 13px; color: var(--tenue); }
 @keyframes asis-p { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
 @media (max-width: 560px) {
   .asis-panel { right: 0; bottom: 0; width: 100vw; height: 100dvh; border-radius: 0; border: 0; }
-  .asis-boton { right: 12px; bottom: 12px; width: 44px; height: 44px; font-size: 19px; }
+  .asis-boton { right: 12px; bottom: 12px; height: 52px; padding: 0 18px 0 14px; gap: 8px; }
+  .asis-etiqueta small { display: none; }
 }
 
 /* Compartir pieza y "Avísenme de novedades" */
@@ -456,3 +468,7 @@ footer p { margin: 0; font-size: 13px; color: var(--tenue); }
 .nov-campos button { flex: 0 0 auto; border: 0; cursor: pointer; background: var(--amarillo); color: #222; font-weight: 800; font-family: inherit; padding: 8px 18px; border-radius: 999px; }
 .nov-campos button:disabled { opacity: .6; }
 .nov-estado { min-height: 1em; font-size: 13px; }
+
+/* Que el botón del chat no tape el pie de página al final de la tienda. */
+footer { padding-bottom: 96px; }
+.asis-msg .asis-demo { display: block; margin-top: 6px; font-size: 11.5px; color: var(--tenue); }

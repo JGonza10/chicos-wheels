@@ -41,6 +41,8 @@ window.CW_STOCK = {
    "id": "27b26f9a7421",
    "precio": 240.0,
    "fecha": "2026-09-25",
+   "por_llegar": true,
+   "llega": "",
    "foto": "https://cdn.shopify.com/s/files/1/0568/1132/3597/files/82d3b5f4e018da60a35ce202cd2e08c11414f9fc.jpg?v=1787889938"
   },
   {

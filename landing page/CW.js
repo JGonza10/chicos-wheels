@@ -26,7 +26,12 @@
   const sinAcentos = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
   const diasDesde = (f) => { const t = Date.parse(f); return isNaN(t) ? 999 : (Date.now() - t) / 864e5; };
-  const esNueva = (p) => diasDesde(p.fecha) <= DIAS_NUEVO;
+  // "Por llegar": compras en camino (en la app, ubicación "Por recibir"); se pueden apartar antes de que lleguen.
+  const porLlegar = (p) => !!p.por_llegar;
+  const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const fechaCorta = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ""); return m ? `${Number(m[3])} ${MESES[Number(m[2]) - 1]}` : ""; };
+  const llegaTxt = (p) => (fechaCorta(p.llega) ? `Llega aprox. ${fechaCorta(p.llega)}` : "Por llegar");
+  const esNueva = (p) => !porLlegar(p) && diasDesde(p.fecha) <= DIAS_NUEVO;
   const serieDe = (p) => (p.tipo === "Pokémon" ? p.expansion || p.serie : p.serie) || "";
   const graduada = (p) => !!p.grado && !/^sin/i.test(String(p.grado).trim());
 
@@ -52,7 +57,9 @@
   const linkMessenger = (texto) => FB ? `https://m.me/${FB}${texto ? `?text=${encodeURIComponent(texto)}` : ""}` : "";
   const linkInstagram = () => IG ? `https://ig.me/m/${IG}` : "";
   const mensajePieza = (p) => `Hola, me interesa ${p.nombre}${serieDe(p) ? ` (${serieDe(p)}${p.anio ? " " + p.anio : ""})` : ""} ` +
-    `de ${pesos.format(p.precio)}. ¿Sigue disponible para recoger el sábado en Balderas?`;
+    `de ${pesos.format(p.precio)}. ` + (porLlegar(p)
+      ? `Vi que viene en camino: ¿me la apartas para recogerla en Balderas cuando llegue?`
+      : `¿Sigue disponible para recoger el sábado en Balderas?`);
 
   /* ---------- Imágenes de respaldo (sin foto) ---------- */
   const SVG_AUTO = `<svg viewBox="0 0 200 84" aria-hidden="true">
@@ -76,11 +83,13 @@
   /* ---------- Fichas ---------- */
   function tarjeta(p, i) {
     const r = rareza(p);
-    const existencia = p.disponible === 1
+    const existencia = porLlegar(p)
+      ? `<span class="existencia llega" title="Viene en camino: apártala antes de que llegue">🚚 ${esc(llegaTxt(p))}</span>`
+      : p.disponible === 1
       ? `<span class="existencia ultima">Última pieza</span>`
       : `<span class="existencia">Quedan ${p.disponible}</span>`;
     const meta = [serieDe(p), p.anio].filter(Boolean).join(" · ");
-    return `<article class="card ${p.tipo === "Pokémon" ? "poke" : esPropia(p) ? "otra" : "hot"}" tabindex="0" data-id="${esc(p.id)}" style="--i:${i}">
+    return `<article class="card ${p.tipo === "Pokémon" ? "poke" : esPropia(p) ? "otra" : "hot"}${porLlegar(p) ? " en-camino" : ""}" tabindex="0" data-id="${esc(p.id)}" style="--i:${i}">
       <div class="card-foto">${imagen(p)}
         <div class="etiquetas">${r ? `<span class="rareza ${r.c}">${esc(r.txt)}</span>` : ""}${existencia}</div>
       </div>
@@ -103,6 +112,7 @@
     ...CATS.map((c) => ({ id: "cat:" + c.nombre, txt: `${c.emoji || "📦"} ${c.nombre}`, f: (p) => p.tipo === c.nombre })),
     { id: "raras", txt: "Rarezas", f: esRara },
     { id: "nuevas", txt: "Recién llegados", f: esNueva },
+    { id: "llegar", txt: "🚚 Por llegar", f: porLlegar },
   ];
   const ORDENES = {
     reciente: (a, b) => String(b.fecha).localeCompare(String(a.fecha)),
@@ -116,7 +126,7 @@
     const palabras = sinAcentos(S.q).split(/\s+/).filter(Boolean);
     return PIEZAS.filter((p) => {
       if (!f(p) || (S.serie && serieDe(p) !== S.serie)) return false;
-      const texto = sinAcentos([p.nombre, serieDe(p), p.color, p.numero, p.rareza, p.anio].join(" "));
+      const texto = sinAcentos([p.nombre, serieDe(p), p.color, p.numero, p.rareza, p.anio, porLlegar(p) ? "por llegar en camino" : ""].join(" "));
       return palabras.every((w) => texto.includes(w));
     }).sort(ORDENES[S.orden] || ORDENES.reciente);
   }
@@ -184,6 +194,7 @@
         <h2 id="modalTitulo">${esc(p.nombre)}</h2>
         <span class="precio">${pesos.format(p.precio)}<small>MXN</small></span>
         <dl class="datos">${filas.filter((f) => f[1]).map((f) => `<dt>${f[0]}</dt><dd>${esc(f[1])}</dd>`).join("")}
+          ${porLlegar(p) ? `<dt>Estatus</dt><dd class="dd-llega">🚚 Por llegar</dd><dt>Llega aprox.</dt><dd>${esc(fechaCorta(p.llega) || "pronto")}</dd>` : ""}
           <dt>Disponibles</dt><dd>${p.disponible === 1 ? "Última pieza" : p.disponible}</dd></dl>
         <div class="interes">
           <b>¿Te interesa? Mándanos este mensaje:</b>
@@ -195,7 +206,7 @@
             ${FB ? `<a class="btn-fb" href="${linkMessenger(mensajePieza(p))}" target="_blank" rel="noopener">Messenger</a>` : ""}
             ${IG ? `<a class="btn-ig" href="${linkInstagram()}" target="_blank" rel="noopener">Instagram</a>` : ""}
           </div>
-          <p class="nota">${FB || IG ? "Copia el mensaje y pégalo en el chat." : "Cópialo y búscanos en Facebook o Instagram como Chicos Wheels."} Entrega los sábados en Balderas.</p>
+          <p class="nota">${FB || IG ? "Copia el mensaje y pégalo en el chat." : "Cópialo y búscanos en Facebook o Instagram como Chicos Wheels."} ${porLlegar(p) ? "Viene en camino: apártala ya y la recoges el primer sábado después de que llegue, en Balderas." : "Entrega los sábados en Balderas."}</p>
         </div>
       </div>
       <button class="cerrar" type="button" aria-label="Cerrar">×</button>
@@ -293,8 +304,8 @@
 
   /* ---------- Arranque ---------- */
   function iniciar() {
-    const hw = PIEZAS.filter((p) => p.tipo === "Hot Wheels").reduce((n, p) => n + (p.disponible || 0), 0);
-    const pk = PIEZAS.filter((p) => p.tipo === "Pokémon").reduce((n, p) => n + (p.disponible || 0), 0);
+    const hw = PIEZAS.filter((p) => p.tipo === "Hot Wheels" && !porLlegar(p)).reduce((n, p) => n + (p.disponible || 0), 0);
+    const pk = PIEZAS.filter((p) => p.tipo === "Pokémon" && !porLlegar(p)).reduce((n, p) => n + (p.disponible || 0), 0);
     $("#conteoHW").textContent = `${hw} ${hw === 1 ? "pieza" : "piezas"} en stock`;
     $("#conteoPKM").textContent = `${pk} ${pk === 1 ? "carta" : "cartas"} en stock`;
     $("#avisoMuestra").hidden = !STOCK.muestra;

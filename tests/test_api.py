@@ -636,6 +636,37 @@ class PruebasAPI(unittest.TestCase):
         s, a = self.pedir("PATCH", f"/api/articulos/{a['id']}", {"nombre": "En camino (renombrada)"})
         self.assertEqual(a["fecha_llegada"], "2026-10-20")             # un cambio parcial no la borra
 
+    def test_51_tienda_muestra_y_aparta_lo_que_viene_en_camino(self):
+        from datetime import date, timedelta
+        from collecthub import asistente
+        leer = lambda r: json.loads(r.get_data(as_text=True).split("window.CW_STOCK = ", 1)[1].rstrip().rstrip(";"))
+        post = lambda ruta, b: self.c.post("/tienda/api/" + ruta, json=b, environ_base={"REMOTE_ADDR": "10.6.6.6"})
+        llega = (date.today() + timedelta(days=10)).isoformat()
+        _, camino = self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": "Porsche 911 en camino",
+                                                          "ubicacion": "Por recibir", "valor_estimado": 450,
+                                                          "precio_compra": 200, "fecha_llegada": llega})
+        # Sin fecha anotada: compra + 14 días; si esa fecha ya pasó, se publica hoy (nunca una fecha vencida)
+        self.pedir("POST", "/api/articulos", {"tipo": "Hot Wheels", "nombre": "Retrasada en camino", "ubicacion": "por recibir",
+                                              "valor_estimado": 300, "fecha_adq": "2026-01-01"})
+        with patch.dict(os.environ, {"LANDING_EMAIL": "chicos@wheels.mx", "ASISTENTE_IA": ""}):
+            r = self.c.get("/tienda/stock.js"); datos = leer(r); r.close()
+            p = next(x for x in datos["piezas"] if x["nombre"] == "Porsche 911 en camino")
+            self.assertEqual((p["por_llegar"], p["llega"]), (True, llega))
+            self.assertNotIn("ubicacion", p)
+            tarde = next(x for x in datos["piezas"] if x["nombre"] == "Retrasada en camino")
+            self.assertEqual(tarde["llega"], date.today().isoformat())
+            self.assertTrue(all(x["llega"] == "" for x in datos["piezas"] if not x["por_llegar"]))
+            # El asistente la encuentra y avisa que viene en camino
+            d = post("asistente", {"mensaje": "¿tienes el porsche 911?"}).get_json()
+            self.assertEqual([x["nombre"] for x in d["piezas"]], ["Porsche 911 en camino"])
+            self.assertIn("camino", d["texto"])
+            # Apartarla: se entrega el primer sábado después de que llegue
+            r = post("apartar", {"pieza": p["id"], "nombre": "Cliente Camino", "contacto": "@camino"})
+            self.assertEqual(r.status_code, 201, r.get_json())
+            self.assertEqual(r.get_json()["entrega"], asistente.proximo_sabado(date.fromisoformat(llega)))
+            self.assertIn("camino", r.get_json()["texto"])
+        self.assertEqual(self._libres(camino["id"]), 0)
+
     def test_34_respaldo_diario_conserva_solo_los_ultimos(self):
         from collecthub import respaldo
         with tempfile.TemporaryDirectory() as d, patch.object(respaldo, "carpeta", return_value=Path(d)):
@@ -920,8 +951,10 @@ class PruebasAPI(unittest.TestCase):
             self.assertEqual(datos["contacto"], {"facebook": "chicoswheels", "instagram": "chicos.wheels"})
             nombres = {p["nombre"] for p in datos["piezas"]}
             self.assertIn("Tienda se vende", nombres)
-            for fuera in ("Tienda conservar", "Tienda por recibir", "Tienda apartada"):
-                self.assertNotIn(fuera, nombres, "solo sale lo disponible que ya llegó")
+            for fuera in ("Tienda conservar", "Tienda apartada"):
+                self.assertNotIn(fuera, nombres, "solo sale lo disponible")
+            # lo que viene en camino sí sale, marcado "Por llegar"
+            self.assertTrue(next(x for x in datos["piezas"] if x["nombre"] == "Tienda por recibir")["por_llegar"])
             p = next(x for x in datos["piezas"] if x["nombre"] == "Tienda se vende")
             for secreto in ("precio_compra", "ganancia", "ubicacion", "notas", "fuente", "usuario_id", "codigo"):
                 self.assertNotIn(secreto, p)

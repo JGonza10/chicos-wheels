@@ -213,8 +213,14 @@ def responder(usuario_id: str, mensaje: str) -> dict:
     if encontradas:
         encontradas = encontradas[:MAX_PIEZAS]
         n = len(encontradas)
-        texto_r = ("¡Sí la tenemos disponible! " if n == 1 else f"¡Sí tenemos {n} piezas que coinciden! ") + \
-                  "Toca «Lo quiero» y te la aparto para el sábado en " + LUGAR + "."
+        en_camino = sum(1 for a in encontradas if landing.por_llegar(a))
+        if en_camino == n:   # todo lo que coincide viene en camino
+            texto_r = ("¡Viene en camino! " if n == 1 else f"¡Vienen {n} piezas en camino que coinciden! ") + \
+                      "Toca «Lo quiero» y te la aparto para el primer sábado después de que llegue, en " + LUGAR + "."
+        else:
+            texto_r = ("¡Sí la tenemos disponible! " if n == 1 else f"¡Sí tenemos {n} piezas que coinciden! ") + \
+                      "Toca «Lo quiero» y te la aparto para el sábado en " + LUGAR + "." + \
+                      (" Las marcadas «por llegar» se entregan el sábado después de que lleguen." if en_camino else "")
         return {"texto": texto_r, "piezas": [landing.publica(a) for a in encontradas],
                 "avisame": False, "busqueda": busqueda, "motor": motor}
 
@@ -257,7 +263,9 @@ def apartar(usuario_id: str, b: dict) -> dict:
     fila = next((a for a in todos(landing.SQL_STOCK, (usuario_id,)) if landing.id_publico(a["id"]) == pid), None)
     if not fila:
         raise ErrorApp("Esa pieza ya no está disponible", 409)
-    entrega = proximo_sabado()
+    # Lo que viene en camino se entrega el primer sábado después de que llegue.
+    llega = landing.llegada(fila) if landing.por_llegar(fila) else ""
+    entrega = proximo_sabado(date.fromisoformat(llega)) if llega else proximo_sabado()
     id_enc = uid("E")
     faltas = todos("SELECT MAX(faltas) f FROM compradores WHERE usuario_id=? AND lower(tel)=lower(?)",
                    (usuario_id, contacto))[0]["f"] or 0
@@ -272,15 +280,17 @@ def apartar(usuario_id: str, b: dict) -> dict:
         con.execute("INSERT INTO encargos (id,usuario_id,comprador_id,fecha,fecha_entrega,anticipo,forma_anticipo,notas,"
                     "origen,confirmado) VALUES (?,?,?,?,?,0,'',?,'tienda',0)",
                     (id_enc, usuario_id, id_c, date.today().isoformat(), entrega,
-                     f"Apartado desde la tienda (asistente), sin anticipo. Contacto: {contacto}"))
+                     f"Apartado desde la tienda (asistente), sin anticipo. Contacto: {contacto}"
+                     + (f". Pieza por llegar (aprox. {llega})" if llega else "")))
         con.execute("INSERT INTO encargo_items (id,encargo_id,articulo_id,nombre_snap,cantidad,precio_unit,costo_unit) "
                     "VALUES (?,?,?,?,1,?,?)",
                     (uid("EI"), id_enc, fila["id"], fila["nombre"], num(fila["valor_estimado"]), num(fila["precio_compra"])))
-    avisar_dueno(f"🛍 Apartado desde la tienda\n{fila['nombre']} — ${num(fila['valor_estimado']):,.0f}\n"
+    avisar_dueno(f"🛍 Apartado desde la tienda{' (por llegar)' if llega else ''}\n{fila['nombre']} — ${num(fila['valor_estimado']):,.0f}\n"
                  f"Cliente: {nombre} ({contacto})\nEntrega: {fecha_larga(entrega)} en {LUGAR}")
     return {"ok": True, "entrega": entrega, "pieza": fila["nombre"],
             "texto": f"¡Listo, {nombre}! Te aparté «{fila['nombre']}» para el {fecha_larga(entrega)} en {LUGAR}. "
-                     f"Te escribiremos a {contacto} para confirmar la hora."}
+                     + ("Todavía viene en camino; si se retrasa, te avisamos. " if llega else "")
+                     + f"Te escribiremos a {contacto} para confirmar la hora."}
 
 
 def avisame(usuario_id: str, b: dict) -> dict:

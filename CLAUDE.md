@@ -160,3 +160,10 @@ El usuario aclaró que la app es **solo inventario + control de entregas**: comp
 - `hoy()` en `app.js` usa la fecha local (antes UTC: después de las 6 pm ya daba mañana). En Railway, variable `TZ=America/Mexico_City` (la imagen `python:3.12-slim` trae tzdata; `/api/salud` muestra la hora local).
 - **Celular**: botón ☰ (`#menuBtn`, visible bajo 860 px) despliega el menú de secciones bajo la barra; se cierra al elegir, al tocar fuera o con Esc. Las flechas de Recién llegados van en su renglón a la izquierda para que el globo del chat no las tape.
 - **Logo e íconos** a partir de la imagen de marca: `static/logo.webp` (barra lateral y acceso), `landing page/img/logo.webp` (encabezado de la tienda), íconos PWA `static/icon-*.png` y de la tienda `landing page/img/icono-192.png` / `apple-touch-icon.png` (logo recortado sobre fondo gris metálico), vista previa para Facebook `landing page/img/portada.jpg` (la usa `_pagina` como `og:image`). `CACHE_VERSION` = `chicoswheels-v29`.
+
+## Cambios del 2026-10-07
+
+- **"Por llegar" en la tienda**: `landing.SQL_STOCK` ya no excluye "Por recibir"; `landing.publica()` agrega `por_llegar` y `llega` (`landing.llegada()`: `fecha_llegada` o compra + 14 días; si ya pasó, hoy — nunca se publica una fecha vencida). La ubicación sigue sin publicarse. En `CW.js`: etiqueta amarilla 🚚 "Llega aprox. <fecha>", filtro "🚚 Por llegar", filas Estatus/Llega aprox. en la ficha, mensaje "viene en camino"; no cuentan en "Recién llegados" ni en los conteos de la portada. El catálogo PDF sigue sin incluirlas.
+- **Apartar lo que viene en camino**: `asistente.apartar()` pone `fecha_entrega` = primer sábado en o después de la llegada, y lo anota en las notas del pedido y en el aviso de Telegram. Prueba 51.
+- **Chat visible**: el botón pasó de globo de 48 px sin texto a píldora roja "💬 Pregúntame · ¿Buscas una pieza?" (56 px, late 3 veces al cargar; en celular solo "Pregúntame"). Panel con `100dvh`. Antes **no se creaba sin `LANDING_EMAIL`** (piezas de ejemplo, como en la PC local); ahora funciona en **vista previa** (`DEMO` en `asistente.js`: búsqueda local en las piezas de ejemplo, apartar/avisar no guardan nada).
+
