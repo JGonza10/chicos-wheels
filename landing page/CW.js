@@ -339,3 +339,6 @@
 
   iniciar();
 })();
+
+// © Kestrel con el año en curso en el pie (regla de Gonza, 2026-10-09).
+document.querySelectorAll(".kestrel-anio").forEach(function (e) { e.textContent = new Date().getFullYear(); });
