@@ -1,170 +1,36 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Qué es
 
-## Qué es esto
+**Erik G** (carpeta y código internos aún se llaman Chicos Wheels / `collecthub`): inventario y control de entregas de Hot Wheels, Pokémon y categorías propias (Barbie…). Flujo del negocio: compra (casi todo Mattel Creations, vía el proyecto 15) → publica en Facebook → apartado/pedido → entrega el **sábado en Balderas** → contabilidad. Toda función nueva debe servir a ese ciclo.
 
-Chicos Wheels (CollectHub): sistema de inventario, valuación y venta de coleccionables (Hot Wheels y cartas Pokémon), con backend Flask y frontend HTML/CSS/JS plano sin build. Pensado para uno o dos usuarios por instancia (negocio pequeño/personal). Todo el código, comentarios y mensajes de error están en español.
-
-`README.md` ya documenta a fondo características de negocio y stack — léelo primero. Este archivo se enfoca en lo que ese README no cubre: comandos exactos y detalles de implementación no obvios.
+Incluye una tienda pública para clientes en `/tienda/` (solo muestra stock, apartar sin anticipo y asistente). Desplegada en Railway.
 
 ## Comandos
 
 ```bash
-python -m venv .venv && .venv\Scripts\activate     # Windows; en Mac/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-python app.py                                        # dev server en http://localhost:3000
-python -m unittest discover -s tests -t . -v          # 28 pruebas contra BD temporal
-python scripts/generar_iconos_pwa.py                  # regenera static/icon-*.png si cambia el diseño
+python app.py                                    # http://localhost:3000
+python -m unittest discover -s tests -t . -v     # pruebas con BD temporal
 ```
 
-Producción vía Docker (`Dockerfile` + `docker-compose.yml`, volumen persistente `collecthub-datos`):
-```bash
-docker compose up -d --build
-```
-o directo con gunicorn (obligatorio un solo worker: SQLite no admite escritura concurrente multi-proceso):
-```bash
-gunicorn "collecthub:crear_app()" -b 0.0.0.0:3000 -w 1 --threads 8
-```
+Variables en `.env` (ver `.env.example`). En producción `JWT_SECRET` es obligatoria. Producción: Docker o gunicorn con **un solo worker** (SQLite).
 
-Variables de entorno: copiar `.env.example` a `.env`. `JWT_SECRET` es obligatoria cuando `FLASK_ENV=production` (la app se niega a arrancar sin ella); `docker-compose.yml` la exige igual vía `${JWT_SECRET:?...}`.
+## Estructura
 
-En esta máquina la app no arranca sola: se prende a pedido desde el hub local "Nexus" (`python app.py`, proyecto `P2`). Los supervisores/arranque silencioso de Windows se eliminaron el 2026-09-15.
+- `collecthub/__init__.py` — fábrica de la app, rate limit, cabeceras de seguridad (CSP).
+- `collecthub/rutas/` — un blueprint por dominio: `auth`, `articulos`, `movimientos` (ventas, encargos/pedidos, cobranza), `catalogos`, `estado`, `tienda` (pública).
+- `collecthub/schema.sql` + `db.py` — SQLite (WAL); migraciones automáticas al arrancar.
+- Frontend sin build: `static/app.js`, `static/styles.css`. Tienda: `landing page/` (`CW.js`, `asistente.js`).
+- Reportes: `reporte.py`, `catalogo.py`, `hoja_entrega.py`, `hoja_excel.py`. Respaldos: `respaldo.py` (diario), `respaldo_cuenta.py` (zip por cuenta).
 
-## Arquitectura
+## Reglas
 
-- **`app.py`** — entrypoint. Carga `.env` a mano (sin `python-dotenv`, parseo propio de líneas `CLAVE=valor`), crea la app con `collecthub.crear_app()` y sirve con el servidor de desarrollo de Flask si se ejecuta directo.
-- **`collecthub/__init__.py`** — application factory. Registra los blueprints de `collecthub/rutas/` bajo `/api/...`, y luego **envuelve automáticamente** todas las vistas de `articulos`, `movimientos`, `catalogos` y `estado` con `requiere_sesion` recorriendo `app.view_functions` por prefijo de endpoint — así una ruta nueva en esos blueprints queda protegida por defecto sin tener que acordarse de decorarla. `auth` y `/api/salud` quedan públicas a propósito. También trae: rate limiting propio en memoria (sin dependencia extra) con dos niveles — 10 intentos/15min en login/registro, 300 peticiones/5min general por IP —, cabeceras de seguridad fijas (CSP, HSTS, X-Frame-Options DENY, etc.) y CORS que **no** manda `Access-Control-Allow-Origin` salvo que `CORS_ORIGIN` esté configurado (el frontend se sirve del mismo origen, no lo necesita).
-- **`collecthub/db.py`** — conexión SQLite por petición (WAL, `foreign_keys` ON, transacciones explícitas `BEGIN IMMEDIATE` para multi-tabla). `collecthub/schema.sql` es el esquema completo; la ganancia neta se calcula con una columna `GENERATED ALWAYS` en SQL, deliberadamente fuera del backend/cliente para que no se pueda falsear.
-- **`collecthub/auth.py`** — sesiones JWT (`PyJWT`), decorador `requiere_sesion`.
-- **`collecthub/vision.py`** — identificación de piezas por foto. `procesar_imagen()` valida con Pillow (`.verify()`, nunca confía en extensión/Content-Type), descarta EXIF y reescala a 1280px antes de usar la imagen para nada. `identificar_foto()` llama a Claude (SDK `anthropic`, salida estructurada `output_config: {"format":{"type":"json_schema",...}}`, mismo patrón que `_interpretar_con_claude()` en `Nexus/nexus.py`) — 503 si falta `ANTHROPIC_API_KEY`, nunca tumba el arranque. `buscar_precio_pokemon()` cruza contra `pokemontcg.io` (sin dependencia extra, `urllib`) y solo devuelve algo con una coincidencia sin ambigüedad; con 0 o varios resultados regresa `None` en vez de adivinar.
-- **`collecthub/rutas/articulos.py`** también trae las rutas de foto: `POST /identificar` (sugerencia, no toca la BD), `POST /<id>/foto` (guarda en `datos/fotos/<usuario_id>/<hex(20)>.jpg`, actualiza `articulos.foto` a `local:<archivo>`), `GET /foto/<archivo>` (sirve solo si `g.usuario_id` coincide con la carpeta — así una cuenta no puede ver fotos de otra aunque adivine el nombre). Fotos con URL externa (`https://...`) se siguen sirviendo directo; las `local:` no pueden ir en `<img src>` sin el header `Authorization`, por eso el frontend las trae por `fetch`+blob (`pintarFotosLocales()` en `app.js`).
-- **`collecthub/rutas/`** — un blueprint por dominio: `auth.py` (registro/login), `articulos.py` (inventario/valuaciones/foto), `movimientos.py` (ventas, lotes, apartados, intercambios), `catalogos.py` (compradores/plataformas/wishlist/ajustes), `estado.py` (métricas, exportar/seed).
-- **Frontend estático** — servido desde `/` y cualquier ruta no-`/api` cae a `static/index.html` si el archivo pedido no existe (patrón SPA). Sin build: se edita `static/app.js`/`styles.css` directo. Es PWA instalable: `static/manifest.json` + `static/sw.js` (cache-first solo de estáticos, nunca de `/api/*`) + `static/icon-*.png` (regenerables con `scripts/generar_iconos_pwa.py`). El registro del service worker vive en `app.js` (al final, función `iniciar()`), no en `index.html`, porque el CSP no admite `<script>` inline.
-- **`scripts/backup.py`** — respaldo en caliente vía la API de backup nativa de SQLite (seguro con el servidor corriendo; copiar el `.db` a mano durante escrituras puede corromperlo). **`scripts/generar_plantilla.py`** — no mencionado en el README; revísalo si necesitas la plantilla de importación de inventario en Excel (`MAX_CONTENT_LENGTH` de 8MB en `__init__.py` existe justo para acotar esa carga).
-
-## Reglas a mantener al modificar
-
-- Cualquier vista nueva en `articulos`/`movimientos`/`catalogos`/`estado` queda protegida automáticamente por el bucle de `crear_app()` — no agregues `requiere_sesion` a mano ahí, y no rompas el prefijo de endpoint del que depende ese bucle.
-- Cálculos de dinero/ganancia que deban ser invulnerables a manipulación van en SQL (`GENERATED ALWAYS`), no en Python ni en JS — sigue el patrón existente en `schema.sql`.
-- Cambios en `Content-Security-Policy` (`collecthub/__init__.py`): `'unsafe-inline'` en `style-src` es necesario porque `app.js` arma vistas con estilos inline — no lo quites sin revisar el frontend completo. `img-src` incluye `blob:` a propósito, para las fotos `local:` que el frontend trae por `fetch` y muestra como object URL.
-- **Puede haber una instancia de esta app en el puerto 3000 si se prendió desde Nexus** — antes de levantar `python app.py` para probar algo, revisa si el puerto 3000 ya está ocupado (`netstat -ano | grep :3000`) y usa `PORT=<otro>` para no pisarla ni terminar ese proceso sin avisar. Ambas comparten el mismo `datos/collecthub.db` por defecto si no defines `DB_FILE` distinto — cualquier prueba manual (usuarios, artículos) queda en la base real, bórrala después.
-
-## Cambios del 2026-09-25
-
-- **Vista Lista** del inventario (hoja de cálculo: columnas ordenables, totales, encabezado fijo) y **gráfica de movimientos por mes** en el Panel (3/6/12/24 o N meses); se quitó el formulario "Nuevo movimiento" del Panel.
-- **Tema Claro** (`data-tema="claro"`, barra lateral oscura porque su texto está fijo en claro).
-- **Reporte PDF configurable** (`collecthub/reporte.py`, `POST /api/reporte-pdf`, dependencia `fpdf2`): secciones, categoría, estatus, orden, orientación y rango de fechas de ventas. Configuración en `localStorage` (`cw_reporte`).
-- **Entregas** (Catálogos): ventas con envío + apartados, por fecha; `ventas.fecha_entrega` (migración automática en `db.crear_esquema`, se llena al marcar "Entregado" y se borra si regresa de estatus).
-- **Recibo PDF por venta** (`GET /api/ventas/<id>/recibo`, botón 🧾 en Entregas): entrega en Balderas o guía de envío.
-- **Canal "Balderas"** (`TG`) para cuentas nuevas y existentes. Gonza vende **solo por Facebook y entrega en Balderas**; Mercado Libre/eBay no se usan por ahora (siguen en el catálogo, no estorban). El texto de "Publicación" ya menciona la entrega en Balderas.
-- **Movimientos de precio** en el Panel: piezas cuyo valor cambió ≥15% en su última valuación.
-- Al cambiar `app.js`/`styles.css` hay que subir `CACHE_VERSION` en `static/sw.js` (hoy `chicoswheels-v8`).
-- **Puente con el proyecto 15**: cada compra confirmada de Mattel se registra aquí (ubicación "Por recibir", foto, valor = reventa estimada). Necesita `COLLECTHUB_EMAIL`/`COLLECTHUB_PASSWORD` en el `.env` del proyecto 15.
-
-### Habilidades agregadas después (mismo día)
-
-- **Balderas** (menú Catálogos → 📍): *Lista de carga* imprimible (marcas lo que llevas; al imprimir solo salen esas, con casilla "Vendida") y *Corte del día* (ventas, cobrado, ganancia, anticipos, entregas). Persistencia local: `cw_carga`, `cw_margenMin`.
-- **Precio mínimo ("piso")**: `precioMinimo(a)` en `app.js` = (costo × (1+margen) + comisión fija) ÷ (1 − comisión% − retención%) con el canal Balderas (o Facebook). Margen editable (10% por defecto). Se ve en la lista de carga y en la ficha de la pieza.
-- **Publicar en lote** (selección múltiple → "Publicar en lote") y **📸 Foto lista** (`GET /api/articulos/<id>/foto-publicar`: cuadrada 1080×1080, contraste y nitidez; solo fotos locales).
-- **Lista de espera de clientes**: tabla `pedidos_cliente`, rutas `/api/pedidos` (POST/PATCH/DELETE), incluida en `/api/estado` como `pedidos`. Se administra en Compradores; al abrir una pieza parecida sale "Te la pidieron".
-- Corregido: el menú lateral de los temas Champs y Claro salía ilegible (`#ch button{color:inherit}` ganaba por especificidad a `.nav button`; ahora `#ch .nav button`).
-- El proyecto 15 avisa por Telegram (9:00 diario) los apartados que vencen hoy o mañana (`collecthub_bridge.apartados_por_vencer`).
-
-### Negocio de referencia y habilidades del 2026-09-25 (tarde)
-
-El usuario final es un joven emprendedor: consigue Hot Wheels y cartas Pokémon (casi todo en Mattel Creations, vía el monitor/bot del proyecto 15), las publica en Facebook y las revende cada semana en la convención/tianguis de **Balderas**. Toda función nueva debe servir a ese ciclo: conseguir → recibir → publicar → vender en Balderas → reinvertir.
-
-- **Registro desde link de Mattel** (`collecthub/mattel.py`, `POST /api/articulos/desde-mattel`): lee `/products/<handle>.js` de Shopify (solo hosts `*.mattel.com` por https), convierte US$→MXN con tipo de cambio en vivo (fallback 20.0). Acepta links con prefijo de país (`/en-mx/products/...`, desde 2026-09-29): con `-mx` lee el precio directo en MXN (`moneda: "MXN"`); otros países se consultan sin prefijo (USD). Solo sugiere; el registro manual sigue igual para compras fuera de Mattel.
-- **Por recibir**: el puente deja las piezas con ubicación "Por recibir"; el Panel las lista con "Ya llegó" (una o todas) y quedan fuera de la lista de carga.
-- **✨ Sugerir carga** (Balderas): prioriza pedidos de clientes, piezas con tiempo guardadas y mejor margen; nunca las griales.
-- **Semana vs semana anterior** en el Corte; **descuento por combo** en la publicación en lote; **rendimiento por fuente** en el Panel.
-- **Respaldo automático diario** (`collecthub/respaldo.py`): un `.db` por día en `datos/respaldos/` (últimos 14); se apaga con `COLLECTHUB_SIN_RESPALDO=1` (las pruebas lo apagan). Ojo: en Docker `datos/` es el volumen persistente, así que los respaldos también persisten.
-- La fuente "Mattel Creations" es ahora la primera de `FUENTES`; el puente la manda tal cual.
-
-### Encargos y hoja de entrega (2026-09-25, noche)
-
-Flujo del negocio: el joven publica en Facebook; un cliente (a veces nuevo) le hace un **encargo** de 1 a N piezas; él lo empaca y lo entrega en Balderas cobrando en efectivo o depósito.
-
-- Tablas `encargos` + `encargo_items` (con `costo_unit` congelado al crear). La vista `v_articulos` (`disponible`) ahora también descuenta lo reservado en encargos **Pendiente/Empacado**; se recrea en cada arranque (`DROP VIEW` + `CREATE VIEW` en `schema.sql`). Una pieza en un encargo activo no se puede borrar.
-- Rutas en `movimientos.py`: `GET/POST /api/encargos`, `PUT/PATCH/DELETE /api/encargos/<id>` (PATCH = Empacado/Pendiente/Cancelado), `POST /api/encargos/<id>/entregar` (crea una venta por pieza en el canal `TG` "Balderas", descuenta stock, guarda cobrado/forma; devuelve `debe`), `POST /api/encargos/hoja-entrega` (PDF). `estado_completo` trae `encargos` con `items`, `piezas`, `total`, `costo`, `ganancia`, `resta`.
-- **Hoja de entrega** (`collecthub/hoja_entrega.py`): resumen (clientes, piezas, costo, precio, ganancia, ya cobrado por forma, POR COBRAR), lista para empacar consolidada por ubicación, detalle por cliente con costo y precio por pieza y total + renglón de cobro/firma, y cruce final piezas vs dinero (columnas Efectivo/Depósito/Dif. en blanco para llenar a mano). Filtra por fecha de entrega; opción de ocultar costos.
-- Cliente nuevo: se da de alta solo (`cliente_nuevo`, `tel_nuevo`) al crear el encargo.
-- Pruebas 35-37 en `tests/test_api.py`. En la interfaz: menú Movimientos → 🛍 Encargos (`vEncargos`, `MOD.encargo`, `MOD.encentregar`; ojo: los `MOD.x = ...` deben ir DESPUÉS de `const MOD = {}`).
-
-### Reorganización alrededor del flujo real (2026-09-25, cierre)
-
-El usuario aclaró que la app es **solo inventario + control de entregas**: compra (Mattel u otra) → Facebook → apartado → entrega el **sábado en Balderas** (rara vez entre semana, zona Coyoacán) → contabilidad. Por eso:
-
-- **Un solo flujo de apartado**: "Apartar"/"+ Nuevo apartado" ahora abren el formulario de **pedido** (varias piezas por cliente). La pantalla de apartados de una pieza sobrevive como **"Apartados previos"** y solo se muestra si hay registros. Todo apartado/pedido exige cliente (registrado o `cliente_nuevo`) y `apartados.cliente_snap` conserva el nombre aunque borren al cliente.
-- **Etiquetas visibles** (`ETQ_ENC` en `app.js`; en la base siguen Pendiente/Empacado/Entregado): **Apartado → En proceso → Liquidado** ("Entregado · debe $X" si quedó saldo).
-- **Sábado por defecto**: `proximoSabado()` da la fecha inicial del pedido; la hoja de entrega y el filtro de Pedidos usan el próximo día con pedidos; el Panel resume "Próximo sábado".
-- **Cobro rápido** 💵/🏦 (entrega y cobra el resto), **💬 mensaje de WhatsApp** al cliente, columna **"Apartada para"** en el inventario (`reservas(a)`).
-- **🛒 Compra Mattel** (varios links a la vez) registra las piezas como "Por recibir".
-- **Corregido**: `util.uid()` podía repetir ids creados en el mismo milisegundo (fallaba de forma intermitente "cargar datos de ejemplo" con 409 y podía romper importaciones masivas). Ahora lleva contador por proceso (prueba 41).
-
-- **Hoja de entrega en Excel** (`collecthub/hoja_excel.py`, `POST /api/encargos/hoja-entrega-excel`, botón 📊): hojas Pedidos (una fila por pieza, fórmulas, filtros; anticipo/resta solo en la primera fila de cada pedido para no duplicar sumas), Por cliente (Cobrado efectivo/depósito + Diferencia) y Empacar. Los totales son fórmulas: Excel/Sheets los calculan al abrir (algunos visores de celular no). Prueba 42.
-
-- **Quitados del menú (2026-09-25, a pedido):** *Balderas* (lista de carga y corte del día) y *Entregas*: quedaron resueltos con **Pedidos**. Se borró su código de `app.js`. El "piso" de regateo (`precioMinimo`) sigue en la ficha de la pieza con margen fijo de 10% (`ui.margenMin`; ya no hay pantalla para cambiarlo). Si se necesita el corte del día o la lista de carga, están en el historial de git (commit `db16ad4`).
-
-### Habilidades del 2026-09-25 (cierre)
-- **Cobranza**: tabla `encargo_pagos`; `POST /api/encargos/<id>/pago` (abono; no permite pagar de más ni en pedidos no entregados). `encargos_de()` calcula `debe` (con abonos) y `pagos`; la interfaz nunca calcula el saldo, lo lee del servidor. Panel: tarjeta **Te deben**; en Pedidos, botones 💵/🏦/Abono…/💬 en pedidos entregados con saldo.
-- **Catálogo PDF** (`collecthub/catalogo.py`, `POST /api/articulos/catalogo-pdf`): 9 piezas por página con foto y precio; solo piezas Disponibles (no Conservar ni Por recibir), máximo 60. Fotos externas solo de hosts conocidos (`HOSTS_FOTO`), con tope de tamaño y 6 s.
-- **Cerrar el día** (`encgrupo`): entrega y cobra en lote todos los pedidos activos de una fecha.
-- **Recontactar** clientes (>30 días sin comprar) y **💬 Novedades**; aviso de precio bajo piso/costo en el formulario de pedido. `enviarWhatsApp()` es el único punto que abre wa.me o copia el texto.
-- Pruebas 43-44.
-
-### Landing page para clientes (2026-09-28)
-- La app está desplegada en **Railway** (Dockerfile del repo; el volumen es `/app/datos`).
-- Carpeta **`landing page/`**: la página para clientes (basada en los borradores `CW.html`/`CW.css` de Gonza, que siguen en la raíz). Archivos estáticos propios, sin build. La app la sirve en **`/tienda/`** (`collecthub/rutas/tienda.py`, blueprint público fuera de `PROTEGIDOS`). También abre con doble clic usando las piezas de ejemplo de `landing page/stock.js`. Ver `landing page/LEEME.md`.
-- **Solo muestra stock**: sin carrito, cuenta, pagos ni suscripción. **El contacto con clientes es solo por Facebook (Messenger) e Instagram, nunca WhatsApp** (decisión de Gonza). "Me interesa" abre la ficha con el mensaje listo para copiar y botones `m.me/<fb>` e `ig.me/m/<ig>`.
-- `/tienda/stock.js` se genera **al momento** desde la base (`collecthub/landing.py`): mismo criterio que el catálogo PDF (Disponible, `disponible > 0` en `v_articulos`, no "Por recibir") y **lista blanca de campos** (`CAMPOS`): nunca costo, ganancia, fuente, ubicación, notas, código ni el id interno (se publica un hash, `id_publico`). Fotos locales por `/tienda/foto/<id>.jpg`, solo de piezas a la venta; externas solo de `HOSTS_FOTO`. Prueba 45.
-- Variables (en Railway): `LANDING_EMAIL` (cuenta a mostrar; sin ella, piezas de ejemplo), `LANDING_FACEBOOK`, `LANDING_INSTAGRAM` (usuario o URL).
-- `static/sw.js` no cachea `/tienda` (el stock debe verse siempre al día).
-- Diseño: logo con flamas propias (SVG `#flama`, inspiradas en Hot Wheels sin copiar su logo). Portada `img/portada.png` (la pone Gonza) con dos zonas clicables; si no existe, se ven las tarjetas de colores. Etiquetas de rareza en `rareza()` de `CW.js` (RLC/Red Line Club y HWC = oro).
-- Las piezas de ejemplo son modelos reales de Hot Wheels con fotos oficiales de Mattel Creations (`cdn.shopify.com`) y cartas de pokemontcg.io; créditos en `stock.js` → `creditos_fotos` (se muestran en el pie).
-
-### Categorías propias (2026-09-29)
-- Además de **Hot Wheels** y **Pokémon** (fijas, cada una con su formulario), cada cuenta tiene categorías propias en la tabla `categorias` (`collecthub/categorias.py`: `tipos_de()`, `prefijo_id()` → ids `CO-`). Toda cuenta arranca con **Barbie 💖** (`INICIALES`; a las cuentas existentes se les agrega la primera vez que arranca la versión nueva).
-- `articulos.tipo` ya no tiene `CHECK`: la API valida contra `tipos_de(usuario)`. Bases viejas se migran solas al arrancar (`db._quitar_check_tipo`: reconstruye la tabla con las llaves foráneas apagadas y deja antes una copia `collecthub-antes-categorias.db` junto a la base; probado con datos: mismas filas, `foreign_key_check` limpio).
-- Rutas: `POST /api/categorias` (nombre, emoji; rechaza duplicados sin importar mayúsculas), `DELETE /api/categorias/<id>` (409 si tiene piezas). `/api/estado` trae `categorias`.
-- Interfaz: botones de categoría + "＋ Categoría" en el formulario de la pieza (también al editar, para cambiar una pieza de categoría). Las categorías propias usan el formulario general: `serie` = línea, `color` = variante, `sub` = empaque. En todo el código, "lo que no es Pokémon usa serie/color" (`a.tipo === 'Pokémon' ? expansion : serie`), nunca `=== 'Hot Wheels'`.
-- Un link de Mattel elige la categoría solo (`tipoMattel()`: Pokémon, o la categoría cuyo nombre aparece en el nombre/línea, ej. "Barbie Signature"). El puente del proyecto 15 manda `tipo: "Barbie"` igual y reintenta como Hot Wheels si la cuenta no la tiene.
-- Se restauraron `mmTraer()`/`mmGuardar()` (🛒 Compra Mattel de varios links): se habían borrado por accidente en el commit `0cdc1e0` y el botón no hacía nada.
-- `compradores.interes` sigue limitado a Hot Wheels/Pokémon/Ambas (no se tocó). La landing (`/tienda`) muestra las piezas de otras categorías en "todo", sin filtro propio.
-- **Fotos por URL que no se veían (corregido 2026-09-29):** `static/sw.js` interceptaba también peticiones a otros dominios (fotos de `cdn.shopify.com`, fuentes de Google). El worker hereda el CSP de la app (`connect-src 'self'`), su `fetch()` fallaba y la imagen quedaba rota (`ERR_FAILED`), también en `/tienda` para quien tuviera el worker instalado. Ahora solo maneja el mismo origen. Además, `foto` con `http://` se guarda como `https://` (`limpiar()` en `articulos.py`, `mattel.py`, y `landing.stock()` para piezas viejas): el bot a veces manda `http://creations.mattel.com/...` y la tienda solo acepta https.
-- **Tienda y categorías:** `stock.js` trae `categorias` (nombre, emoji) y `CW.js` arma un filtro por cada una que tenga piezas a la venta (más cualquier `tipo` desconocido, con 📦). La ficha de una categoría propia muestra Categoría/Línea/Variante; sin foto, su emoji. La portada sigue con los dos banners fijos (Hot Wheels y Pokémon). Prueba 47.
-
-### Asistente de la tienda (2026-09-29)
-- `collecthub/asistente.py` + rutas públicas en `rutas/tienda.py`: `POST /tienda/api/asistente` (responde con el stock), `/tienda/api/apartar` (crea encargo `Pendiente` = "Apartado", **sin anticipo**, `fecha_entrega` = próximo sábado, 1 pieza, re-verifica `disponible` dentro de la transacción), `/tienda/api/avisame` (fila en `pedidos_cliente`). El cliente se reusa por nombre + contacto (`compradores.tel` guarda su Facebook/Instagram). Solo existen con `LANDING_EMAIL` (503 si no).
-- Sin IA: búsqueda por palabras (`palabras()`, `_coincidencias()`, stopwords en `VACIAS`, singular aproximado). Con `ASISTENTE_IA=1` + `ANTHROPIC_API_KEY`: `claude-haiku-4-5` (`ASISTENTE_MODELO`) **solo clasifica** (intención, búsqueda, ids del stock); los ids se validan contra el stock y los textos son plantillas, así que no puede inventar piezas ni precios. Tope diario `ASISTENTE_IA_TOPE` (en memoria, un solo worker); si falla o se acaba, cae a palabras. **La vía con IA solo está probada con un doble (sin llamada real).**
-- Anti-abuso: límite por IP en `crear_app()` (40 peticiones/10 min en `/tienda/api/`, 6 altas/hora), campo trampa `sitio`. Detrás de Railway (`RAILWAY_ENVIRONMENT`) se usa `ProxyFix(x_for=1)` para la IP real — antes todos los visitantes compartían la IP del proxy (también el límite de login).
-- Aviso opcional por Telegram (`CW_TELEGRAM_TOKEN`, `CW_TELEGRAM_CHAT_ID`), en hilo y sin fallar nunca.
-- Frontend: `landing page/asistente.js` (se carga después de `CW.js`, expone `window.CWAsistente.apartar(p)` para el botón "Apartar aquí" de la ficha). `stock.js` en vivo trae `asistente: true`. Prueba 48.
-
-### Mejoras del 2026-09-29 (tarde)
-- **Apartados viejos → Pedidos**: `db._apartados_a_pedidos()` (al arrancar, idempotente) pasa cada apartado `Vigente` a un encargo (mismo cliente, precio, anticipo, `fecha_entrega` = fecha límite) y deja el apartado `Cancelado` con la nota "[Pasado a Pedidos E-…]". Se quitó "Apartados previos" del menú y la alerta de vencidos; la sección `apartados` del reporte PDF ahora es "Pedidos por entregar". La tabla y `POST /api/apartados` siguen existiendo por compatibilidad, pero la interfaz ya no los usa. El seed crea pedidos (uno de la tienda sin confirmar).
-- **Tienda sin anticipo, con control**: `encargos.origen` ('tienda') y `encargos.confirmado` (0 = por confirmar). `POST /api/encargos/<id>/confirmar`, `POST /api/encargos/<id>/no-show` (cancela, libera y suma `compradores.faltas`), `POST /api/compradores/<id>/faltas` (las pone en 0). Con `FALTAS_BLOQUEO` (2) faltas, el asistente responde 403 "escríbenos por Facebook o Instagram" (se busca por contacto). Panel: tarjeta "Apartados de la tienda por confirmar".
-- **Lista de espera automática**: `collecthub/espera.py` (`coincide`, `esperan`, `avisar_si_esperan`) — misma regla que `coincideEspera()`/`pedidosPara()` en `app.js`. Registros "Novedades: <categoría>" (de la tienda) coinciden con cualquier pieza de esa categoría. Al crear una pieza: Telegram (si está configurado) y, en la interfaz, el modal "¡Alguien esperaba esta pieza!". Panel: "Llegó lo que esperaban" + "Avisar novedades".
-- **Mensajes al cliente** (`enviarWhatsApp()`, nombre histórico): si el contacto es Facebook/Messenger o Instagram (`redDe()`), copia el texto y abre m.me / ig.me; WhatsApp solo si lo único guardado es un teléfono (el negocio atiende por Facebook e Instagram).
-- **Link por pieza**: `GET /tienda/p/<pid>` sirve `index.html` con `<base href="/tienda/">`, etiquetas Open Graph (foto, nombre, precio) y `meta cw-pieza` (CW.js abre la ficha). `/tienda/` también lleva OG. Botón "🔗 Compartir" en la ficha de la tienda; en la app, "🔗 Link" en la ficha y el link va en la Publicación. `estado.articulos[].pid` = `id_publico`.
-- **Novedades en la tienda**: formulario en Contacto (`asistente.js`) → `/tienda/api/avisame` con `busqueda: "Novedades: <cat>"`.
-- **Respaldo fuera del servidor**: `collecthub/respaldo_cuenta.py`. `GET /api/respaldo` = .zip con `datos.json` + `fotos/` **solo de esa cuenta** (marca `ajustes.ultimo_respaldo`). `POST /api/respaldo/restaurar` (multipart `archivo` + `confirmar=RESTAURAR`) reemplaza todos los datos de la cuenta; acepta el .zip o el .json de `/api/exportar`; valida antes de borrar (todo en una transacción), límite de subida 300 MB solo en esa ruta, protección contra zips bomba. Panel recuerda descargarlo si pasaron >7 días.
-- **Rotación por categoría** ("Qué se vende más rápido") y **Ofertas** (alerta "Capital estancado" → `MOD.ofertas`: rebaja 10/15/20% según días, nunca bajo `precioMinimo`, copia la publicación y aplica precios).
-- `.venv` recreado (el anterior apuntaba a un Python borrado). Nexus arranca la app con el Python del sistema (`python app.py`). Pruebas 22 y 49; `CACHE_VERSION` = `chicoswheels-v27`.
-
-## Cambios del 2026-09-29
-
-- **Tienda**: el asistente ya no guarda nombre/contacto del cliente en `localStorage` (borra las claves viejas `cw_asis_nombre`/`cw_asis_contacto` al cargar). "Cómo comprar" y "Escríbenos" compactos, sin logo en el pie, "Recién llegados" paginado (`#pagRecien`, hasta 20 piezas). Modo oscuro en azul Oxford (`#002147`, tokens en `:root[data-tema="oscuro"]` de `CW.css`).
-- **Por llegar** (antes "Faltantes", va justo después de Inventario): compras con ubicación "Por recibir" y columna nueva `articulos.fecha_llegada` (`YYYY-MM-DD` o `''`, validada en `limpiar`). Sin fecha se estima compra + 14 días (`DIAS_ENVIO` en `app.js`). Secciones "En camino" / "Ya debieron llegar". La fecha se pone en Compra Mattel (`#mm_llegada`), en el formulario de pieza y la manda el bot (`collecthub_bridge.py` del proyecto 15, hoy + 14). La lista vieja de faltantes (`wishlist`) sigue visible dentro de un `<details>` si tiene datos. Prueba 50.
-- `hoy()` en `app.js` usa la fecha local (antes UTC: después de las 6 pm ya daba mañana). En Railway, variable `TZ=America/Mexico_City` (la imagen `python:3.12-slim` trae tzdata; `/api/salud` muestra la hora local).
-- **Celular**: botón ☰ (`#menuBtn`, visible bajo 860 px) despliega el menú de secciones bajo la barra; se cierra al elegir, al tocar fuera o con Esc. Las flechas de Recién llegados van en su renglón a la izquierda para que el globo del chat no las tape.
-- **Logo e íconos** a partir de la imagen de marca: `static/logo.webp` (barra lateral y acceso), `landing page/img/logo.webp` (encabezado de la tienda), íconos PWA `static/icon-*.png` y de la tienda `landing page/img/icono-192.png` / `apple-touch-icon.png` (logo recortado sobre fondo gris metálico), vista previa para Facebook `landing page/img/portada.jpg` (la usa `_pagina` como `og:image`). `CACHE_VERSION` = `chicoswheels-v29`.
-
-## Cambios del 2026-10-07
-
-- **"Por llegar" en la tienda**: `landing.SQL_STOCK` ya no excluye "Por recibir"; `landing.publica()` agrega `por_llegar` y `llega` (`landing.llegada()`: `fecha_llegada` o compra + 14 días; si ya pasó, hoy — nunca se publica una fecha vencida). La ubicación sigue sin publicarse. En `CW.js`: etiqueta amarilla 🚚 "Llega aprox. <fecha>", filtro "🚚 Por llegar", filas Estatus/Llega aprox. en la ficha, mensaje "viene en camino"; no cuentan en "Recién llegados" ni en los conteos de la portada. El catálogo PDF sigue sin incluirlas.
-- **Apartar lo que viene en camino**: `asistente.apartar()` pone `fecha_entrega` = primer sábado en o después de la llegada, y lo anota en las notas del pedido y en el aviso de Telegram. Prueba 51.
-- **Chat visible**: el botón pasó de globo de 48 px sin texto a píldora roja "💬 Pregúntame · ¿Buscas una pieza?" (56 px, late 3 veces al cargar; en celular solo "Pregúntame"). Panel con `100dvh`. Antes **no se creaba sin `LANDING_EMAIL`** (piezas de ejemplo, como en la PC local); ahora funciona en **vista previa** (`DEMO` en `asistente.js`: búsqueda local en las piezas de ejemplo, apartar/avisar no guardan nada).
-
-- **Marca: "Erik G"** (2026-10-07, a pedido de Gonza; primero llegó un logo "ERICK G" y lo corrigió a "ERIK G"). Todo texto visible que decía "Chicos Wheels" dice "Erik G": tienda (`landing page/`, títulos y Open Graph de `rutas/tienda.py`), app (`static/index.html`, `app.js` — encabezado "ERIK G", login, QR, nombres de descarga `erik-g-*.json`/`erik-g-respaldo-*.zip` —, `manifest.json`), catálogo PDF, respaldo, `app.py`, MANUAL.md/.html y README. **`MANUAL.pdf` sigue con el nombre viejo** (su generador se borró en `8125e9f`). Quedan con el nombre viejo a propósito los identificadores internos: carpeta, paquete `collecthub`, `CACHE_VERSION` (`chicoswheels-v30`), claves `cw_*`, correos de prueba. Logo (escudo con flamas) en `landing page/img/` (logo.webp, icono-192, apple-touch-icon, portada.jpg) y `static/` (logo.webp, icon-192/512/512-maskable). La imagen original traía la cuadrícula de "transparente" pintada: se recortó con `rembg` (modelo `isnet-general-use`, local), dejando solo el escudo.
+- Las vistas nuevas de `articulos/movimientos/catalogos/estado` quedan protegidas solas por el bucle de `crear_app()`: no agregar `requiere_sesion` a mano ni cambiar el prefijo de endpoint.
+- Dinero y ganancia que no deban poder falsearse se calculan en SQL (`GENERATED ALWAYS`); el saldo (`debe`) lo calcula el servidor.
+- La tienda publica solo los campos de la lista blanca `CAMPOS` en `landing.py`: nunca costo, ganancia, ubicación ni id interno.
+- **Contacto con clientes solo por Facebook (Messenger) e Instagram, nunca WhatsApp** (a menos que solo exista un teléfono).
+- Al cambiar `app.js`/`styles.css`, subir `CACHE_VERSION` en `static/sw.js`. El service worker solo maneja el mismo origen y no cachea `/tienda`.
+- Los `MOD.x = ...` de `app.js` van después de `const MOD = {}`.
+- Categorías: "lo que no es Pokémon usa serie/color"; nunca comparar `=== 'Hot Wheels'`.
+- No quitar `'unsafe-inline'` de `style-src` ni `blob:` de `img-src` en el CSP.
+- Si el puerto 3000 ya está ocupado (lo prende Nexus, `P2`), no matar ese proceso: probar con otro `PORT`. Comparten la misma base: borrar los datos de prueba.
