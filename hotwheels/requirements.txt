@@ -1,0 +1,11 @@
+# Solo para esta PC (el bot no corre en Railway). Sobre el requirements.txt del 02:
+#   .venv\Scripts\pip install -r hotwheels\requirements.txt
+#   .venv\Scripts\python -m playwright install chromium
+APScheduler==3.11.3
+playwright==1.63.0
+python-dotenv==1.2.3
+requests==2.34.2
+twilio==9.11.1
+reportlab==5.0.1
+tzlocal==5.4.4
+Flask>=3.0

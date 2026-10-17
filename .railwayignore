@@ -5,3 +5,5 @@ venv/
 .env
 *.zip
 MANUAL.pdf
+# El Bot Hot Wheels solo corre en esta PC
+hotwheels/

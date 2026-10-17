@@ -3,7 +3,7 @@
  * verse siempre fresco, nunca una copia vieja servida "offline" por error.
  * Sube CACHE_VERSION cuando cambien app.js/styles.css para forzar a los
  * navegadores con la app ya instalada a bajar la versión nueva. */
-const CACHE_VERSION = 'chicoswheels-v30';
+const CACHE_VERSION = 'chicoswheels-v31';
 const ESTATICOS = ['/', '/app.js', '/styles.css', '/manifest.json', '/logo.webp'];
 
 self.addEventListener('install', (e) => {
@@ -25,8 +25,9 @@ self.addEventListener('fetch', (e) => {
   // Google van directo: este worker hereda el CSP de la app (connect-src 'self')
   // y su fetch() a otro dominio falla, dejando la imagen rota (ERR_FAILED).
   if (url.origin !== self.location.origin) return;
-  // La tienda (/tienda) tampoco: su stock debe verse siempre al día.
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/tienda') || e.request.method !== 'GET') return;
+  // La tienda (/tienda) y el bot (/bot) tampoco: deben verse siempre al día.
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/tienda') ||
+      url.pathname.startsWith('/bot') || e.request.method !== 'GET') return;
   e.respondWith(
     caches.match(e.request).then((cacheado) => cacheado || fetch(e.request).then((resp) => {
       const copia = resp.clone();

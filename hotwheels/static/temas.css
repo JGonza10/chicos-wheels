@@ -1,0 +1,235 @@
+/* ============================================================================
+   nexus-temas.css — Sistema de diseño NEXUS (design tokens)
+   Fuente: nexus-hub.html (const THEMES) + un quinto tema propio ("clasico").
+   Copia de referencia para reutilizar los mismos temas en cualquier
+   proyecto, sin tener que reconstruirlos desde cero cada vez.
+
+   Última actualización: 2026-08-06 —
+   1) corregido el deslumbre del tema "claro" (los paneles estaban en
+      #FFFFFF puro; ver nota en ese bloque).
+   2) agregado el tema "clasico": es la paleta azul+dorado sobre marino que
+      tenía Chicos Wheels/Gonza antes de adoptar el lenguaje visual de
+      Nexus. Mismo lenguaje de forma que los otros 4 (esquinas rectas,
+      mayúsculas con tracking) — solo cambia el color, igual que hace el
+      propio Nexus entre sus 4 temas. Si en cambio quieres el look
+      ORIGINAL completo (esquinas redondeadas, tipografía Inter sin
+      mayúsculas forzadas), eso requiere mover --r/--f/--d a variables por
+      tema y overrides de text-transform; no está hecho aquí todavía.
+   Aplicado por ahora en:
+   - 01 Sistema Administración de Pagos/gonza-app (frontend/src/estilos.css)
+   - 02 chicos-wheels (static/styles.css)
+
+   ── CÓMO REUTILIZARLO EN OTRO PROYECTO ──────────────────────────────────────
+   1. Copia el bloque de fuentes (@import) y los 5 bloques de variables tal
+      cual — son solo "tokens" (colores, tipografías, radio), no dependen de
+      ninguna clase ni de React.
+   2. En el <html> (o el nodo raíz) del proyecto, pon el atributo
+      data-tema="nexus" | "gonza" | "champs" | "grafito" | "clasico" para
+      elegir paleta. El bloque :root (sin atributo) ya es "nexus" por
+      defecto, para que no haya parpadeo antes de que corra el JS que
+      decide el tema guardado.
+   3. Los componentes propios de cada proyecto (botones, tarjetas, tablas...)
+      deben usar estas variables (var(--yellow), var(--panel), etc.) en vez
+      de colores fijos — así heredan el cambio de tema gratis. Los nombres
+      de variable (--yellow, --cyan, --red, --purple, --blue, --green,
+      --orange) son "slots" de acento, no colores literales: en el tema
+      "gonza", por ejemplo, --yellow vale un azul cian, no dorado. Lo que
+      importa es el ROL (acento principal, alerta, enlaces...), no el
+      nombre de la variable.
+   4. gonza-app y chicos-wheels tienen, además de estos tokens, un set
+      completo de clases de componente (.pnl, .kpi, .btn, .tbl, .tag,
+      .md...) en su propio CSS — esas SÍ son específicas de cada proyecto
+      (dependen de las clases que usa su frontend). Para portar el look
+      completo (no solo los colores) a otro proyecto, esas reglas de
+      componente son la referencia, pero hay que adaptarlas a las
+      clases/estructura de cada proyecto.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── TEMA: NEXUS (por defecto) — oro + cian sobre negro azulado ──────────── */
+:root {
+  --bg:#05080E;      --bg2:#0C1420;
+  --panel:#0C1420;   --panel2:#111B29;  --raise:#172335;
+  --line:rgba(255,201,74,.16);   --line2:rgba(143,233,255,.16);
+  --blue:#3FA9FF;    --blue2:#1B6FD4;   --cyan:#8FE9FF;
+  --red:#D62B34;     --yellow:#FFC94A;  --green:#3FCF8E;
+  --purple:#B49CFF;  --orange:#FF9D42;
+  --text:#DCE6F2;    --muted:#8C9DB2;   --muted2:#55677E;
+
+  --tint-blue:rgba(63,169,255,.14);
+  --tint-yellow:rgba(255,201,74,.14);
+  --tint-red:rgba(214,43,52,.14);
+  --tint-green:rgba(63,207,142,.14);
+  --tint-orange:rgba(255,157,66,.14);
+
+  --campo:#05080E;
+  --fondo-app:
+    radial-gradient(1100px 620px at 18% -8%,rgba(255,201,74,.07) 0%,transparent 58%),
+    radial-gradient(900px 520px at 96% 4%,rgba(143,233,255,.06) 0%,transparent 52%),
+    linear-gradient(168deg,#05080E 0%,#080D16 48%,#0A121F 100%);
+  --panel-fondo:linear-gradient(180deg,rgba(17,27,41,.92),rgba(9,13,21,.92));
+  --side-fondo:linear-gradient(180deg,rgba(12,20,32,.72),rgba(5,8,14,.4));
+  --hover-fila:rgba(255,201,74,.03);
+  --grad:linear-gradient(180deg,#FFC94A 0%,#D9A324 100%);
+  --scan:.028;                          /* opacidad de las líneas de escaneo, 0 = apagadas */
+
+  --f:'Barlow',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --d:'Chakra Petch',var(--f);          /* titulares y control de marca */
+  --m:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --r:2px;                              /* radio HUD: rectos, casi sin curva */
+}
+
+/* ── TEMA: GONZA (cian + violeta, dorado cálido en los enlaces) ──────────── */
+:root[data-tema="gonza"] {
+  --bg:#040B16;      --bg2:#0A1B31;
+  --panel:#0A1B31;   --panel2:#0E2440;  --raise:#123055;
+  --line:rgba(95,211,255,.18);   --line2:rgba(169,139,255,.2);
+  --blue:#4C8FE0;    --blue2:#2E6BB8;   --cyan:#A98BFF;
+  --red:#F0555C;     --yellow:#5FD3FF;  --green:#4FE0C0;
+  --purple:#FFC46B;  --orange:#FF9A52;
+  --text:#D6E8F7;    --muted:#8AA6C0;   --muted2:#52708E;
+
+  --tint-blue:rgba(76,143,224,.14);
+  --tint-yellow:rgba(95,211,255,.14);
+  --tint-red:rgba(240,85,92,.14);
+  --tint-green:rgba(79,224,192,.14);
+  --tint-orange:rgba(255,154,82,.14);
+
+  --campo:#040B16;
+  --fondo-app:
+    radial-gradient(1100px 620px at 18% -8%,rgba(95,211,255,.07) 0%,transparent 58%),
+    radial-gradient(900px 520px at 96% 4%,rgba(169,139,255,.06) 0%,transparent 52%),
+    linear-gradient(168deg,#040B16 0%,#071527 48%,#0A1B31 100%);
+  --panel-fondo:linear-gradient(180deg,rgba(14,36,64,.92),rgba(7,20,38,.92));
+  --side-fondo:linear-gradient(180deg,rgba(10,27,49,.72),rgba(4,11,22,.4));
+  --hover-fila:rgba(95,211,255,.03);
+  --grad:linear-gradient(180deg,#5FD3FF 0%,#2E9FD9 100%);
+  --scan:.03;
+}
+
+/* ── TEMA: CLARO / "Champs" — oro + marino sobre gris muy suave, nunca blanco puro ── */
+/* OJO: --panel a #FFFFFF puro deslumbraba en pantalla (mucho brillo directo).
+   Se usa ~97% de luminosidad (#F8F9FB), que se sigue leyendo como "tema
+   claro" pero sin el brillo del blanco absoluto. Si portas este tema a otro
+   proyecto, NO lo regreses a #FFFFFF por defecto.
+   Identidad "Champs": oro (--yellow) + marino (--blue) como acentos
+   principales, con un guiño a medallas — plata en --purple, bronce en
+   --orange. --red/--green se dejan en sus tonos semánticos (alerta/éxito). */
+:root[data-tema="champs"] {
+  --bg:#EEF1F6;      --bg2:#E5E9F0;
+  --panel:#F8F9FB;   --panel2:#EFF1F5;  --raise:#E6E9EF;
+  --line:rgba(10,31,68,.20);     --line2:rgba(140,140,150,.22);
+  --blue:#0A1F44;    --blue2:#071630;   --cyan:#3D5A80;
+  --red:#C1272D;     --yellow:#B8860B;  --green:#0E7A57;
+  --purple:#8A8F98;  --orange:#A0522D;
+  --text:#0A1F44;    --muted:#4A5A72;   --muted2:#78879C;
+
+  --tint-blue:#DCE6F4;
+  --tint-yellow:#F5E7C6;
+  --tint-red:#F6DEDF;
+  --tint-green:#DCEFE8;
+  --tint-orange:#EEDFD2;
+
+  --campo:#F0F3F8;
+  --fondo-app:
+    radial-gradient(1100px 620px at 18% -8%,rgba(184,134,11,.06) 0%,transparent 58%),
+    radial-gradient(900px 520px at 96% 4%,rgba(10,31,68,.05) 0%,transparent 52%),
+    linear-gradient(168deg,#EEF1F6 0%,#EAEDF3 48%,#E5E9F0 100%);
+  --panel-fondo:#F8F9FB;
+  --side-fondo:linear-gradient(180deg,#0A1F44,#050D1F);  /* la barra lateral
+     navy: firma de marca coherente con Champs (en los otros temas se queda
+     oscura igual, aquí además hace juego con el acento marino) */
+  --hover-fila:rgba(10,31,68,.035);
+  --grad:linear-gradient(180deg,#FFD700 0%,#B8860B 100%);  /* aquí sí se usa
+     el dorado brillante: es decorativo (barras, no texto) */
+  --scan:0;
+}
+
+/* ── TEMA: GRAFITO (gris neutro, sin brillos, para sesiones largas) ──────── */
+:root[data-tema="grafito"] {
+  --bg:#121417;      --bg2:#1A1E23;
+  --panel:#1A1E23;   --panel2:#22272E;  --raise:#2A3038;
+  --line:rgba(226,230,234,.14);  --line2:rgba(127,178,217,.16);
+  --blue:#6FA8E0;    --blue2:#4A82BA;   --cyan:#7FB2D9;
+  --red:#E0645F;     --yellow:#E7EAEE;  --green:#8CC7A1;
+  --purple:#C9A66B;  --orange:#D98A4E;
+  --text:#E2E6EA;    --muted:#9AA4AE;   --muted2:#6B757F;
+
+  --tint-blue:rgba(111,168,224,.14);
+  --tint-yellow:rgba(231,234,238,.14);
+  --tint-red:rgba(224,100,95,.14);
+  --tint-green:rgba(140,199,161,.14);
+  --tint-orange:rgba(217,138,78,.14);
+
+  --campo:#121417;
+  --fondo-app:
+    radial-gradient(1100px 620px at 18% -8%,rgba(231,234,238,.04) 0%,transparent 58%),
+    radial-gradient(900px 520px at 96% 4%,rgba(127,178,217,.04) 0%,transparent 52%),
+    linear-gradient(168deg,#121417 0%,#15181C 48%,#1A1E23 100%);
+  --panel-fondo:linear-gradient(180deg,rgba(26,30,35,.92),rgba(18,20,23,.92));
+  --side-fondo:linear-gradient(180deg,rgba(20,23,27,.72),rgba(12,14,17,.4));
+  --hover-fila:rgba(226,230,234,.03);
+  --grad:linear-gradient(180deg,#E7EAEE 0%,#C3C9D1 100%);
+  --scan:0;
+}
+
+/* ── TEMA: CLÁSICO — azul + dorado sobre marino (el Chicos Wheels original) ─ */
+/* La paleta que tenía Chicos Wheels (y de la que GONZA venía "portado")
+   antes de adoptar a Nexus. Se conserva el lenguaje de forma de los otros
+   4 temas (esquinas rectas, mayúsculas); solo cambia el color. --line/
+   --line2 aquí son hex sólidos (no rgba) porque así eran en el original y
+   siguen leyéndose bien sobre este panel. */
+:root[data-tema="clasico"] {
+  --bg:#0A1120;      --bg2:#111C30;
+  --panel:#16202F;   --panel2:#1C2739;  --raise:#22304A;
+  --line:#26344B;    --line2:#334764;
+  --blue:#2E9BF0;    --blue2:#1B6FD4;   --cyan:#38D6F0;
+  --red:#FF4B4B;     --yellow:#FFD84D;  --green:#2ED573;
+  --purple:#A78BFA;  --orange:#FF8A3D;
+  --text:#E9F0FA;    --muted:#8B9AB3;   --muted2:#5F6F88;
+
+  --tint-blue:rgba(46,155,240,.14);
+  --tint-yellow:rgba(255,216,77,.14);
+  --tint-red:rgba(255,75,75,.14);
+  --tint-green:rgba(46,213,115,.14);
+  --tint-orange:rgba(255,138,61,.14);
+
+  --campo:#0D1729;
+  --fondo-app:
+    radial-gradient(1100px 620px at 18% -8%,#1B2C4A 0%,transparent 58%),
+    radial-gradient(900px 520px at 96% 4%,#16304F 0%,transparent 52%),
+    linear-gradient(168deg,#0A1120 0%,#0D1728 48%,#101D33 100%);
+  --panel-fondo:linear-gradient(180deg,rgba(28,39,57,.92),rgba(19,28,43,.92));
+  --side-fondo:linear-gradient(180deg,rgba(22,32,47,.72),rgba(10,17,32,.4));
+  --hover-fila:rgba(255,255,255,.022);
+  --grad:linear-gradient(180deg,#3AA5F5 0%,#1C74D4 100%);
+  --scan:0;                             /* es el look clásico, sin el HUD de Nexus */
+}
+
+/* ── BASE genérica que solo depende de los tokens de arriba (reutilizable) ── */
+@media (prefers-color-scheme: light) {
+  :root:not([data-tema]) { color-scheme: light; }
+}
+
+body {
+  font-family:var(--f); color:var(--text); background:var(--fondo-app);
+  background-attachment:fixed;
+}
+
+h1, h2, h3 {
+  font-family:var(--d); font-weight:700; letter-spacing:.04em; line-height:1.2;
+  text-transform:uppercase;
+}
+
+.mn, .num { font-family:var(--m); font-variant-numeric:tabular-nums }
+
+::-webkit-scrollbar-thumb { background:var(--yellow); border-radius:0 }
+:focus-visible { outline:1.5px solid var(--yellow); outline-offset:2px }
+
+/* Líneas de escaneo (firma HUD): opcional, requiere position:relative en el
+   contenedor y que el contenido tenga z-index:1 para quedar por encima. */
+.nexus-scan::before {
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:repeating-linear-gradient(0deg, rgba(143,233,255,var(--scan)) 0 1px, transparent 1px 3px);
+}

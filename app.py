@@ -26,8 +26,17 @@ from collecthub.db import RUTA_BD  # noqa: E402
 app = crear_app()
 
 if __name__ == "__main__":
+    from collecthub import bot
+
     puerto = int(os.environ.get("PORT", 3000))
+    con_bot = bot.montar(app)   # solo con HOTWHEELS_ACTIVO=1 (esta PC)
     print(f"\n  Erik G corriendo en http://localhost:{puerto}")
-    print(f"  Base de datos: {RUTA_BD}\n")
+    print(f"  Base de datos: {RUTA_BD}")
+    if con_bot and bot.iniciar_servicios():
+        print(f"  Bot Hot Wheels: http://localhost:{puerto}/bot/ (monitor y compra en este proceso)")
+    print()
     # Solo esta PC por defecto; producción usa gunicorn (Dockerfile), no esta línea.
-    app.run(host=os.environ.get("HOST", "127.0.0.1"), port=puerto, debug=os.environ.get("FLASK_ENV") == "development")
+    # Sin recargador cuando corre el bot: duplicaría el monitor y el scheduler.
+    debug = os.environ.get("FLASK_ENV") == "development"
+    app.run(host=os.environ.get("HOST", "127.0.0.1"), port=puerto, debug=debug,
+            use_reloader=debug and not con_bot, threaded=True)

@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="es" data-tema="nexus">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hot Wheels · Monitor y compra</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='temas.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<div class="wrap-app">
+
+    <div class="hdr">
+        <div>
+            <div class="logo"><i>HOT WHEELS</i> · MONITOR Y COMPRA</div>
+            <span class="sub">El monitor busca · tú decides qué comprar{% if request.script_root %} · <a href="/" style="color:inherit">← Chicos Wheels</a>{% endif %}</span>
+        </div>
+        <div class="sp"></div>
+        <div class="estado-barra" id="estadoBarra">
+            <span class="pill" id="pillMonitor"><i class="dot"></i><span>Monitor…</span></span>
+            <span class="pill" id="pillBot"><i class="dot"></i><span>Bot…</span></span>
+            <span class="pill" id="pillCheckout" title="Prueba diaria del pago completo (sin pagar)"><i class="dot"></i><span>Checkout…</span></span>
+            <button class="pill boton" id="btnAlertas" type="button" title="Sonido y notificación cuando llegue una pieza nueva">🔕 Alertas</button>
+        </div>
+        <div class="temas" id="selectorTemas">
+            <button data-tema="nexus">Nexus</button>
+            <button data-tema="grafito">Grafito</button>
+        </div>
+    </div>
+
+    <div class="banda-drop" id="bandaDrop" style="display:none"></div>
+
+    <div class="banner-ensayo" id="bannerEnsayo" style="display:none">
+        🧪 Modo ensayo activo: el bot recorre todo el proceso pero <b>no paga</b>.
+    </div>
+
+    <div class="seg tabs" id="selectorVista">
+        <button data-vista="piezas" class="on">🏎 Piezas <span class="cuenta" id="cuentaPiezas"></span></button>
+        <button data-vista="links">🔗 Mis links</button>
+        <button data-vista="historial">📊 Historial</button>
+        <button data-vista="ajustes">⚙ Ajustes</button>
+    </div>
+
+    <!-- ======================= 1. PIEZAS ENCONTRADAS ======================= -->
+    <div id="vista-piezas" class="vista">
+        <div class="pnl pnl-grow">
+            <div class="pnl-hdr">
+                <h2>Piezas encontradas <span id="notaPiezas"></span></h2>
+                <select class="sel orden" id="ordenPiezas" title="Ordenar las piezas por decidir">
+                    <option value="recientes">Más recientes</option>
+                    <option value="ganancia">Mayor ganancia</option>
+                    <option value="precio">Menor precio</option>
+                </select>
+                <div class="seg mini" id="selectorPiezas">
+                    <button data-ver="pendientes" class="on">Por decidir</button>
+                    <button data-ver="historial">Ya resueltas</button>
+                </div>
+            </div>
+            <div class="note" id="ayudaPiezas">
+                El monitor te avisa por Telegram y deja aquí cada pieza que está disponible.
+                Tú eliges: <b>Comprar</b> (el bot lo hace por ti), <b>Ignorar</b>, o
+                <b>Ya la compré</b> si la pagaste por tu cuenta.
+            </div>
+            <div class="piezas" id="listaPiezas"></div>
+        </div>
+    </div>
+
+    <!-- ============================ 2. MIS LINKS ============================ -->
+    <div id="vista-links" class="vista" style="display:none">
+        <div class="pnl pnl-grow">
+            <div class="pnl-hdr">
+                <h2>Mis links <span>{{ products | length }}</span></h2>
+                <form method="POST" action="{{ request.script_root }}/run_smoke">
+                    <button class="btn sm" type="submit" title="Visita cada link sin comprar, para confirmar que el botón de compra siga en la página">🩺 Probar links</button>
+                </form>
+            </div>
+            <form method="POST" action="{{ request.script_root }}/add_url" class="form-row">
+                <div class="fld">
+                    <label class="lbl">Agregar un link de producto</label>
+                    <input class="in" type="text" name="url" placeholder="https://creations.mattel.com/products/..." required>
+                </div>
+                <button class="btn pri" type="submit">Agregar</button>
+            </form>
+
+            {% if products %}
+            <div class="wrap-tbl" style="margin-top:12px">
+                <table class="tbl">
+                    <thead><tr><th></th><th>Producto</th><th>Precio visto</th><th>Estado</th><th>Acciones</th></tr></thead>
+                    <tbody>
+                    {% for p in products %}
+                        {% set s = salud.get(p.url) %}
+                        {% set pr = precios.get(p.url) %}
+                        <tr>
+                            <td>
+                                {% if p.image_url %}
+                                    <img class="thumb thumb-zoom" src="{{ p.image_url }}" alt="" onerror="this.style.display='none'" onclick="abrirZoom(this.src)">
+                                {% else %}
+                                    <span class="thumb thumb-vacio">🏎</span>
+                                {% endif %}
+                            </td>
+                            <td><a class="url mn" href="{{ p.url }}" target="_blank" rel="noopener">{{ p.url.split('/products/')[-1] if '/products/' in p.url else p.url }}</a></td>
+                            <td class="mn">
+                                {% if pr %}${{ '%.0f'|format(pr.minimo) }} – ${{ '%.0f'|format(pr.maximo) }}{% else %}—{% endif %}
+                            </td>
+                            <td>
+                                {% if not p.active %}<span class="tag">Pausado</span>{% endif %}
+                                {% if s %}
+                                    <span class="tag {{ 'g' if s.ok else 'r' }}" title="{{ s.detalle }} — {{ s.created_at }}">{{ 'link OK' if s.ok else 'link roto' }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="acciones">
+                                    <button class="btn sm pri" type="button" onclick="comprarLink({{ p.id }})">Comprar</button>
+                                    <form method="POST" action="{{ url_for('toggle_product_route', product_id=p.id) }}">
+                                        <input type="hidden" name="active" value="{{ '0' if p.active else '1' }}">
+                                        <button class="btn sm" type="submit" title="Pausado = no entra a la ejecución programada">{{ 'Pausar' if p.active else 'Reanudar' }}</button>
+                                    </form>
+                                    <form method="POST" action="{{ url_for('delete_product_route', product_id=p.id) }}"
+                                          onsubmit="return confirm('¿Quitar este link de la lista?');">
+                                        <button class="btn sm dgr" type="submit">Quitar</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty">Aún no hay links. Pega arriba el link de una pieza para tenerla a mano.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ============================ 3. HISTORIAL ============================ -->
+    <div id="vista-historial" class="vista" style="display:none">
+        <div class="grid-2">
+            <div class="pnl pnl-grow">
+                <div class="pnl-hdr">
+                    <h2>Compras del bot</h2>
+                    {% if results %}
+                    <form method="POST" action="{{ request.script_root }}/clear_results" onsubmit="return confirm('¿Borrar todo el historial de resultados? También vacía el gráfico.');">
+                        <button class="btn sm dgr" type="submit">🗑 Borrar</button>
+                    </form>
+                    {% endif %}
+                </div>
+                {% if results %}
+                <div class="feed scroll-y">
+                    {% for r in results[:60] %}
+                        {% set partes = r.split(' - ', 1) %}
+                        {% set es_exito = ('✅' in r) or ('🎉' in r) %}
+                        <div class="fi">
+                            <span class="dot {{ 'g' if es_exito else 'r' }}"></span>
+                            <span class="tx">{{ partes[1] if partes|length > 1 else r }}</span>
+                            <span class="ts mn">{{ partes[0] if partes|length > 1 else '' }}</span>
+                        </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty">Todavía no hay intentos de compra registrados.</div>
+                {% endif %}
+            </div>
+            <div class="col-side">
+                <div class="pnl">
+                    <h2>Éxitos y fallos por día</h2>
+                    <div class="chart-box" style="min-height:190px"><canvas id="resultsChart"></canvas></div>
+                </div>
+                <div class="pnl">
+                    <h2>Anotadas en Chicos Wheels</h2>
+                    <div class="note" id="resumenColeccion">Consultando tu colección…</div>
+                    {% if collecthub_registros %}
+                    <div class="wrap-tbl scroll-y">
+                        <table class="tbl">
+                            <thead><tr><th>Cuándo</th><th>Pieza</th><th></th></tr></thead>
+                            <tbody>
+                            {% for r in collecthub_registros %}
+                                <tr>
+                                    <td class="mn">{{ r.created_at }}</td>
+                                    <td>{{ r.titulo or r.url }}</td>
+                                    <td><span class="tag {{ 'g' if r.resultado == 'ok' else 'r' }}">{{ 'registrada' if r.resultado == 'ok' else (r.resultado or '—') }}</span></td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="empty">Cada compra confirmada se anota sola en tu colección de Chicos Wheels.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================== 4. AJUSTES ============================== -->
+    <div id="vista-ajustes" class="vista" style="display:none">
+        <div class="grid-2">
+            <div class="col-main">
+                <div class="pnl">
+                    <h2>Qué busca el monitor</h2>
+                    <span class="lbl">Colecciones de Mattel Creations</span>
+                    <div id="listaColecciones" class="chips"></div>
+                    <form class="form-row" id="formColeccion" style="margin-top:8px">
+                        <div class="fld"><input class="in" id="inColeccion" placeholder="handle, ej. hot-wheels-premium"></div>
+                        <button class="btn" type="submit">Agregar colección</button>
+                    </form>
+                    <div class="note">✔ activa = se revisa · ⚡ rápida = se revisa cada pocos segundos (para lo que se agota rápido).</div>
+                </div>
+                <div class="pnl">
+                    <h2>Modelos que te importan <span>(avisan siempre)</span></h2>
+                    <div id="listaDeseados" class="chips"></div>
+                    <form class="form-row" id="formDeseado" style="margin-top:8px">
+                        <div class="fld"><input class="in" id="inDeseado" placeholder="ej. skyline, super treasure hunt"></div>
+                        <button class="btn" type="submit">Agregar</button>
+                    </form>
+                </div>
+                <div class="pnl">
+                    <h2>Modelos que NO te importan <span>(se silencian)</span></h2>
+                    <div id="listaBloqueados" class="chips"></div>
+                    <form class="form-row" id="formBloqueado" style="margin-top:8px">
+                        <div class="fld"><input class="in" id="inBloqueado" placeholder="ej. playera, gorra"></div>
+                        <button class="btn" type="submit">Agregar</button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="col-side">
+                <div class="pnl">
+                    <h2>Topes de gasto <span>(te avisan antes de pagar)</span></h2>
+                    <div class="note">No bloquean nada: si una compra pasa un tope, el panel (o Telegram) te pide una confirmación más fuerte.</div>
+                    <form class="form-row" id="formLimites">
+                        <div class="fld"><label class="lbl">Por pieza (MXN)</label><input class="in" type="number" min="1" step="50" id="inTopePieza"></div>
+                        <div class="fld"><label class="lbl">Por mes (MXN)</label><input class="in" type="number" min="1" step="100" id="inTopeMes"></div>
+                        <button class="btn" type="submit">Guardar</button>
+                    </form>
+                    <p class="mn" id="gastoMes" style="margin-top:8px"></p>
+                </div>
+
+                <div class="pnl">
+                    <h2>Prueba del checkout <span>(sin pagar)</span></h2>
+                    <div class="note">Cada día a las 8:45 el bot recorre carrito y pago con una pieza disponible, sin ventana y <b>sin pagar</b>, para avisarte si el proceso se rompió antes del próximo drop.</div>
+                    <p class="mn" id="textoCheckout">Aún no se ha probado.</p>
+                    <button class="btn" type="button" id="btnProbarCheckout">🧪 Probar ahora</button>
+                </div>
+
+                <div class="pnl">
+                    <h2>Compra programada <span>(opcional)</span></h2>
+                    <div class="note y">
+                        Normalmente no hace falta: compras tú desde <b>Piezas</b>. Esto solo sirve si quieres
+                        que el bot intente comprar <b>tus links activos</b> de "Mis links" a una hora fija, sin que tú estés.
+                    </div>
+                    <details>
+                        <summary>Horario diario</summary>
+                        <p class="mn" style="margin:8px 0">Ahora: de {{ start_hour }}:00 a {{ end_hour }}:00 {% if start_hour > end_hour %}(apagado){% endif %}</p>
+                        <form method="POST" action="{{ request.script_root }}/set_schedule" class="form-row">
+                            <div class="fld"><label class="lbl">Inicio</label><input class="in" type="number" name="start_hour" min="0" max="23" value="{{ start_hour }}"></div>
+                            <div class="fld"><label class="lbl">Fin</label><input class="in" type="number" name="end_hour" min="0" max="23" value="{{ end_hour }}"></div>
+                            <button class="btn" type="submit">Guardar</button>
+                        </form>
+                    </details>
+                    <details>
+                        <summary>Evento puntual (hora exacta de un lanzamiento)</summary>
+                        {% if event and not event.hecho %}
+                            <div class="note"><b>{{ event.fecha }} {{ '%02d'|format(event.hora) }}:{{ '%02d'|format(event.minuto) }}</b> — pendiente.</div>
+                            <form method="POST" action="{{ request.script_root }}/clear_event"><button class="btn dgr sm" type="submit">Cancelar evento</button></form>
+                        {% elif event and event.hecho %}
+                            <div class="note">El último evento ({{ event.fecha }} {{ '%02d'|format(event.hora) }}:{{ '%02d'|format(event.minuto) }}) ya se ejecutó.</div>
+                        {% endif %}
+                        <form method="POST" action="{{ request.script_root }}/set_event" class="form-row" style="margin-top:8px">
+                            <div class="fld"><label class="lbl">Fecha</label><input class="in" type="date" name="fecha" required></div>
+                            <div class="fld"><label class="lbl">Hora</label><input class="in" type="number" name="hora" min="0" max="23" required></div>
+                            <div class="fld"><label class="lbl">Min.</label><input class="in" type="number" name="minuto" min="0" max="59" required></div>
+                            <button class="btn" type="submit">Programar</button>
+                        </form>
+                    </details>
+                    <details>
+                        <summary>Ejecutar ahora todos los links activos</summary>
+                        <p class="mn" style="margin:8px 0">Intenta comprar cada link activo de "Mis links" en este momento.</p>
+                        <form method="POST" action="{{ request.script_root }}/run" onsubmit="return confirm('El bot va a intentar comprar TODOS los links activos ahora. ¿Seguro?');">
+                            <button class="btn pri" type="submit">▶ Ejecutar ahora</button>
+                        </form>
+                    </details>
+                </div>
+
+                <div class="pnl">
+                    <h2>Usar el panel desde el celular</h2>
+                    <details>
+                        <summary>Cómo hacerlo con seguridad</summary>
+                        <div class="note y" style="margin-top:8px">
+                            El panel escucha solo en esta PC. Como ahora puede <b>comprar</b>, abrirlo a tu red exige
+                            usuario y contraseña: en <code>.env</code> pon <code>DASHBOARD_USER</code>,
+                            <code>DASHBOARD_PASSWORD</code> y <code>PANEL_HOST=0.0.0.0</code>, y reinicia el panel.
+                            Sin usuario y contraseña, ignora PANEL_HOST y sigue cerrado. Para usarlo <b>fuera de casa</b>
+                            sin abrir puertos a internet, instala Tailscale en la PC y el celular.
+                            Mientras tanto, los botones de Telegram ya te dejan decidir desde el celular.
+                        </div>
+                    </details>
+                </div>
+
+                <div class="pnl">
+                    <h2>Proxies <span>{{ proxies | length }}</span></h2>
+                    <details>
+                        <summary>{{ 'Ver / agregar' if proxies else 'Sin proxies: se usa tu conexión directa' }}</summary>
+                        {% if proxies %}
+                        <table class="tbl" style="margin-top:8px">
+                            <thead><tr><th>Servidor</th><th>Usuario</th></tr></thead>
+                            <tbody>{% for proxy in proxies %}<tr><td class="mn">{{ proxy.server }}</td><td>{{ proxy.username or '—' }}</td></tr>{% endfor %}</tbody>
+                        </table>
+                        {% endif %}
+                        <form method="POST" action="{{ request.script_root }}/add_proxy" class="form-row" style="margin-top:8px">
+                            <div class="fld"><label class="lbl">Servidor</label><input class="in" type="text" name="server" placeholder="http://host:puerto"></div>
+                            <div class="fld"><label class="lbl">Usuario</label><input class="in" type="text" name="username"></div>
+                            <div class="fld"><label class="lbl">Contraseña</label><input class="in" type="password" name="password"></div>
+                            <button class="btn" type="submit">Agregar</button>
+                        </form>
+                    </details>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<div id="imgZoomOverlay" class="img-zoom-overlay" onclick="cerrarZoom()">
+    <img id="imgZoomGrande" src="" alt="">
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+    // ---------- utilidades ----------
+    // Prefijo donde esta montado el panel (/bot dentro de Chicos Wheels; vacio suelto).
+    const BASE = {{ request.script_root|tojson }};
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+        (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+    function toast(msg, malo) {
+        const t = $("toast");
+        t.textContent = msg; t.className = "toast on" + (malo ? " mal" : "");
+        clearTimeout(toast._t); toast._t = setTimeout(() => t.className = "toast", 4500);
+    }
+    async function api(ruta, cuerpo) {
+        try {
+            const r = await fetch(BASE + ruta, cuerpo === undefined ? {} : {
+                method: "POST", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(cuerpo)});
+            return await r.json();
+        } catch (e) { return {ok: false, error: "no se pudo contactar al panel"}; }
+    }
+    function hace(iso) {
+        const min = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+        if (min < 1) return "hace un momento";
+        if (min < 60) return "hace " + min + " min";
+        if (min < 1440) return "hace " + Math.round(min / 60) + " h";
+        return "hace " + Math.round(min / 1440) + " d";
+    }
+
+    // ---------- zoom de imagen ----------
+    function abrirZoom(src) { $("imgZoomGrande").src = src; $("imgZoomOverlay").classList.add("on"); }
+    function cerrarZoom() { $("imgZoomOverlay").classList.remove("on"); }
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") cerrarZoom(); });
+
+    // ---------- pestañas ----------
+    function aplicarVista(v) {
+        if (!["piezas", "links", "historial", "ajustes"].includes(v)) v = "piezas";
+        document.querySelectorAll(".vista").forEach(el => el.style.display = el.id === "vista-" + v ? "" : "none");
+        document.querySelectorAll("#selectorVista button").forEach(b => b.classList.toggle("on", b.dataset.vista === v));
+        try { localStorage.setItem("hw_vista2", v); } catch (e) {}
+        if (v === "ajustes") cargarAjustes();
+        if (v === "historial") cargarColeccion();
+    }
+    document.querySelectorAll("#selectorVista button").forEach(b => b.addEventListener("click", () => aplicarVista(b.dataset.vista)));
+
+    // ---------- temas ----------
+    const TEMAS = ["nexus", "grafito"];   // un tema guardado que ya no existe cae a nexus
+    function aplicarTema(t) {
+        if (!TEMAS.includes(t)) t = "nexus";
+        document.documentElement.setAttribute("data-tema", t);
+        try { localStorage.setItem("hw_tema", t); } catch (e) {}
+        document.querySelectorAll("#selectorTemas button").forEach(b => b.classList.toggle("on", b.dataset.tema === t));
+    }
+    document.querySelectorAll("#selectorTemas button").forEach(b => b.addEventListener("click", () => aplicarTema(b.dataset.tema)));
+
+    // ---------- estado (cabecera) ----------
+    function faltan(iso) {
+        const ms = new Date(iso) - Date.now();
+        if (ms <= 0) return "ahora";
+        const min = Math.floor(ms / 60000), d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+        return (d ? d + " d " : "") + (h || d ? h + " h " : "") + m + " min";
+    }
+    async function refrescarEstado() {
+        const d = await api("/api/estado");
+        if (!d || !d.monitor) return;
+        const m = d.monitor;
+        const pm = $("pillMonitor");
+        const texto = {bien: "Monitor vigilando", tarde: "Monitor tardando", ciego: "Monitor sin señal", sin_datos: "Monitor sin datos"}[m.semaforo] || "Monitor";
+        pm.className = "pill " + ({bien: "ok", tarde: "warn", ciego: "mal", sin_datos: "mal"}[m.semaforo] || "mal");
+        pm.querySelector("span").textContent = texto + (m.minutos_latido != null ? " · hace " + Math.round(m.minutos_latido) + " min" : "");
+        pm.title = m.semaforo === "bien" ? "El monitor está revisando Mattel con normalidad" :
+            "Si sigue así, arranca 'python monitor.py' desde Nexus (proyecto 15)";
+        const pb = $("pillBot");
+        pb.className = "pill " + (d.comprando ? "warn" : "ok");
+        pb.querySelector("span").textContent = d.comprando ? ("Bot comprando…" + (d.en_cola ? " · " + d.en_cola + " en cola" : "")) : "Bot libre";
+        // prueba diaria del checkout
+        const pc = $("pillCheckout"), c = d.checkout;
+        const mapa = {ok: ["ok", "Checkout OK"], roto: ["mal", "Checkout con falla"], sin_producto: ["", "Checkout sin probar (nada disponible)"], captcha: ["warn", "Checkout pidió captcha"]};
+        const [cc, ct] = c ? (mapa[c.estado] || ["", "Checkout"]) : ["", "Checkout sin probar"];
+        pc.className = "pill " + cc; pc.querySelector("span").textContent = ct;
+        pc.title = c ? ("Última prueba: " + c.created_at + " UTC — " + (c.detalle || "")) : "Aún no se ha probado";
+        $("textoCheckout").textContent = c ? ("Última prueba: " + c.created_at + " UTC — " + ({ok: "todo el proceso llegó hasta antes de pagar ✔", roto: "FALLÓ: " + (c.detalle || ""), sin_producto: "no había nada disponible para probar", captcha: "apareció un captcha"}[c.estado] || c.estado)) : "Aún no se ha probado.";
+        // cuenta regresiva del proximo drop
+        const dr = m.proximo_drop, banda = $("bandaDrop");
+        if (dr) {
+            banda.style.display = "";
+            banda.innerHTML = "⏳ Próximo drop " + (dr.supuesto ? "supuesto" : "probable") + ": <b>" + esc(dr.texto) + "</b> · faltan <b>" + faltan(dr.iso) + "</b>" +
+                (dr.confianza ? ' <span class="mn">(' + Math.round(dr.confianza * 100) + "% de las veces, " + dr.casos + " casos)</span>" : ' <span class="mn">(aún sin historial suficiente)</span>');
+        }
+        $("bannerEnsayo").style.display = d.ensayo ? "" : "none";
+        const n = (d.hallazgos && (d.hallazgos.pendiente + (d.hallazgos.en_cola || 0))) || 0;
+        $("cuentaPiezas").textContent = n ? n : "";
+        document.title = (n ? "(" + n + ") " : "") + "Hot Wheels · Monitor y compra";
+        if (d.limites) {
+            $("gastoMes").textContent = "Llevas gastado este mes: $" + Math.round(d.limites.gastado_mes_mxn).toLocaleString("es-MX") + " de $" + Math.round(d.limites.tope_mensual_mxn).toLocaleString("es-MX");
+            if (!$("inTopePieza").matches(":focus") && !$("inTopeMes").matches(":focus") && !$("inTopePieza").dataset.listo) {
+                $("inTopePieza").value = d.limites.tope_pieza_mxn; $("inTopeMes").value = d.limites.tope_mensual_mxn; $("inTopePieza").dataset.listo = "1";
+            }
+        }
+    }
+
+    // ---------- alertas: sonido + notificacion del navegador ----------
+    let alertasOn = false, idsVistos = null;
+    try { alertasOn = localStorage.getItem("hw_alertas") === "1"; } catch (e) {}
+    function pintarBtnAlertas() { $("btnAlertas").textContent = alertasOn ? "🔔 Alertas" : "🔕 Alertas"; $("btnAlertas").classList.toggle("ok", alertasOn); }
+    function pitar() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            [880, 1175].forEach((f, i) => {
+                const o = ctx.createOscillator(), g = ctx.createGain();
+                o.frequency.value = f; o.type = "sine"; o.connect(g); g.connect(ctx.destination);
+                g.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.18);
+                g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + i * 0.18 + 0.02);
+                g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.18 + 0.16);
+                o.start(ctx.currentTime + i * 0.18); o.stop(ctx.currentTime + i * 0.18 + 0.17);
+            });
+        } catch (e) {}
+    }
+    $("btnAlertas").addEventListener("click", async () => {
+        alertasOn = !alertasOn;
+        try { localStorage.setItem("hw_alertas", alertasOn ? "1" : "0"); } catch (e) {}
+        if (alertasOn) {
+            pitar();
+            if ("Notification" in window && Notification.permission === "default") { try { await Notification.requestPermission(); } catch (e) {} }
+            toast("Alertas activadas: sonará un aviso cuando llegue una pieza nueva.");
+        }
+        pintarBtnAlertas();
+    });
+    pintarBtnAlertas();
+    function avisarNuevas(piezas) {
+        const ids = new Set(piezas.filter(p => p.estado === "pendiente" && p.disponible).map(p => p.id));
+        if (idsVistos !== null && alertasOn) {
+            const nuevas = piezas.filter(p => ids.has(p.id) && !idsVistos.has(p.id));
+            if (nuevas.length) {
+                pitar();
+                if ("Notification" in window && Notification.permission === "granted") {
+                    try { new Notification("Hot Wheels: " + nuevas.length + " pieza(s) nueva(s)", {body: nuevas.map(p => p.titulo).join("\n").slice(0, 200)}); } catch (e) {}
+                }
+            }
+        }
+        idsVistos = ids;
+    }
+
+    // ---------- piezas encontradas ----------
+    let verPiezas = "pendientes", ordenPiezas = "recientes", firmaPiezas = "";
+    try { ordenPiezas = localStorage.getItem("hw_orden") || "recientes"; } catch (e) {}
+    $("ordenPiezas").value = ordenPiezas;
+    $("ordenPiezas").addEventListener("change", () => {
+        ordenPiezas = $("ordenPiezas").value;
+        try { localStorage.setItem("hw_orden", ordenPiezas); } catch (e) {}
+        refrescarPiezas(true);
+    });
+    const ETIQ_TIPO = {nuevo: "Nuevo", restock: "Restock", pocas_unidades: "Pocas unidades"};
+    const ETIQ_ESTADO = {comprando: ["y", "Comprando…"], en_cola: ["y", "En cola"], comprado: ["g", "Comprada ✔"], carrito: ["b", "Quedó en carrito"],
+                         fallo: ["r", "Falló"], ignorado: ["", "Ignorada"], pendiente: ["y", "Por decidir"]};
+    const dinero = (n) => "$" + Math.round(n).toLocaleString("es-MX");
+    function tarjeta(p) {
+        let [cls, etq] = ETIQ_ESTADO[p.estado] || ["", p.estado];
+        if (p.estado === "en_cola" && p.posicion_cola) etq = "En cola #" + p.posicion_cola;
+        const precio = p.precio_mxn ? dinero(p.precio_mxn) + " MXN" : "precio no disponible";
+        const etiquetas = [];
+        if (p.deseado) etiquetas.push('<span class="tag y">★ En tus deseados</span>');
+        if (p.impacto === "Alto impacto") etiquetas.push('<span class="tag r">Alto impacto</span>');
+        if (p.tipo) etiquetas.push('<span class="tag b">' + esc(ETIQ_TIPO[p.tipo] || p.tipo) + '</span>');
+        if (!p.disponible) etiquetas.push('<span class="tag">Agotada</span>');
+        if (p.ganancia_mxn != null) {
+            etiquetas.push('<span class="tag ' + (p.ganancia_mxn >= 0 ? "g" : "r") + '" title="Reventa estimada ' + (p.reventa_mxn ? dinero(p.reventa_mxn) : "?") + ' menos envío, comisión y costo">Ganancia ≈ ' + (p.ganancia_mxn < 0 ? "-" : "") + dinero(Math.abs(p.ganancia_mxn)) + (p.margen_pct != null ? " (" + Math.round(p.margen_pct) + "%)" : "") + '</span>');
+        }
+        if (p.agota_min) etiquetas.push('<span class="tag ' + (p.agota_min <= 10 ? "r" : "") + '" title="Tiempo típico que dura disponible">Se agota en ~' + Math.round(p.agota_min) + ' min</span>');
+        if (p.ya_tienes && p.ya_tienes.length) etiquetas.push('<span class="tag r" title="Ya hay algo parecido en tu colección de Chicos Wheels">⚠ Ya tienes: ' + esc(p.ya_tienes[0].nombre) + '</span>');
+        const puedeComprar = (p.estado === "pendiente") && p.disponible;
+        let acciones = "";
+        if (puedeComprar) {
+            acciones += '<input class="in cant" type="number" min="1" max="10" value="1" title="Cantidad" id="cant' + p.id + '">' +
+                '<button class="btn pri" onclick="comprarPieza(' + p.id + ')">Comprar</button>';
+        } else if (p.estado === "comprando") {
+            acciones += '<span class="tag y">El bot está comprando…</span>';
+        } else if (p.estado === "en_cola") {
+            acciones += '<button class="btn sm" onclick="restaurarPieza(' + p.id + ')">Sacar de la cola</button>';
+        }
+        acciones += '<a class="btn sm" href="' + esc(p.url) + '" target="_blank" rel="noopener">Abrir</a>';
+        if (p.estado === "pendiente") {
+            acciones += '<button class="btn sm" onclick="ignorarPieza(' + p.id + ')">Ignorar</button>';
+            acciones += '<button class="btn sm" onclick="yaComprada(' + p.id + ')" title="La pagaste por tu cuenta">Ya la compré</button>';
+        } else if (p.estado === "ignorado" || p.estado === "fallo" || p.estado === "carrito") {
+            acciones += '<button class="btn sm" onclick="restaurarPieza(' + p.id + ')">Volver a decidir</button>';
+        }
+        return '<div class="pieza' + (p.disponible ? "" : " agotada") + '">' +
+            (p.imagen ? '<img class="foto thumb-zoom" src="' + esc(p.imagen) + '" alt="" onerror="this.style.visibility=\'hidden\'" onclick="abrirZoom(this.src)">' : '<div class="foto vacio">🏎</div>') +
+            '<div class="cuerpo"><div class="titulo">' + esc(p.titulo || p.url) + '</div>' +
+            '<div class="meta"><b class="mn">' + precio + '</b> · <span>' + hace(p.detectado_at) + '</span> <span class="spark" data-titulo="' + esc(p.titulo || "") + '"></span></div>' +
+            '<div class="etiquetas"><span class="tag ' + cls + '">' + etq + '</span>' + etiquetas.join("") + '</div>' +
+            (p.resultado && p.estado !== "pendiente" ? '<div class="resultado mn">' + esc(p.resultado) + '</div>' : "") +
+            '<div class="acciones-pieza">' + acciones + '</div></div></div>';
+    }
+    // mini-grafica del precio (historial del monitor); solo si hay al menos 2 puntos
+    const cachePrecios = {};
+    async function pintarSparks() {
+        for (const el of document.querySelectorAll(".spark[data-titulo]")) {
+            const titulo = el.dataset.titulo; if (!titulo) continue;
+            if (!(titulo in cachePrecios)) {
+                const r = await api("/api/monitor/precios?titulo=" + encodeURIComponent(titulo));
+                cachePrecios[titulo] = (r.precios || []).map(x => x.precio_mxn).filter(v => v != null);
+            }
+            const v = cachePrecios[titulo];
+            if (v.length < 2) { el.innerHTML = ""; continue; }
+            const w = 70, h = 20, mn = Math.min(...v), mx = Math.max(...v), rango = (mx - mn) || 1;
+            const pts = v.map((y, i) => (i * (w - 2) / (v.length - 1) + 1).toFixed(1) + "," + (h - 2 - (y - mn) / rango * (h - 4)).toFixed(1)).join(" ");
+            const sube = v[v.length - 1] > v[0];
+            el.innerHTML = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" title="Precio: ' + dinero(v[0]) + ' → ' + dinero(v[v.length - 1]) + '"><polyline fill="none" stroke="' + (sube ? "var(--red)" : "var(--green)") + '" stroke-width="1.5" points="' + pts + '"/></svg>';
+        }
+    }
+    async function refrescarPiezas(forzar) {
+        const d = await api("/api/hallazgos?ver=" + verPiezas + "&orden=" + ordenPiezas);
+        if (!d.ok) return;
+        if (verPiezas === "pendientes") avisarNuevas(d.piezas);
+        const firma = verPiezas + ordenPiezas + JSON.stringify(d.piezas.map(p => [p.id, p.estado, p.disponible, p.precio_mxn, p.ultima_vez, p.posicion_cola]));
+        if (!forzar && firma === firmaPiezas) return;   // sin cambios: no redibujar (no perder lo escrito)
+        firmaPiezas = firma;
+        const cont = $("listaPiezas");
+        if (!d.piezas.length) {
+            cont.innerHTML = '<div class="empty">' + (verPiezas === "pendientes"
+                ? "Nada por decidir. Cuando el monitor encuentre una pieza disponible, aparecerá aquí (y te llega el aviso a Telegram)."
+                : "Todavía no hay piezas resueltas.") + '</div>';
+        } else cont.innerHTML = d.piezas.map(tarjeta).join("");
+        $("notaPiezas").textContent = d.piezas.length ? d.piezas.length : "";
+        pintarSparks();
+    }
+    document.querySelectorAll("#selectorPiezas button").forEach(b => b.addEventListener("click", () => {
+        verPiezas = b.dataset.ver;
+        document.querySelectorAll("#selectorPiezas button").forEach(x => x.classList.toggle("on", x === b));
+        $("ayudaPiezas").style.display = verPiezas === "pendientes" ? "" : "none";
+        $("ordenPiezas").style.display = verPiezas === "pendientes" ? "" : "none";
+        refrescarPiezas(true);
+    }));
+    async function comprarPieza(id, forzar) {
+        const cant = parseInt(($("cant" + id) || {}).value || "1", 10) || 1;
+        if (!forzar && !confirm("¿Comprar esta pieza (cantidad " + cant + ")?\nEl bot abrirá el navegador y pagará con tu tarjeta guardada." )) return;
+        const r = await api("/api/hallazgos/" + id + "/comprar", {cantidad: cant, forzar: !!forzar});
+        if (r.excede) {   // pasa un tope de gasto: confirmacion mas fuerte
+            if (confirm("⚠️ Ojo: " + r.error + ".\n\n¿Comprar de todos modos?")) return comprarPieza(id, true);
+            return;
+        }
+        toast(r.ok ? (r.en_cola ? "El bot está ocupado: quedó en la cola (#" + r.posicion + ")." : "El bot empezó la compra. Verás el resultado aquí y en Telegram.") : (r.error || "No se pudo comprar"), !r.ok);
+        refrescarPiezas(true); refrescarEstado();
+    }
+    async function ignorarPieza(id) { await api("/api/hallazgos/" + id + "/ignorar", {}); refrescarPiezas(true); refrescarEstado(); }
+    async function restaurarPieza(id) { await api("/api/hallazgos/" + id + "/restaurar", {}); refrescarPiezas(true); refrescarEstado(); }
+    async function yaComprada(id) {
+        if (!confirm("¿Confirmas que ya pagaste esta pieza por tu cuenta? Se anotará en Chicos Wheels.")) return;
+        const r = await api("/api/hallazgos/" + id + "/ya_comprada", {});
+        toast(r.chicos_wheels ? "Anotada en Chicos Wheels ✔" : "Marcada como comprada (Chicos Wheels: " + (r.mensaje || "no disponible") + ")", !r.chicos_wheels);
+        refrescarPiezas(true); refrescarEstado();
+    }
+    async function comprarLink(productId) {
+        if (!confirm("¿Comprar este link ahora?\nEl bot abrirá el navegador y pagará con tu tarjeta guardada.")) return;
+        const r = await api("/comprar_url/" + productId, {});
+        toast(r.ok ? "El bot empezó la compra. El resultado saldrá en Historial y en Telegram." : (r.error || "No se pudo comprar"), !r.ok);
+        refrescarEstado();
+    }
+
+    // ---------- ajustes: qué busca el monitor ----------
+    async function cargarAjustes() {
+        const [col, des, blo] = await Promise.all([api("/api/monitor/colecciones"), api("/api/monitor/lista/deseados"), api("/api/monitor/lista/bloqueados")]);
+        $("listaColecciones").innerHTML = (col.entradas || []).map(c =>
+            '<span class="chip ' + (c.activa ? "" : "off") + '"><b>' + esc(c.nombre) + '</b>' +
+            '<button title="' + (c.activa ? "Apagar" : "Prender") + '" onclick="cambiarColeccion(\'' + esc(c.handle) + '\',{activa:' + (!c.activa) + '})">' + (c.activa ? "✔" : "○") + '</button>' +
+            '<button title="Ciclo rápido: se revisa cada pocos segundos" class="rap ' + (c.rapida ? "on" : "") + '" onclick="cambiarColeccion(\'' + esc(c.handle) + '\',{rapida:' + (!c.rapida) + '})">⚡</button>' +
+            '<button title="Quitar" onclick="quitarColeccion(\'' + esc(c.handle) + '\')">✕</button></span>').join("") || '<div class="empty">Sin colecciones.</div>';
+        const chips = (lista, arr) => $("lista" + lista).innerHTML = (arr || []).map(e =>
+            '<span class="chip"><b>' + esc(e.texto) + '</b><button title="Quitar" onclick="quitarTexto(\'' + lista.toLowerCase() + '\',this.dataset.t)" data-t="' + esc(e.texto) + '">✕</button></span>').join("") || '<div class="empty">Vacía.</div>';
+        chips("Deseados", des.entradas); chips("Bloqueados", blo.entradas);
+    }
+    async function cambiarColeccion(handle, cambios) { await api("/api/monitor/colecciones/cambiar", Object.assign({handle}, cambios)); cargarAjustes(); }
+    async function quitarColeccion(handle) { if (confirm("¿Quitar esta colección del monitor?")) { await api("/api/monitor/colecciones/quitar", {handle}); cargarAjustes(); } }
+    async function quitarTexto(lista, texto) { await api("/api/monitor/lista/" + lista + "/quitar", {texto}); cargarAjustes(); }
+    function formTexto(idForm, idInput, ruta, campo) {
+        $(idForm).addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const v = $(idInput).value.trim(); if (!v) return;
+            const r = await api(ruta, {[campo]: v});
+            if (!r.ok) toast(r.error || "No se pudo agregar", true); else $(idInput).value = "";
+            cargarAjustes();
+        });
+    }
+    formTexto("formColeccion", "inColeccion", "/api/monitor/colecciones/agregar", "handle");
+    formTexto("formDeseado", "inDeseado", "/api/monitor/lista/deseados/agregar", "texto");
+    formTexto("formBloqueado", "inBloqueado", "/api/monitor/lista/bloqueados/agregar", "texto");
+
+    // ---------- topes de gasto y prueba del checkout ----------
+    $("formLimites").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const r = await api("/api/limites", {tope_pieza_mxn: $("inTopePieza").value, tope_mensual_mxn: $("inTopeMes").value});
+        toast(r.ok ? "Topes guardados ✔" : (r.error || "No se pudo guardar"), !r.ok);
+        refrescarEstado();
+    });
+    $("btnProbarCheckout").addEventListener("click", async () => {
+        $("btnProbarCheckout").disabled = true; $("textoCheckout").textContent = "Probando… (tarda ~1 minuto)";
+        await api("/api/probar_checkout", {});
+        setTimeout(() => { $("btnProbarCheckout").disabled = false; refrescarEstado(); }, 75000);
+    });
+
+    // ---------- resumen de la coleccion (Chicos Wheels) ----------
+    async function cargarColeccion() {
+        const r = await api("/api/coleccion");
+        $("resumenColeccion").innerHTML = r.configurado
+            ? "Tu colección Hot Wheels: <b>" + r.piezas + " piezas</b> · valor estimado <b>" + dinero(r.valor_estimado_mxn) + "</b>. Las piezas nuevas que se parezcan a algo que ya tienes salen marcadas con ⚠."
+            : "Sin conexión con Chicos Wheels (" + esc(r.motivo || "no configurado") + "). Cuando la tengas, el panel avisará si una pieza ya está en tu colección.";
+    }
+
+    // ---------- gráfico de éxitos/fallos ----------
+    fetch(BASE + "/chart_data").then(r => r.json()).then(data => {
+        const labels = Object.keys(Object.assign({}, data.success, data.fail)).sort();
+        new Chart($("resultsChart"), {
+            type: "bar",
+            data: {labels, datasets: [
+                {label: "Éxitos", backgroundColor: "#3FCF8E", data: labels.map(d => data.success[d] || 0)},
+                {label: "Fallos", backgroundColor: "#D62B34", data: labels.map(d => data.fail[d] || 0)}]},
+            options: {responsive: true, maintainAspectRatio: false,
+                scales: {x: {ticks: {color: "#8C9DB2"}, grid: {color: "rgba(255,255,255,.06)"}},
+                         y: {ticks: {color: "#8C9DB2", precision: 0}, grid: {color: "rgba(255,255,255,.06)"}, beginAtZero: true}},
+                plugins: {legend: {labels: {color: "#DCE6F2"}}}}
+        });
+    }).catch(() => {});
+
+    // ---------- arranque ----------
+    (function () {
+        let t = "nexus", v = "piezas";
+        try { t = localStorage.getItem("hw_tema") || "nexus"; v = localStorage.getItem("hw_vista2") || "piezas"; } catch (e) {}
+        aplicarTema(t); aplicarVista(v);
+        refrescarEstado(); refrescarPiezas(true);
+        setInterval(() => { refrescarEstado(); refrescarPiezas(false); }, 8000);
+    })();
+</script>
+<footer class="kestrel-copy" style="text-align:center;font-size:.75rem;opacity:.6;padding:16px 0;"><style>.kestrel-link{color:inherit;text-decoration:none}.kestrel-link:hover{text-decoration:underline}</style>© <a class="kestrel-link" href="https://kestrel-ia.up.railway.app/" target="_blank" rel="noopener noreferrer">Kestrel</a> {{ anio_actual }}</footer>
+</body>
+</html>

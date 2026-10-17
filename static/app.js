@@ -163,6 +163,8 @@ function normalizar(e) {
 async function cargarEstado() {
   db = normalizar(await GET('/estado'));
   CUR = db.ajustes.moneda || 'MXN';
+  /* Bot Hot Wheels: solo en esta PC y para la cuenta dueña (collecthub/bot.py) */
+  try { ui.bot = (await GET('/bot/disponible')).disponible; } catch (e) { ui.bot = false; }
   render();
 }
 
@@ -348,6 +350,18 @@ async function autenticar() {
     render();
   }
 }
+async function abrirBot() {
+  /* La pestaña se abre ya (si no, el navegador la bloquea tras el await) y se
+     dirige al panel cuando el servidor deja la cookie de sesión del bot. */
+  const w = window.open('', '_blank');
+  try {
+    const r = await POST('/bot/entrar', {});
+    if (w) { w.opener = null; w.location.href = r.url; } else location.href = r.url;
+  } catch (e) {
+    if (w) w.close();
+    toast(e.message);
+  }
+}
 function salir(silencioso) {
   token = ''; usuario = null; db = null;
   localStorage.removeItem(TOKEN_KEY);
@@ -381,6 +395,7 @@ function render() {
       <nav class="nav">${NAV.filter((n) => n[0] !== 'apartados' || db.apartados.length).map((n) => (n[0].startsWith('SEP')
         ? `<div class="navsep">${n[2]}</div>`
         : `<button data-a="nav" data-v="${n[0]}" class="${ui.vista === n[0] ? 'on' : ''}"><span class="ic">${n[1]}</span>${n[2]}<span class="cnt">${CNT[n[0]] ? (CNT[n[0]]() || '') : ''}</span></button>`)).join('')}
+        ${ui.bot ? '<div class="navsep">Bot</div><button data-a="bot" title="Monitor y compra en Mattel Creations"><span class="ic">🤖</span>Bot Hot Wheels</button>' : ''}
         <div class="salir"><button data-a="salir"><span class="ic">⏻</span>Cerrar sesión</button></div>
       </nav>
     </aside>
@@ -1788,6 +1803,7 @@ document.addEventListener('click', async (e) => {
     case 'authtab': ui.authTab = el.dataset.v; ui.authErr = ''; render(); break;
     case 'auth': await autenticar(); break;
     case 'salir': if (confirm('¿Cerrar sesión en este dispositivo?')) salir(); break;
+    case 'bot': abrirBot(); break;
     case 'tema': aplicarTema(el.dataset.t); render(); break;
 
     /* --- navegación --- */
@@ -2595,6 +2611,11 @@ function exportarVentasCSV() {
     const r = await GET('/auth/yo');
     usuario = r.usuario;
     await cargarEstado();
+    /* Llegó del link de Telegram al bot sin su cookie: se renueva y se regresa ahí */
+    if (location.hash === '#bot' && ui.bot) {
+      history.replaceState(null, '', '/');
+      location.href = (await POST('/bot/entrar', {})).url;
+    }
   } catch (e) {
     salir(true);
   }

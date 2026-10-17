@@ -1,0 +1,14 @@
+# Solo el código del bot va a git. Datos, secretos (.env, config.env), la
+# configuración con correo y teléfono (config.json) y las capturas se quedan
+# en esta PC.
+*
+!.gitignore
+!*.py
+!*.ps1
+!.env.example
+!requirements.txt
+!README.md
+!templates/
+!templates/**
+!static/
+!static/**

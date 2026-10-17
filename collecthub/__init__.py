@@ -157,6 +157,10 @@ def crear_app() -> Flask:
     app.register_blueprint(bp_catalogos, url_prefix="/api")
     app.register_blueprint(bp_estado, url_prefix="/api")
 
+    # Acceso al Bot Hot Wheels (/bot lo monta app.py solo en esta PC; ver bot.py).
+    from .bot import bp as bp_bot
+    app.register_blueprint(bp_bot, url_prefix="/api/bot")
+
     # Landing page para clientes (/tienda): pública a propósito, fuera de PROTEGIDOS.
     from .rutas.tienda import bp as bp_tienda
     app.register_blueprint(bp_tienda)
