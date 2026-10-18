@@ -70,6 +70,16 @@ class Control:
         except (IndexError, ValueError):
             self._api("answerCallbackQuery", callback_query_id=cq["id"])
             return None
+        if accion == "rc":
+            # Pieza que encontro el monitor de relevo (Railway): se trae al
+            # panel local y sigue el camino de siempre (confirmar y comprar).
+            importar = self.acciones.get("importar_relevo")
+            hid = importar(hid) if importar else None
+            if not hid:
+                self._api("answerCallbackQuery", callback_query_id=cq["id"],
+                          text="No pude traer esa pieza de Railway.", show_alert=True)
+                return "relevo_fallo"
+            accion = "c"
         pieza = self.acciones["obtener"](hid)
         if pieza is None:
             self._api("answerCallbackQuery", callback_query_id=cq["id"],

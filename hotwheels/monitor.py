@@ -4,6 +4,7 @@ Multi-coleccion, ciclo rapido + francotirador, carrito precargado,
 lista de deseados, historial, ganancia neta y vigilante.
 """
 
+import html
 import json
 import os
 import random
@@ -11,6 +12,7 @@ import re
 import sys
 import time
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 import requests
 
@@ -47,10 +49,30 @@ except Exception as _e:
     print(f"  [aviso] hallazgos.py no disponible ({_e}). Las piezas solo se avisaran por Telegram.")
 
 _DIR_SCRIPT = os.path.dirname(os.path.abspath(__file__))
+# Donde viven los datos (estado, historial, listas, config.env). En la PC es la
+# carpeta del script, como siempre. En Railway HOTWHEELS_DATOS apunta al
+# volumen (/app/datos/hotwheels) para que sobrevivan a cada redespliegue.
+_DIR_DATOS = os.environ.get("HOTWHEELS_DATOS") or _DIR_SCRIPT
+os.makedirs(_DIR_DATOS, exist_ok=True)
+
+# Claves que tambien pueden llegar como variables de entorno (Railway no tiene
+# config.env). Si el archivo trae la clave, gana el archivo: en la PC nada cambia.
+_CLAVES_ENTORNO = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_CANAL_ID",
+                   "MERCADOLIBRE_ACCESS_TOKEN", "URL_PANEL")
+
+
+def _cargar_config():
+    datos = EX.cargar_config(os.path.join(_DIR_DATOS, "config.env")) if EX else {}
+    claves = _CLAVES_ENTORNO + tuple(getattr(EX, "AJUSTES_PERMITIDOS", {}) or ())
+    for clave in claves:
+        if not datos.get(clave) and os.environ.get(clave):
+            datos[clave] = os.environ[clave]
+    return datos
+
 
 # config.env vive junto a monitor.py y NO se comparte con nadie: ahi va el
 # token del bot. Si el archivo no existe, se usan los valores de abajo.
-CONFIG = EX.cargar_config(os.path.join(_DIR_SCRIPT, "config.env")) if EX else {}
+CONFIG = _cargar_config()
 
 
 # ============================================================
@@ -87,22 +109,21 @@ URL_PANEL = CONFIG.get("URL_PANEL", "http://127.0.0.1:3000/bot/")
 # Ruta ABSOLUTA anclada a la carpeta del script. Asi el monitor y el
 # dashboard siempre usan el MISMO estado.json sin importar desde donde
 # se ejecute (terminal, cron, systemd con otro WorkingDirectory, etc.).
-_DIR_SCRIPT = os.path.dirname(os.path.abspath(__file__))
-ARCHIVO_ESTADO = os.path.join(_DIR_SCRIPT, "estado.json")
-ARCHIVO_HISTORIAL = os.path.join(_DIR_SCRIPT, "historial.db")
-ARCHIVO_DESEADOS = os.path.join(_DIR_SCRIPT, "deseados.json")
-ARCHIVO_DESEADOS_LEGACY = os.path.join(_DIR_SCRIPT, "deseados.txt")
+ARCHIVO_ESTADO = os.path.join(_DIR_DATOS, "estado.json")
+ARCHIVO_HISTORIAL = os.path.join(_DIR_DATOS, "historial.db")
+ARCHIVO_DESEADOS = os.path.join(_DIR_DATOS, "deseados.json")
+ARCHIVO_DESEADOS_LEGACY = os.path.join(_DIR_DATOS, "deseados.txt")
 # Misma idea que deseados.json pero al reves: modelos que NUNCA quieres que
 # te avisen, sin importar el impacto (ej. una linea que no coleccionas).
 # Usa exactamente las mismas funciones de hw_extras.py -- es el mismo tipo
 # de archivo, solo que este apaga en vez de marcar.
-ARCHIVO_BLOQUEADOS = os.path.join(_DIR_SCRIPT, "no_deseados.json")
-ARCHIVO_LATIDO = os.path.join(_DIR_SCRIPT, "latido.txt")
+ARCHIVO_BLOQUEADOS = os.path.join(_DIR_DATOS, "no_deseados.json")
+ARCHIVO_LATIDO = os.path.join(_DIR_DATOS, "latido.txt")
 # Que se vigila, administrable desde el tablero (ver hw_extras seccion 10).
-ARCHIVO_COLECCIONES = os.path.join(_DIR_SCRIPT, "colecciones.json")
-ARCHIVO_VIGILAR = os.path.join(_DIR_SCRIPT, "vigilar.json")
-ARCHIVO_BUSQUEDAS_ML = os.path.join(_DIR_SCRIPT, "busquedas_ml.json")
-ARCHIVO_CONFIG = os.path.join(_DIR_SCRIPT, "config.env")
+ARCHIVO_COLECCIONES = os.path.join(_DIR_DATOS, "colecciones.json")
+ARCHIVO_VIGILAR = os.path.join(_DIR_DATOS, "vigilar.json")
+ARCHIVO_BUSQUEDAS_ML = os.path.join(_DIR_DATOS, "busquedas_ml.json")
+ARCHIVO_CONFIG = os.path.join(_DIR_DATOS, "config.env")
 TIPO_CAMBIO = 20.0
 CACHE_EBAY = {}
 REVISIONES_CALENTAMIENTO = 3
@@ -119,6 +140,14 @@ HORA_RESUMEN_DIARIO = 22  # 10pm hora Mexico
 SEGUNDOS_CICLO_RAPIDO = int(EX.config_num(CONFIG, "SEGUNDOS_CICLO_RAPIDO", 15)) if EX else 15
 COLECCIONES_RAPIDAS = ["new-arrivals"]
 MAX_FRANCOTIRADOR = int(EX.config_num(CONFIG, "MAX_FRANCOTIRADOR", 6)) if EX else 6
+# Modo drop: en la ventana del dia y hora aprendidos (o martes 11am) el ciclo
+# rapido acelera. El barrido completo sigue igual: las RLC y Elite salen en su
+# propia coleccion, no en new-arrivals, y no se deben ver tarde.
+SEGUNDOS_CICLO_DROP = int(EX.config_num(CONFIG, "SEGUNDOS_CICLO_DROP", 5)) if EX else 5
+MINUTOS_ANTES_DROP = int(EX.config_num(CONFIG, "MINUTOS_ANTES_DROP", 10)) if EX else 10
+MINUTOS_DESPUES_DROP = int(EX.config_num(CONFIG, "MINUTOS_DESPUES_DROP", 45)) if EX else 45
+SEGUNDOS_PAUSA_429 = 60          # si Mattel dice "mas despacio", se le hace caso
+_PAUSA_HASTA = 0.0               # time.monotonic() hasta donde no se consulta Mattel
 HORAS_VIGILANCIA = 72            # cuanto tiempo se sigue vigilando un producto
 SEGUNDOS_REFRESCO_DATOS = 7200   # tipo de cambio + cache de eBay cada 2 h
 SEGUNDOS_REFRESCO_LISTAS = 60    # deseados/bloqueados/colecciones/vigilar: solo disco
@@ -144,13 +173,31 @@ COMISION_REVENTA_PCT = EX.config_num(CONFIG, "COMISION_REVENTA_PCT", 13.0) if EX
 # ------------------------------------------------------------
 MINUTOS_ALERTA_CIEGO = int(EX.config_num(CONFIG, "MINUTOS_ALERTA_CIEGO", 15)) if EX else 15
 
+# ------------------------------------------------------------
+# RELEVO PC <-> RAILWAY
+# En Railway el monitor corre siempre, pero callado mientras la PC le mande
+# su latido (cada barrido bueno). Si la PC deja de mandarlo MINUTOS_RELEVO
+# minutos, Railway toma el relevo y avisa el; cuando la PC vuelve, se calla.
+# Asi no hay avisos dobles y el bot de compra (que solo vive en la PC) sigue
+# siendo el unico con botones Comprar/Ignorar.
+# ------------------------------------------------------------
+MODO_RELEVO = False      # True solo en Railway (activar_relevo, desde collecthub/bot.py)
+MINUTOS_RELEVO = 5
+_PC_LATIDO = None        # time.monotonic() del ultimo latido con el monitor de la PC sano
+_PC_APP = None           # time.monotonic() del ultimo latido (aunque su monitor este ciego)
+ESTADO_RELEVO = {}       # En la PC: como respondio Railway al ultimo latido (para el panel)
+_RELEVO_ACTIVO = False   # True mientras Railway avisa porque la PC callo
+AL_BARRIDO_OK = None     # En la PC: funcion(monitor_ok) que manda el latido a Railway
+
 # Objetos que se llenan al arrancar (ver main)
 HISTORIAL = None       # conexion a la base del historial
 DESEADOS = []          # tu lista de autos deseados
 BLOQUEADOS = []        # lo que nunca quieres que te avise
 PATRON_DROPS = None    # dia y hora de drop aprendidos del historial
 _TS_ULTIMO_BARRIDO_OK = 0.0
-_TS_ULTIMA_ALERTA_CIEGO = 0.0
+_REVISIONES_HECHAS = 0
+_ULTIMO_BARRIDO_FUE_OK = False  # el ultimo barrido completo si vio la tienda
+_TS_ULTIMA_ALERTA_CIEGO = None   # None = nunca se ha avisado (ver registrar_salud_coleccion)
 
 # Varios navegadores reales en vez de uno fijo: reduce la huella repetitiva
 # de las peticiones (antecedente de bloqueo de Cloudflare/Forter documentado
@@ -169,6 +216,13 @@ HEADERS = {
     "Accept-Language": "es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7",
 }
 
+# Una sola sesion por proceso: reutiliza la conexion TCP/TLS (keep-alive) en
+# vez de abrir una nueva en cada consulta, que cuesta 100-300 ms por saludo.
+# En el ciclo rapido son 7+ consultas cada 15 s; en un drop eso es la ventaja.
+SESION = requests.Session()
+SESION.headers.update(HEADERS)
+SESION_TG = requests.Session()   # Telegram aparte: otro servidor, sin la huella del navegador
+
 TAGS_POCAS_UNIDADES = [
     "only a few left", "low stock", "almost gone", "limited quantity",
     "few left", "selling fast", "act fast", "last chance",
@@ -181,6 +235,199 @@ TAGS_REBAJA = [
 # Dedup temporal (15 min)
 NOTIFICACIONES_ENVIADAS = {}
 HORAS_BLOQUEO_DUPLICADOS = 0.25
+
+
+def rearmar_aviso(*keys):
+    """Borra el candado de duplicados de estos avisos. Se usa cuando la pieza
+    cambio de verdad (se agoto o volvio): en un drop los carritos que vencen
+    regresan stock a los pocos minutos y ese segundo restock SI importa."""
+    for k in keys:
+        NOTIFICACIONES_ENVIADAS.pop(k, None)
+
+
+def activar_relevo():
+    """Modo Railway: sin panel ni compras aqui, asi que las piezas no se
+    registran (HALLAZGOS). Los botones de compra solo salen si la app de la PC
+    esta viva para atenderlos (ver guardar_pieza_relevo).
+    Arranca suponiendo que la PC vigila: le da MINUTOS_RELEVO para mandar su
+    primer latido antes de hablar (si no, cada redespliegue duplicaria avisos)."""
+    global MODO_RELEVO, _PC_LATIDO, _PC_APP, HALLAZGOS
+    MODO_RELEVO = True
+    HALLAZGOS = None
+    _PC_LATIDO = _PC_APP = time.monotonic()
+
+
+def registrar_latido_pc(monitor_ok=True, listas=None):
+    """Latido de la PC, tras cada barrido completo.
+
+    monitor_ok=False: la app de la PC vive pero su monitor no ve la tienda.
+    Railway toma el relevo, y como la PC SI puede comprar, sus avisos llevan
+    el boton "Comprar con el bot (PC)". `listas` trae deseados, bloqueados,
+    colecciones y vigilados de la PC cuando cambiaron (ver aplicar_listas_pc).
+    Devuelve como esta Railway, para el panel de la PC."""
+    global _PC_LATIDO, _PC_APP
+    _PC_APP = time.monotonic()
+    if monitor_ok:
+        _PC_LATIDO = _PC_APP
+    respuesta = {"relevo": _RELEVO_ACTIVO,
+                 "minutos_sin_ver": round((time.monotonic() - _TS_ULTIMO_BARRIDO_OK) / 60.0, 1),
+                 "revisiones": _REVISIONES_HECHAS,
+                 "listas_hash": _LISTAS_HASH}
+    if listas is not None:
+        respuesta["listas_hash"] = aplicar_listas_pc(listas)
+    return respuesta
+
+
+def pc_vigilando():
+    """True si este monitor es el de Railway y la PC esta vigilando: callarse."""
+    if not MODO_RELEVO or _PC_LATIDO is None:
+        return False
+    return (time.monotonic() - _PC_LATIDO) < MINUTOS_RELEVO * 60
+
+
+def pc_app_viva():
+    """True si la app de la PC sigue mandando latido (aunque su monitor este
+    ciego): hay quien atienda el boton de compra."""
+    return bool(MODO_RELEVO and _PC_APP is not None
+                and (time.monotonic() - _PC_APP) < MINUTOS_RELEVO * 60)
+
+
+# --- Listas de la PC -> Railway ---
+# Mismas listas que se editan en el panel de la PC. Viajan con el latido solo
+# cuando cambian (la PC compara el hash que Railway le devuelve).
+ARCHIVOS_LISTAS = {"deseados": "ARCHIVO_DESEADOS", "bloqueados": "ARCHIVO_BLOQUEADOS",
+                   "colecciones": "ARCHIVO_COLECCIONES", "vigilar": "ARCHIVO_VIGILAR"}
+MAX_ENTRADAS_LISTA = 2000
+MAX_BYTES_LISTA = 256 * 1024
+_LISTAS_HASH = None
+
+
+def _hash_listas(listas):
+    import hashlib
+    texto = json.dumps(listas, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(texto.encode("utf-8")).hexdigest()[:16]
+
+
+def listas_para_relevo():
+    """PC: el contenido de las listas, tal como estan en disco. La que no
+    existe no viaja: mandarla vacia borraria la de Railway sin razon."""
+    listas = {}
+    for nombre, var in ARCHIVOS_LISTAS.items():
+        if not os.path.exists(globals()[var]):
+            continue
+        try:
+            with open(globals()[var], encoding="utf-8") as f:
+                datos = json.load(f)
+            listas[nombre] = datos if isinstance(datos, list) else []
+        except Exception:
+            listas[nombre] = []
+    return listas, _hash_listas(listas)
+
+
+def _lista_valida(datos):
+    """Lista de objetos planos (texto, numero, booleano o nulo), con tope de
+    tamaño. Lo que no cumpla se rechaza entero: nunca se escribe a medias."""
+    if not isinstance(datos, list) or len(datos) > MAX_ENTRADAS_LISTA:
+        return False
+    for e in datos:
+        if not isinstance(e, dict) or len(e) > 20:
+            return False
+        for k, v in e.items():
+            if not isinstance(k, str) or not (v is None or isinstance(v, (str, int, float, bool))):
+                return False
+            if isinstance(v, str) and len(v) > 500:
+                return False
+    return len(json.dumps(datos, ensure_ascii=False).encode("utf-8")) <= MAX_BYTES_LISTA
+
+
+def aplicar_listas_pc(listas):
+    """Railway: guarda las listas que mando la PC (escritura atomica). El
+    monitor las toma solo en su siguiente recarga (cada 60 s). Devuelve el
+    hash de lo que quedo guardado; si algo no es valido no toca nada."""
+    global _LISTAS_HASH
+    if not isinstance(listas, dict) or set(listas) - set(ARCHIVOS_LISTAS):
+        raise ValueError("listas desconocidas")
+    if not all(_lista_valida(v) for v in listas.values()):
+        raise ValueError("lista con formato invalido")
+    for nombre, datos in listas.items():
+        ruta = globals()[ARCHIVOS_LISTAS[nombre]]
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(ruta), prefix=".lista_", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(datos, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, ruta)
+        except Exception:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
+    _LISTAS_HASH = _hash_listas(listas)
+    print(f"  [relevo] listas de la PC guardadas ({', '.join(sorted(listas))})")
+    return _LISTAS_HASH
+
+
+# --- Piezas que Railway encontro y la PC puede comprar ---
+PIEZAS_RELEVO = {}          # id -> datos de la pieza (en memoria, se pierden al reiniciar)
+MAX_PIEZAS_RELEVO = 200
+_ID_PIEZA_RELEVO = 0
+
+
+def guardar_pieza_relevo(url, titulo=None, url_carrito=None, imagen=None,
+                         precio_mxn=None, tipo=None):
+    """Railway: anota una pieza comprable y devuelve su id para el boton
+    "Comprar con el bot (PC)" (callback rc:<id>). Al tocarlo, la PC la pide
+    con GET /api/bot/pieza-relevo/<id> y sigue su flujo normal de compra."""
+    global _ID_PIEZA_RELEVO
+    for pid, d in PIEZAS_RELEVO.items():
+        if d["url"] == url:
+            d.update(url_carrito=url_carrito, precio_mxn=precio_mxn, tipo=tipo)
+            return pid
+    _ID_PIEZA_RELEVO += 1
+    PIEZAS_RELEVO[_ID_PIEZA_RELEVO] = {
+        "url": url, "titulo": titulo, "url_carrito": url_carrito, "imagen": imagen,
+        "precio_mxn": precio_mxn, "tipo": tipo,
+        "cuando": datetime.now(timezone.utc).isoformat()}
+    while len(PIEZAS_RELEVO) > MAX_PIEZAS_RELEVO:
+        PIEZAS_RELEVO.pop(min(PIEZAS_RELEVO))
+    return _ID_PIEZA_RELEVO
+
+
+def fila_decision(hallazgo_id=None, relevo_id=None):
+    """Botones de decidir (solo chat personal): los del panel local o, en
+    Railway, el que le pide a la PC que compre."""
+    if hallazgo_id:
+        return [{"text": "🛒 Comprar con el bot", "callback_data": f"c:{hallazgo_id}"},
+                {"text": "🙈 Ignorar", "callback_data": f"i:{hallazgo_id}"}]
+    if relevo_id:
+        return [{"text": "🛒 Comprar con el bot (PC)", "callback_data": f"rc:{relevo_id}"}]
+    return None
+
+
+def revisar_relevo():
+    """Avisa (una vez) cuando Railway toma el relevo y cuando lo suelta."""
+    global _RELEVO_ACTIVO
+    if not MODO_RELEVO:
+        return
+    vigila = pc_vigilando()
+    if not vigila and not _RELEVO_ACTIVO:
+        _RELEVO_ACTIVO = True
+        minutos = int((time.monotonic() - _PC_LATIDO) / 60) if _PC_LATIDO else 0
+        print(f"  [relevo] la PC lleva {minutos} min sin vigilar: Railway avisa")
+        if pc_app_viva():
+            como = ("La app de la PC sigue prendida pero su monitor no ve la tienda.\n"
+                    "Te aviso desde Railway, y el botón <i>Comprar con el bot (PC)</i> "
+                    "hace que la PC compre como siempre.")
+        else:
+            como = ("La PC está apagada, sin internet o con la app cerrada.\n"
+                    "Te aviso desde Railway con la liga del carrito. Sin la PC no hay "
+                    "botón <i>Comprar con el bot</i>: el bot de compra vive ahí.")
+        enviar_telegram_texto(
+            "☁️ <b>RAILWAY TOMA EL RELEVO</b>\n\n"
+            f"La PC lleva {minutos} min sin vigilar. {como}", forzar=True)
+    elif vigila and _RELEVO_ACTIVO:
+        _RELEVO_ACTIVO = False
+        print("  [relevo] la PC volvio: Railway se calla")
+        enviar_telegram_texto("🖥️ <b>La PC volvió a vigilar.</b> Railway se queda en silencio.",
+                              forzar=True)
 
 
 def ya_notificado(key):
@@ -317,10 +564,27 @@ def agregar_alerta(estado, producto, tipo, precio_anterior=None, veces_agotado=0
 # HTTP
 # ============================================================
 
-def hacer_request(url, params=None, intentos=3):
+def hacer_request(url, params=None, intentos=3, fresco=False):
+    """GET a Mattel con reintentos. `fresco=True` (ciclo rapido) agrega un
+    parametro que cambia en cada consulta: la CDN de Shopify guarda
+    products.json unos segundos y sin esto un restock se puede ver tarde."""
+    global _PAUSA_HASTA
+    if time.monotonic() < _PAUSA_HASTA:
+        return None     # en pausa por un 429: ni el resto del barrido consulta
+    if fresco:
+        params = dict(params or {}, _=int(time.time() * 1000))
     for intento in range(1, intentos + 1):
         try:
-            r = requests.get(url, headers=HEADERS, params=params, timeout=25)
+            r = SESION.get(url, params=params, timeout=10 if fresco else 25)
+            if r.status_code == 429:
+                # Reintentar en caliente solo empeora el castigo: se pausa todo.
+                try:
+                    espera = min(int(r.headers.get("Retry-After", "")), 300)
+                except ValueError:
+                    espera = SEGUNDOS_PAUSA_429
+                _PAUSA_HASTA = time.monotonic() + max(espera, 5)
+                print(f"    429 - Mattel pide bajar el ritmo; pausa de {max(espera, 5)}s")
+                return None
             if r.status_code == 503:
                 if intento >= intentos:
                     return None
@@ -379,8 +643,10 @@ def registrar_salud_coleccion(estado, coleccion, respondio, cuantos):
     d["fallos"] = d.get("fallos", 0) + 1
     if d["fallos"] < FALLOS_ALERTA_COLECCION:
         return
-    ultima = _TS_ALERTA_COLECCION.get(coleccion, 0.0)
-    if (time.monotonic() - ultima) < 3600:
+    # Ojo: time.monotonic() cuenta desde que prendio la PC. Con 0.0 como
+    # "nunca", la primera hora despues de prender la PC no avisaba nada.
+    ultima = _TS_ALERTA_COLECCION.get(coleccion)
+    if ultima is not None and (time.monotonic() - ultima) < 3600:
         return          # maximo un aviso por hora y por coleccion
     _TS_ALERTA_COLECCION[coleccion] = time.monotonic()
     print(f"  [ALERTA] la coleccion {coleccion} no responde ({d['fallos']} veces)")
@@ -392,20 +658,32 @@ def registrar_salud_coleccion(estado, coleccion, respondio, cuantos):
         "<b>Administrar</b> del tablero.")
 
 
+COLECCIONES_EN_PARALELO = 3   # pocas a la vez: rapido sin parecer ataque
+
+
 def obtener_todos_los_productos(estado=None):
-    """Consulta todas las colecciones y combina sin duplicados."""
+    """Consulta todas las colecciones y combina sin duplicados.
+
+    Van de COLECCIONES_EN_PARALELO en paralelo: antes iban una por una con
+    pausas y el barrido tardaba lo suficiente para frenar al ciclo rapido.
+    Los resultados se juntan en el orden de COLECCIONES, como siempre.
+    Devuelve (productos, colecciones_que_fallaron)."""
+    colecciones = list(COLECCIONES)
+    print(f"    Consultando {len(colecciones)} colecciones...")
+    with ThreadPoolExecutor(max_workers=COLECCIONES_EN_PARALELO) as pool:
+        resultados = list(pool.map(obtener_productos_coleccion, colecciones))
     productos_por_id = {}
-    for coleccion in COLECCIONES:
-        print(f"    Consultando: {coleccion}...")
-        items, respondio = obtener_productos_coleccion(coleccion)
+    fallaron = []
+    for coleccion, (items, respondio) in zip(colecciones, resultados):
         for p in items:
             pid = str(p["id"])
             if pid not in productos_por_id:
                 productos_por_id[pid] = p
+        if not respondio:
+            fallaron.append(coleccion)
         if estado is not None:
             registrar_salud_coleccion(estado, coleccion, respondio, len(items))
-        time.sleep(1)
-    return list(productos_por_id.values())
+    return list(productos_por_id.values()), fallaron
 
 
 # ============================================================
@@ -547,8 +825,7 @@ def texto_ganancia_neta(producto):
 #   - agotado que ya se resurtio antes: candidato claro a restock.
 # Se guarda dentro de estado.json para que sobreviva a un reinicio.
 
-_IDX_FRANCOTIRADOR = 0
-
+_IDX_FRANCOTIRADOR = {}   # grupo -> por donde va el turno
 
 def marcar_vigilancia(estado, producto, motivo):
     handle = producto.get("handle", "")
@@ -636,9 +913,9 @@ def revisar_mercadolibre(estado):
                 continue
             envio = " · envío gratis" if it["envio_gratis"] else ""
             cuerpo = (f"<b>{titulo_aviso}</b>\n\n"
-                      f"{it['titulo']}\n"
+                      f"{html.escape(it['titulo'])}\n"
                       f"<b>MXN ${precio:,.0f}</b>{envio}\n"
-                      f"Búsqueda: <i>{termino}</i>")
+                      f"Búsqueda: <i>{html.escape(termino)}</i>")
             if previo is not None:
                 cuerpo += f"\nAntes: MXN ${float(previo):,.0f}"
             enviar_telegram(cuerpo, it["imagen"], it["link"], None)
@@ -687,9 +964,10 @@ def recargar_ajustes():
     global CONFIG, SEGUNDOS_CICLO_RAPIDO, MAX_FRANCOTIRADOR, MINUTOS_ALERTA_CIEGO
     global ENVIO_MXN_ESTIMADO, COMISION_REVENTA_PCT
     global MINUTOS_MERCADOLIBRE, FALLOS_ALERTA_COLECCION
+    global SEGUNDOS_CICLO_DROP, MINUTOS_ANTES_DROP, MINUTOS_DESPUES_DROP
     if not EX:
         return
-    CONFIG = EX.cargar_config(ARCHIVO_CONFIG)
+    CONFIG = _cargar_config()
     SEGUNDOS_CICLO_RAPIDO = int(EX.config_num(CONFIG, "SEGUNDOS_CICLO_RAPIDO", SEGUNDOS_CICLO_RAPIDO))
     MAX_FRANCOTIRADOR = int(EX.config_num(CONFIG, "MAX_FRANCOTIRADOR", MAX_FRANCOTIRADOR))
     MINUTOS_ALERTA_CIEGO = int(EX.config_num(CONFIG, "MINUTOS_ALERTA_CIEGO", MINUTOS_ALERTA_CIEGO))
@@ -697,6 +975,9 @@ def recargar_ajustes():
     COMISION_REVENTA_PCT = EX.config_num(CONFIG, "COMISION_REVENTA_PCT", COMISION_REVENTA_PCT)
     MINUTOS_MERCADOLIBRE = int(EX.config_num(CONFIG, "MINUTOS_MERCADOLIBRE", MINUTOS_MERCADOLIBRE))
     FALLOS_ALERTA_COLECCION = int(EX.config_num(CONFIG, "FALLOS_ALERTA_COLECCION", FALLOS_ALERTA_COLECCION))
+    SEGUNDOS_CICLO_DROP = int(EX.config_num(CONFIG, "SEGUNDOS_CICLO_DROP", SEGUNDOS_CICLO_DROP))
+    MINUTOS_ANTES_DROP = int(EX.config_num(CONFIG, "MINUTOS_ANTES_DROP", MINUTOS_ANTES_DROP))
+    MINUTOS_DESPUES_DROP = int(EX.config_num(CONFIG, "MINUTOS_DESPUES_DROP", MINUTOS_DESPUES_DROP))
 
 
 def recargar_listas(estado):
@@ -746,29 +1027,51 @@ def sincronizar_vigilados_manuales(estado):
     return agregados
 
 
+def _turno(grupo, nombre, cupo):
+    """Hasta `cupo` elementos de `grupo`, turnandose entre ciclos."""
+    if cupo <= 0 or not grupo:
+        return []
+    if len(grupo) <= cupo:
+        return list(grupo)
+    i = _IDX_FRANCOTIRADOR.get(nombre, 0) % len(grupo)
+    _IDX_FRANCOTIRADOR[nombre] = (i + cupo) % len(grupo)
+    return [grupo[(i + k) % len(grupo)] for k in range(cupo)]
+
+
 def _siguientes_francotirador(estado):
-    """A cuales vigilar en este ciclo. Los "coming soon" van primero; el
-    resto se turna, para no disparar decenas de consultas por ciclo."""
-    global _IDX_FRANCOTIRADOR
+    """A cuales vigilar en este ciclo, por prioridad:
+      1. lo que Gonza quiere: vigilados a mano y autos de su lista de deseados
+      2. los "coming soon" (pueden prender en cualquier momento)
+      3. el resto (agotados candidatos a restock)
+    Cada grupo se turna por su lado, asi un deseado nunca espera detras de
+    30 agotados cualquiera."""
     v = estado.get("vigilancia", {})
     if not v:
         return []
-    prioritarios = [h for h, d in v.items() if d.get("motivo") == "coming_soon"]
-    otros = sorted(h for h, d in v.items() if d.get("motivo") != "coming_soon")
-    seleccion = prioritarios[:MAX_FRANCOTIRADOR]
-    libres = MAX_FRANCOTIRADOR - len(seleccion)
-    if libres > 0 and otros:
-        n = min(libres, len(otros))
-        for i in range(n):
-            seleccion.append(otros[(_IDX_FRANCOTIRADOR + i) % len(otros)])
-        _IDX_FRANCOTIRADOR = (_IDX_FRANCOTIRADOR + n) % len(otros)
+    titulos = {d.get("handle"): d.get("titulo") or ""
+               for d in estado.get("productos", {}).values() if d.get("handle")}
+
+    def es_de_gonza(h, d):
+        if (d or {}).get("motivo") == "manual":
+            return True
+        titulo = titulos.get(h) or h.replace("-", " ")
+        return bool(EX and DESEADOS and EX.es_deseado(titulo, DESEADOS))
+
+    top = sorted(h for h, d in v.items() if es_de_gonza(h, d))
+    ya = set(top)
+    resto = [h for h in v if h not in ya]
+    coming = sorted(h for h in resto if (v[h] or {}).get("motivo") == "coming_soon")
+    otros = sorted(h for h in resto if (v[h] or {}).get("motivo") != "coming_soon")
+    seleccion = []
+    for nombre, grupo in (("top", top), ("coming", coming), ("otros", otros)):
+        seleccion += _turno(grupo, nombre, MAX_FRANCOTIRADOR - len(seleccion))
     return seleccion
 
 
 def obtener_producto_individual(handle):
     """Consulta UN solo producto. Es una peticion chica, por eso se puede
     repetir cada pocos segundos sin castigar al servidor."""
-    data = hacer_request(f"{BASE_URL}/products/{handle}.json", intentos=1)
+    data = hacer_request(f"{BASE_URL}/products/{handle}.json", intentos=1, fresco=True)
     if isinstance(data, dict):
         return data.get("product")
     return None
@@ -779,7 +1082,7 @@ def obtener_productos_rapidos(estado):
     productos_por_id = {}
     for coleccion in COLECCIONES_RAPIDAS:
         data = hacer_request(f"{BASE_URL}/collections/{coleccion}/products.json",
-                             params={"limit": 250}, intentos=1)
+                             params={"limit": 250}, intentos=1, fresco=True)
         if not data:
             continue
         for p in data.get("products", []):
@@ -795,6 +1098,21 @@ def obtener_productos_rapidos(estado):
 # EBAY + EVALUACION DE IMPACTO
 # ============================================================
 
+_RE_PRECIO_USD = re.compile(r'\$(\d{1,3}(?:,\d{3})+|\d{1,5})\.(\d{2})')
+
+
+def extraer_precios_ebay(texto):
+    """Precios en dolares de la pagina de vendidos de eBay. Acepta "$1,250.00"
+    (antes solo leia hasta $9999 sin coma, y con el tope de 800 las piezas
+    caras salian con reventa baja y se silenciaban como "Bajo interes")."""
+    precios = []
+    for entero, centavos in _RE_PRECIO_USD.findall(texto):
+        valor = float(entero.replace(",", "") + "." + centavos)
+        if 3.0 <= valor <= 5000.0:
+            precios.append(valor)
+    return precios
+
+
 def buscar_ebay(termino, tag_cache=None):
     cache_key = (tag_cache or termino).lower().strip()
     if cache_key in CACHE_EBAY:
@@ -806,7 +1124,7 @@ def buscar_ebay(termino, tag_cache=None):
             headers={"User-Agent": HEADERS["User-Agent"], "Accept-Language": "en-US,en;q=0.9"},
             timeout=15)
         r.raise_for_status()
-        precios = [float(p) for p in re.findall(r'\$(\d{1,4}\.\d{2})', r.text) if 3.0 <= float(p) <= 800.0]
+        precios = extraer_precios_ebay(r.text)
         if len(precios) >= 3:
             ordenados = sorted(precios)
             recortados = ordenados[1:-1] if len(ordenados) > 4 else ordenados
@@ -875,12 +1193,42 @@ LINEAS_PRODUCTO = {
 }
 
 
+def _reventa_en_cache(titulo):
+    """Precio de reventa SOLO si ya esta en memoria (sin red, al instante).
+    Mismo calculo que precio_reventa_estimado, sin consultar eBay ni ML."""
+    tag = f"exacto:{titulo}".lower().strip()
+    candidatos, total = [], 0
+    precio_ebay, ventas_ebay = CACHE_EBAY.get(tag, (None, 0))
+    if precio_ebay and ventas_ebay >= 3:
+        candidatos.append(precio_ebay)
+        total += ventas_ebay
+    cache_ml = getattr(EX, "_CACHE_MERCADOLIBRE", {}) if EX else {}
+    precio_ml_mxn, resultados_ml = cache_ml.get(tag, (None, 0))
+    if precio_ml_mxn and resultados_ml >= 3 and TIPO_CAMBIO:
+        candidatos.append(precio_ml_mxn / TIPO_CAMBIO)
+        total += resultados_ml
+    if not candidatos:
+        return None, 0
+    return round(sum(candidatos) / len(candidatos), 2), total
+
+
+def impacto_rapido(producto, veces_agotado=0):
+    """Impacto sin tocar la red: decide si un aviso sale como express."""
+    return _calificar(producto, veces_agotado,
+                      _reventa_en_cache(producto.get("title", "")))
+
+
 def evaluar_impacto(producto, veces_agotado=0):
+    return _calificar(producto, veces_agotado,
+                      precio_reventa_estimado(producto.get("title", "")))
+
+
+def _calificar(producto, veces_agotado, reventa):
     titulo = producto.get("title", "")
     precio_retail = precio_minimo(producto)
     t = titulo.lower()
 
-    precio_reventa, ventas = precio_reventa_estimado(titulo)
+    precio_reventa, ventas = reventa
 
     if precio_reventa and precio_retail and precio_retail > 0 and ventas >= 3:
         margen = ((precio_reventa - precio_retail) / precio_retail) * 100
@@ -926,7 +1274,7 @@ def _enviar_a_chat(api, chat_id, texto, foto_url=None, boton=None):
             payload = {"chat_id": chat_id, "photo": foto_url,
                        "caption": texto[:1024], "parse_mode": "HTML"}
             if boton: payload["reply_markup"] = boton
-            r = requests.post(f"{api}/sendPhoto", data=payload, timeout=15)
+            r = SESION_TG.post(f"{api}/sendPhoto", data=payload, timeout=15)
             enviado = r.status_code == 200
         except Exception:
             pass
@@ -937,7 +1285,7 @@ def _enviar_a_chat(api, chat_id, texto, foto_url=None, boton=None):
                 files = {"photo": ("producto.jpg", img.content, "image/jpeg")}
                 payload = {"chat_id": chat_id, "caption": texto[:1024], "parse_mode": "HTML"}
                 if boton: payload["reply_markup"] = boton
-                r = requests.post(f"{api}/sendPhoto", data=payload, files=files, timeout=20)
+                r = SESION_TG.post(f"{api}/sendPhoto", data=payload, files=files, timeout=20)
                 enviado = r.status_code == 200
         except Exception:
             pass
@@ -946,18 +1294,33 @@ def _enviar_a_chat(api, chat_id, texto, foto_url=None, boton=None):
             payload = {"chat_id": chat_id, "text": texto,
                        "parse_mode": "HTML", "disable_web_page_preview": False}
             if boton: payload["reply_markup"] = boton
-            r = requests.post(f"{api}/sendMessage", data=payload, timeout=15)
+            r = SESION_TG.post(f"{api}/sendMessage", data=payload, timeout=15)
+            enviado = r.status_code == 200
+        except Exception:
+            pass
+    if not enviado:
+        # Ultimo recurso: texto plano. Si Telegram rechazo el HTML (un "<" o
+        # "&" raro en un titulo), sin esto el aviso se perdia por completo.
+        try:
+            plano = html.unescape(re.sub(r"<[^>]+>", "", texto))
+            payload = {"chat_id": chat_id, "text": plano[:4096]}
+            if boton: payload["reply_markup"] = boton
+            r = SESION_TG.post(f"{api}/sendMessage", data=payload, timeout=15)
             enviado = r.status_code == 200
         except Exception:
             pass
     return enviado
 
 
-def enviar_telegram(texto, foto_url=None, link=None, link_compra=None, hallazgo_id=None):
+def enviar_telegram(texto, foto_url=None, link=None, link_compra=None, hallazgo_id=None,
+                    relevo_id=None):
     """Aviso con foto y botones. Con `hallazgo_id` (pieza registrada en el
     panel) suma los botones Comprar / Ignorar: al pulsarlos, telegram_control.py
     (dentro del panel) pide confirmacion y ejecuta. Esos botones van SOLO al
     chat personal, nunca al canal (en un canal los podria pulsar cualquiera)."""
+    if pc_vigilando():
+        print("    -> [relevo] la PC vigila: aviso omitido en Railway")
+        return
     api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
     filas = []
     # El carrito va arriba a proposito: es el boton que se aprieta con prisa.
@@ -967,9 +1330,9 @@ def enviar_telegram(texto, foto_url=None, link=None, link_compra=None, hallazgo_
         filas.append([{"text": "Ver producto", "url": link}])
     boton_canal = json.dumps({"inline_keyboard": filas}) if filas else None
     filas_chat = list(filas)
-    if hallazgo_id:
-        filas_chat.insert(0, [{"text": "🛒 Comprar con el bot", "callback_data": f"c:{hallazgo_id}"},
-                              {"text": "🙈 Ignorar", "callback_data": f"i:{hallazgo_id}"}])
+    decision = fila_decision(hallazgo_id, relevo_id)
+    if decision:
+        filas_chat.insert(0, decision)
     boton_chat = json.dumps({"inline_keyboard": filas_chat}) if filas_chat else None
     ok = _enviar_a_chat(api, TELEGRAM_CHAT_ID, texto, foto_url, boton_chat)
     print(f"    -> {'Enviado' if ok else 'ERROR'} a Telegram")
@@ -978,13 +1341,71 @@ def enviar_telegram(texto, foto_url=None, link=None, link_compra=None, hallazgo_
         print(f"    -> {'Enviado' if ok2 else 'ERROR'} al canal")
 
 
-def enviar_telegram_texto(texto):
-    """Envia solo texto sin foto ni boton (para resumen diario)."""
+def enviar_express(producto, tipo, link, link_compra, hallazgo_id=None, motivo="",
+                   relevo_id=None):
+    """Aviso corto, solo texto, solo al chat personal, ANTES de calcular nada.
+
+    sendMessage sin foto ni vista previa llega en ~1 s; la tarjeta completa
+    (foto, impacto, ganancia con eBay y Mercado Libre) puede tardar 30 s o
+    mas y sale despues. Para lo que de verdad quieres, esos segundos son la
+    diferencia entre alcanzarla o no."""
+    if pc_vigilando():
+        return False
+    etiqueta = {"nuevo": "NUEVO", "restock": "RESTOCK",
+                "pocas_unidades": "POCAS UNIDADES"}.get(tipo, tipo.upper())
+    texto = (f"⚡ <b>{etiqueta} — CORRE</b>{(' · ' + html.escape(motivo)) if motivo else ''}\n\n"
+             f"{html.escape(producto.get('title', ''))}\n"
+             f"🟢 {formato_precio(precio_minimo(producto))}")
+    filas = []
+    decision = fila_decision(hallazgo_id, relevo_id)
+    if decision:
+        filas.append(decision)
+    if link_compra:
+        filas.append([{"text": "COMPRAR AHORA - carrito listo", "url": link_compra}])
+    if link:
+        filas.append([{"text": "Ver producto", "url": link}])
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "HTML",
+               "disable_web_page_preview": True}
+    if filas:
+        payload["reply_markup"] = json.dumps({"inline_keyboard": filas})
+    try:
+        r = SESION_TG.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                           data=payload, timeout=8)
+        ok = r.status_code == 200
+    except Exception:
+        ok = False
+    print(f"    -> express {'enviado' if ok else 'ERROR'}")
+    return ok
+
+
+def es_urgente(estado, producto, tipo, deseado, bloqueado, veces_agotado=0):
+    """Que avisos salen como express: piezas comprables que sabemos que
+    quieres (deseados, vigilados a mano) o que ya son "Alto impacto" sin
+    consultar la red. Devuelve el motivo (texto) o "" si no es urgente."""
+    if tipo not in ("nuevo", "restock", "pocas_unidades") or not hay_disponibilidad(producto):
+        return ""
+    if deseado:
+        return "de tu lista"
+    if bloqueado:
+        return ""
+    vig = (estado.get("vigilancia", {}).get(producto.get("handle", "")) or {})
+    if vig.get("motivo") == "manual":
+        return "la vigilas"
+    if impacto_rapido(producto, veces_agotado) == "Alto impacto":
+        return "alto impacto"
+    return ""
+
+
+def enviar_telegram_texto(texto, forzar=False):
+    """Envia solo texto sin foto ni boton (para resumen diario). En Railway
+    se calla mientras la PC vigila, salvo `forzar` (avisos del relevo)."""
+    if not forzar and pc_vigilando():
+        return True
     api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
     try:
-        r = requests.post(f"{api}/sendMessage", data={
+        r = SESION_TG.post(f"{api}/sendMessage", data={
             "chat_id": TELEGRAM_CHAT_ID, "text": texto,
-            "parse_mode": "HTML", "disable_web_page_preview": True})
+            "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=15)
         return r.status_code == 200
     except Exception:
         return False
@@ -1019,6 +1440,26 @@ def predecir_fecha_drop():
     return f"{dia_sem} {proximo.day} {mes}, 11:00am CDMX"
 
 
+def en_ventana_drop(ahora=None):
+    """True de MINUTOS_ANTES_DROP antes a MINUTOS_DESPUES_DROP despues de la
+    hora del drop: la aprendida del historial o, sin datos, martes 11am CDMX."""
+    zona_mx = timezone(timedelta(hours=-6))
+    ahora = ahora or datetime.now(zona_mx)
+    if PATRON_DROPS:
+        dia, hora = PATRON_DROPS["dia_semana"], PATRON_DROPS["hora"]
+    else:
+        dia, hora = 1, 11
+    for delta in (-1, 0, 1):            # por si la ventana cruza la medianoche
+        d = (ahora + timedelta(days=delta)).date()
+        if d.weekday() != dia:
+            continue
+        inicio = datetime(d.year, d.month, d.day, hora, tzinfo=zona_mx)
+        if (inicio - timedelta(minutes=MINUTOS_ANTES_DROP) <= ahora
+                <= inicio + timedelta(minutes=MINUTOS_DESPUES_DROP)):
+            return True
+    return False
+
+
 def formato_precio(precio_usd):
     if precio_usd is None: return "Precio N/D"
     return f"MXN ${usd_a_mxn_ajustado(precio_usd):,.2f}"
@@ -1036,7 +1477,9 @@ def formato_velocidad(previo):
 
 
 def formato_mensaje(producto, tipo, precio_anterior=None, veces_agotado=0, previo=None):
-    titulo = producto.get("title", "Sin titulo")
+    # Escapado: Telegram rechaza el mensaje entero si un titulo trae "&" o "<"
+    # sueltos (ej. "Fast & Furious") con parse_mode=HTML.
+    titulo = html.escape(producto.get("title", "Sin titulo"))
     precio = precio_minimo(producto)
     precio_txt = formato_precio(precio)
     handle = producto.get("handle", "")
@@ -1103,9 +1546,10 @@ def formato_mensaje(producto, tipo, precio_anterior=None, veces_agotado=0, previ
         cuerpo = f"{titulo}\n\n🟢 {precio_txt}"
 
     # Si el auto esta en tu lista de deseados, el mensaje lo grita.
-    if EX and DESEADOS and EX.es_deseado(titulo, DESEADOS):
-        cual = EX.coincidencia_deseada(titulo, DESEADOS)
-        etiqueta = f"DE TU LISTA ({cual}) — " + etiqueta
+    titulo_crudo = producto.get("title", "")
+    if EX and DESEADOS and EX.es_deseado(titulo_crudo, DESEADOS):
+        cual = EX.coincidencia_deseada(titulo_crudo, DESEADOS)
+        etiqueta = f"DE TU LISTA ({html.escape(str(cual))}) — " + etiqueta
 
     return f"<b>{etiqueta}</b>\n\n{cuerpo}\n\n{url}"
 
@@ -1215,13 +1659,42 @@ def notificar(estado, producto, tipo, precio_anterior=None, previo=None):
 
     deseado = bool(EX and EX.es_deseado(titulo, DESEADOS))
     bloqueado = bool(EX and BLOQUEADOS and EX.es_deseado(titulo, BLOQUEADOS))
+    link = f"{BASE_URL}/products/{producto.get('handle','')}"
+    # El boton de comprar solo aparece si de verdad hay algo que comprar.
+    compra = link_carrito(producto) if disponible_ahora else None
+
+    # AVISO EXPRESS: lo urgente sale ya, antes de consultar eBay/ML (que
+    # puede tardar 30 s). La pieza se registra en el panel en ese momento
+    # para que los botones Comprar/Ignorar funcionen desde el primer aviso.
+    hallazgo_id = None
+    # Railway con la app de la PC viva: la pieza se anota para que el boton
+    # "Comprar con el bot (PC)" funcione (la PC la pide al tocarlo).
+    relevo_id = None
+    if (MODO_RELEVO and disponible_ahora and tipo in ("nuevo", "restock", "pocas_unidades")
+            and pc_app_viva() and not pc_vigilando()):
+        precio = precio_minimo(producto)
+        relevo_id = guardar_pieza_relevo(
+            link, titulo=titulo, url_carrito=compra, imagen=imagen_thumbnail(producto),
+            precio_mxn=usd_a_mxn_ajustado(precio) if precio else None, tipo=tipo)
+    extra_relevo = {"relevo_id": relevo_id} if relevo_id else {}
+    urgente = es_urgente(estado, producto, tipo, deseado, bloqueado, va)
+    if urgente:
+        if HALLAZGOS is not None:
+            precio = precio_minimo(producto)
+            hallazgo_id = HALLAZGOS.registrar(
+                link, titulo=titulo, url_carrito=compra,
+                imagen=imagen_thumbnail(producto),
+                precio_mxn=usd_a_mxn_ajustado(precio) if precio else None,
+                tipo=tipo, deseado=deseado)
+        enviar_express(producto, tipo, link, compra, hallazgo_id, motivo=urgente, **extra_relevo)
+
     impacto_actual = evaluar_impacto(producto, va) if tipo != "agotado" else None
 
     # Candado de ruido: "agotado" nunca se silencia (es corto e informativo)
     # y nada de tu lista de deseados se silencia jamas. Lo bloqueado a
     # proposito no se manda pase lo que pase; lo de "Bajo interes" (sobre
     # todo mercancia: playeras, gorras, tazas) tampoco, salvo que lo quieras.
-    if tipo != "agotado" and not deseado:
+    if tipo != "agotado" and not deseado and not urgente:
         if bloqueado:
             print(f"  [bloqueado] {tipo.upper()}: {titulo}")
             return
@@ -1229,21 +1702,21 @@ def notificar(estado, producto, tipo, precio_anterior=None, previo=None):
             print(f"  [silenciado, bajo interes] {tipo.upper()}: {titulo}")
             return
 
-    link = f"{BASE_URL}/products/{producto.get('handle','')}"
-    # El boton de comprar solo aparece si de verdad hay algo que comprar.
-    compra = link_carrito(producto) if disponible_ahora else None
     print(f"  {tipo.upper()}: {titulo}")
     mensaje = formato_mensaje(producto, tipo, precio_anterior, va, previo)
-    if compra and tipo != "agotado":
+    if compra and tipo != "agotado" and not MODO_RELEVO:
         mensaje += "\n\n<i>Decide en el panel o con los botones: " + URL_PANEL + "</i>"
 
     # Registro en el bot (proyecto fusionado): la pieza queda en la lista
     # "Piezas encontradas" del panel para que el usuario decida si comprarla.
     # El monitor NUNCA compra ni dispara compras: solo informa y registra.
-    hallazgo_id = None
     if HALLAZGOS is not None:
         if tipo == "agotado":
             HALLAZGOS.marcar_agotado(link)
+        elif hallazgo_id:
+            # Ya la registro el express: solo se completan los datos lentos.
+            HALLAZGOS.completar(hallazgo_id, impacto=impacto_actual,
+                                **_ganancia_y_urgencia(producto, previo))
         elif disponible_ahora and tipo in ("nuevo", "restock", "pocas_unidades"):
             precio = precio_minimo(producto)
             extra = _ganancia_y_urgencia(producto, previo)
@@ -1253,7 +1726,8 @@ def notificar(estado, producto, tipo, precio_anterior=None, previo=None):
                 precio_mxn=usd_a_mxn_ajustado(precio) if precio else None,
                 tipo=tipo, impacto=impacto_actual, deseado=deseado, **extra)
 
-    enviar_telegram(mensaje, imagen_principal(producto), link, compra, hallazgo_id=hallazgo_id)
+    enviar_telegram(mensaje, imagen_principal(producto), link, compra, hallazgo_id=hallazgo_id,
+                    **extra_relevo)
     agregar_alerta(estado, producto, tipo, precio_anterior, va)
 
     # Historial: cada aviso queda guardado para poder analizarlo despues.
@@ -1357,6 +1831,10 @@ def _procesar_producto(estado, p, productos_previos, nuevo_catalogo,
     # --- Agotado ---
     elif previo and previo.get("disponible") and not disponible and not coming_soon:
         if not ya_notificado(f"agotado:{notif_key}"):
+            # Se agoto de verdad: el siguiente restock se avisa aunque no
+            # hayan pasado los 15 minutos del candado.
+            rearmar_aviso(f"restock:{notif_key}", f"disponible:{notif_key}",
+                          f"pocas:{notif_key}")
             va_nuevo = previo.get("veces_agotado", 0) + 1
             nuevo_catalogo[pid]["veces_agotado"] = va_nuevo
 
@@ -1408,6 +1886,7 @@ def _procesar_producto(estado, p, productos_previos, nuevo_catalogo,
     # --- Restock ---
     elif not previo.get("disponible") and disponible:
         if not ya_notificado(f"restock:{notif_key}"):
+            rearmar_aviso(f"agotado:{notif_key}")   # y el siguiente agotado tambien
             notificar(estado, p, "restock", precio_anterior, previo)
             stats["restocks"] += 1
 
@@ -1443,8 +1922,10 @@ def revisar(estado, productos=None, parcial=False):
 
     Devuelve (estado, numero_de_cambios).
     """
-    global _TS_ULTIMO_BARRIDO_OK
+    global _TS_ULTIMO_BARRIDO_OK, _REVISIONES_HECHAS, _ULTIMO_BARRIDO_FUE_OK
     hora = datetime.now().strftime('%H:%M:%S')
+    if not parcial:
+        _ULTIMO_BARRIDO_FUE_OK = False
     revisiones = estado.get("revisiones", 0)
     en_calentamiento = revisiones < REVISIONES_CALENTAMIENTO
 
@@ -1455,8 +1936,9 @@ def revisar(estado, productos=None, parcial=False):
             print(f"\n[{hora}] Revisando {len(COLECCIONES)} colecciones...")
 
     productos_previos = estado.get("productos", {})
+    fallaron = []
     if productos is None:
-        productos = obtener_todos_los_productos(estado)
+        productos, fallaron = obtener_todos_los_productos(estado)
         print(f"  Total productos unicos: {len(productos)}")
 
     if not productos:
@@ -1464,10 +1946,20 @@ def revisar(estado, productos=None, parcial=False):
             print("  Sin productos. Reintentando despues.")
         return estado, 0
 
-    if (not parcial and productos_previos
-            and len(productos) < len(productos_previos) * 0.5):
-        print(f"  Respuesta parcial ({len(productos)} vs {len(productos_previos)} esperados). Saltando.")
+    # Barrido incompleto (alguna coleccion no contesto o trajo muy poco).
+    # Ya calentado, se procesa lo que SI llego: lo que falto conserva su
+    # estado anterior, asi que no se inventan agotados ni nuevos, y un
+    # restock en otra coleccion no se pierde. En el calentamiento se salta
+    # como antes: si no, lo que faltara se anunciaria luego como "nuevo".
+    incompleto = (not parcial and (bool(fallaron) or (
+        productos_previos and len(productos) < len(productos_previos) * 0.5)))
+    if incompleto and en_calentamiento:
+        print(f"  Respuesta parcial en calentamiento ({len(productos)} vs "
+              f"{len(productos_previos)} esperados). Saltando.")
         return estado, 0
+    if incompleto:
+        print(f"  Barrido incompleto ({', '.join(fallaron) or 'respuesta corta'}): "
+              "se procesa lo que si respondio")
 
     nuevo_catalogo = dict(productos_previos)
     pocas_unidades_lista = None if parcial else []
@@ -1508,9 +2000,14 @@ def revisar(estado, productos=None, parcial=False):
 
     # Solo un barrido COMPLETO cuenta como "el monitor esta viendo bien".
     _TS_ULTIMO_BARRIDO_OK = time.monotonic()
+    _REVISIONES_HECHAS += 1
+    _ULTIMO_BARRIDO_FUE_OK = True
 
-    estado["pocas_unidades"] = pocas_unidades_lista
     estado["revisiones"] = revisiones + 1
+    if incompleto:
+        # Totales y "pocas unidades" saldrian mal con datos parciales.
+        return estado, sum(stats.values())
+    estado["pocas_unidades"] = pocas_unidades_lista
 
     total = len(nuevo_catalogo)
     disponibles = sum(1 for p in nuevo_catalogo.values() if p.get("disponible"))
@@ -1535,7 +2032,7 @@ def revisar(estado, productos=None, parcial=False):
     return estado, cambios
 
 
-_ARCHIVO_INSTANCIA = os.path.join(_DIR_SCRIPT, "monitor.lock")
+_ARCHIVO_INSTANCIA = os.path.join(_DIR_DATOS, "monitor.lock")
 _INSTANCIA = None   # se guarda el archivo abierto: el candado vive mientras viva el proceso
 
 
@@ -1613,9 +2110,15 @@ def main():
     for c in COLECCIONES:
         print(f"    - {c}")
     print(f"  Ciclo rapido cada {SEGUNDOS_CICLO_RAPIDO} s: {', '.join(COLECCIONES_RAPIDAS)}")
-    print(f"  Francotirador: hasta {MAX_FRANCOTIRADOR} productos vigilados por ciclo")
+    print(f"  Francotirador: hasta {MAX_FRANCOTIRADOR} productos vigilados por ciclo (deseados primero)")
+    print(f"  Modo drop: ciclo rapido cada {SEGUNDOS_CICLO_DROP} s de {MINUTOS_ANTES_DROP} min antes "
+          f"a {MINUTOS_DESPUES_DROP} min despues del drop")
     print(f"  Resumen diario: {HORA_RESUMEN_DIARIO}:00 CDMX")
-    print(f"  Panel (donde decides que comprar): {URL_PANEL}")
+    if not MODO_RELEVO:
+        print(f"  Panel (donde decides que comprar): {URL_PANEL}")
+    if MODO_RELEVO:
+        print(f"  Modo relevo (Railway): callado mientras la PC mande latido; "
+              f"avisa si calla {MINUTOS_RELEVO} min")
     print("  Para detener: Ctrl + C")
     print("=" * 60)
 
@@ -1633,11 +2136,21 @@ def main():
     proximo_listas = ahora + SEGUNDOS_REFRESCO_LISTAS
     proximo_ml = ahora + 30          # la primera pasada de ML es de calentamiento
     _TS_ULTIMO_BARRIDO_OK = ahora
-    _TS_ULTIMA_ALERTA_CIEGO = 0.0
+    _TS_ULTIMA_ALERTA_CIEGO = None
+    modo_drop = False
 
     while True:
         try:
             ahora = time.monotonic()
+
+            # --- Modo drop: en la ventana del drop se acelera el ciclo rapido ---
+            drop_ahora = en_ventana_drop()
+            if drop_ahora != modo_drop:
+                modo_drop = drop_ahora
+                print(f"  [drop] {'ENTRA a modo drop: ciclo rapido cada ' + str(SEGUNDOS_CICLO_DROP) + ' s' if modo_drop else 'sale de modo drop'}")
+                if modo_drop:
+                    proximo_rapido = min(proximo_rapido, ahora)
+            seg_rapido = SEGUNDOS_CICLO_DROP if modo_drop else SEGUNDOS_CICLO_RAPIDO
 
             # --- Refresco periodico de tipo de cambio, eBay, patron y deseados ---
             if ahora >= proximo_refresco:
@@ -1671,11 +2184,15 @@ def main():
                 except Exception as e:
                     print(f"  Error revisando Mercado Libre: {e}")
 
+            # --- Relevo (solo Railway): tomar o soltar los avisos ---
+            revisar_relevo()
+
             # --- VIGILANTE: el monitor corre pero no ve nada ---
             sin_ver = (time.monotonic() - _TS_ULTIMO_BARRIDO_OK) / 60.0
             if sin_ver > MINUTOS_ALERTA_CIEGO:
                 # Se avisa una vez por hora, para no volverse otra molestia.
-                if (time.monotonic() - _TS_ULTIMA_ALERTA_CIEGO) > 3600:
+                if (_TS_ULTIMA_ALERTA_CIEGO is None
+                        or (time.monotonic() - _TS_ULTIMA_ALERTA_CIEGO) > 3600):
                     _TS_ULTIMA_ALERTA_CIEGO = time.monotonic()
                     print(f"  [ALERTA] {int(sin_ver)} min sin un barrido bueno")
                     enviar_telegram_texto(
@@ -1683,6 +2200,11 @@ def main():
                         f"Llevo {int(sin_ver)} minutos sin poder leer la tienda.\n"
                         "El servicio sigue corriendo, pero no esta viendo nada. "
                         "Puede ser internet, un bloqueo del sitio o un cambio en la pagina.")
+
+            # Mattel respondio 429: no se le consulta hasta que pase la pausa.
+            if time.monotonic() < _PAUSA_HASTA:
+                time.sleep(1)
+                continue
 
             # ---------- BARRIDO COMPLETO ----------
             if ahora >= proximo_completo:
@@ -1699,10 +2221,18 @@ def main():
                 if EX:
                     EX.latido(ARCHIVO_LATIDO,
                               f"{len(estado.get('productos', {}))} productos")
+                # PC: latido a Railway tras cada barrido. monitor_ok dice si
+                # de verdad vio la tienda: si no, Railway avisa por ella, pero
+                # con el boton de compra que atiende esta PC.
+                if AL_BARRIDO_OK:
+                    try:
+                        AL_BARRIDO_OK(_ULTIMO_BARRIDO_FUE_OK)
+                    except Exception as e:
+                        print(f"  [relevo] no se pudo mandar el latido: {e}")
 
             # ---------- CICLO RAPIDO ----------
             elif ahora >= proximo_rapido:
-                proximo_rapido = time.monotonic() + SEGUNDOS_CICLO_RAPIDO
+                proximo_rapido = time.monotonic() + seg_rapido
                 # Durante el calentamiento no corre: primero hay que tener la
                 # foto completa de la tienda, si no avisaria de todo.
                 if estado.get("revisiones", 0) >= REVISIONES_CALENTAMIENTO:

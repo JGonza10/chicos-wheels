@@ -172,6 +172,12 @@ def crear_app() -> Flask:
         if endpoint.startswith(PROTEGIDOS):
             app.view_functions[endpoint] = requiere_sesion(vista)
 
+    # Railway: el monitor de Mattel como relevo de la PC (solo con
+    # HOTWHEELS_MONITOR_NUBE=1; sin la variable no se importa nada del bot).
+    if os.environ.get("HOTWHEELS_MONITOR_NUBE") == "1":
+        from .bot import iniciar_monitor_nube
+        iniciar_monitor_nube()
+
     @app.get("/api/salud")
     def salud():
         from .db import RUTA_BD

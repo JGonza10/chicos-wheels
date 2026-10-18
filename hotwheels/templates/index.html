@@ -21,6 +21,7 @@
             <span class="pill" id="pillMonitor"><i class="dot"></i><span>Monitor…</span></span>
             <span class="pill" id="pillBot"><i class="dot"></i><span>Bot…</span></span>
             <span class="pill" id="pillCheckout" title="Prueba diaria del pago completo (sin pagar)"><i class="dot"></i><span>Checkout…</span></span>
+            <span class="pill" id="pillRelevo" style="display:none"><i class="dot"></i><span>Relevo…</span></span>
             <button class="pill boton" id="btnAlertas" type="button" title="Sonido y notificación cuando llegue una pieza nueva">🔕 Alertas</button>
         </div>
         <div class="temas" id="selectorTemas">
@@ -407,6 +408,21 @@
         pc.className = "pill " + cc; pc.querySelector("span").textContent = ct;
         pc.title = c ? ("Última prueba: " + c.created_at + " UTC — " + (c.detalle || "")) : "Aún no se ha probado";
         $("textoCheckout").textContent = c ? ("Última prueba: " + c.created_at + " UTC — " + ({ok: "todo el proceso llegó hasta antes de pagar ✔", roto: "FALLÓ: " + (c.detalle || ""), sin_producto: "no había nada disponible para probar", captcha: "apareció un captcha"}[c.estado] || c.estado)) : "Aún no se ha probado.";
+        // monitor de relevo en Railway (solo si el inventario vive alla)
+        const pr = $("pillRelevo"), rl = d.relevo;
+        pr.style.display = rl ? "" : "none";
+        if (rl) {
+            const mr = {ok: ["ok", "Relevo Railway listo"], avisando: ["warn", "Railway avisando por la PC"],
+                        ciego: ["warn", "Relevo Railway ciego"], sin_respuesta: ["mal", "Relevo Railway sin respuesta"],
+                        no_activo: ["mal", "Relevo Railway apagado"]}[rl.estado] || ["", "Relevo Railway"];
+            pr.className = "pill " + mr[0];
+            pr.querySelector("span").textContent = mr[1];
+            pr.title = rl.estado === "ok"
+                ? "Railway vigila callado y avisa si la PC deja de ver la tienda. Vio Mattel hace " + Math.round(rl.minutos_sin_ver || 0) + " min" + (rl.listas_al_dia ? " · listas al día" : " · listas pendientes de copiar")
+                : rl.estado === "ciego" ? "Railway lleva " + Math.round(rl.minutos_sin_ver || 0) + " min sin leer Mattel: si la PC se apaga, no vería nada"
+                : rl.estado === "avisando" ? "Tu monitor no ve la tienda: Railway te avisa y el botón Comprar con el bot (PC) compra desde aquí"
+                : (rl.detalle || "Revisa HOTWHEELS_MONITOR_NUBE en Railway");
+        }
         // cuenta regresiva del proximo drop
         const dr = m.proximo_drop, banda = $("bandaDrop");
         if (dr) {

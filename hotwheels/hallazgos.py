@@ -129,6 +129,26 @@ def registrar(url, titulo=None, url_carrito=None, imagen=None, precio_mxn=None,
         return None
 
 
+def completar(hallazgo_id, impacto=None, reventa_mxn=None, ganancia_mxn=None,
+              margen_pct=None, agota_min=None, db=None):
+    """Agrega los datos lentos (reventa, ganancia) a una pieza ya registrada
+    por el aviso express. No suma veces_visto ni reabre: es la misma vista."""
+    if not hallazgo_id:
+        return
+    try:
+        init_db(db)
+        conn = _conn(db)
+        conn.execute(
+            "UPDATE hallazgos SET impacto=COALESCE(?,impacto), reventa_mxn=COALESCE(?,reventa_mxn),"
+            " ganancia_mxn=COALESCE(?,ganancia_mxn), margen_pct=COALESCE(?,margen_pct),"
+            " agota_min=COALESCE(?,agota_min) WHERE id=?",
+            (impacto, reventa_mxn, ganancia_mxn, margen_pct, agota_min, hallazgo_id))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"  [hallazgos] no se pudo completar: {e}")
+
+
 def marcar_agotado(url, db=None):
     """El monitor vio que se agoto: la tarjeta queda como 'Agotada'."""
     try:
