@@ -1,6 +1,11 @@
 """
 Bot Hot Wheels dentro de Chicos Wheels (solo en esta PC).
 
+Excepción: el MONITOR (no el bot de compra) también puede correr en Railway
+como relevo, con HOTWHEELS_MONITOR_NUBE=1. Ahí vigila siempre, pero se queda
+callado mientras la PC le mande su latido (POST /api/bot/latido-pc tras cada
+barrido bueno); si la PC deja de mandarlo, Railway avisa por Telegram.
+
 El panel del bot (hotwheels/dashboard_bot.py) se monta tal cual bajo /bot en el
 mismo proceso, y aquí arrancan el monitor de Mattel, el scheduler, la cola de
 compras y los botones de Telegram. Sin HOTWHEELS_ACTIVO=1 (Railway) nada de
@@ -26,6 +31,10 @@ from .util import ErrorApp
 CARPETA = Path(__file__).resolve().parent.parent / "hotwheels"
 COOKIE = "bot_sesion"
 HORAS_SESION = 12
+_NUBE = None              # módulo monitor cuando corre como relevo en Railway
+_AVISO_RELEVO = {"ts": None, "fallo": False}   # PC: estado del último latido
+HORAS_AVISO_RELEVO_CIEGO = 6
+MINUTOS_RELEVO_CIEGO = 30
 
 bp = Blueprint("bot_acceso", __name__)
 
@@ -66,6 +75,78 @@ def entrar():
                     max_age=HORAS_SESION * 3600, path="/bot", httponly=True,
                     samesite="Strict", secure=request.is_secure)
     return resp
+
+
+@bp.post("/latido-pc")
+@requiere_sesion
+def latido_pc():
+    """La PC avisa que sigue vigilando: el monitor de Railway se queda callado."""
+    if _email_de_sesion() not in _duenos():
+        raise ErrorApp("Esta cuenta no tiene acceso al bot", 403)
+    if _NUBE is None:
+        raise ErrorApp("El monitor de relevo no está activo aquí", 404)
+    return jsonify(ok=True, **_NUBE.registrar_latido_pc())
+
+
+def iniciar_monitor_nube() -> bool:
+    """Railway: arranca solo el monitor, en modo relevo (sin panel ni compras).
+
+    Necesita HOTWHEELS_MONITOR_NUBE=1, TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID y,
+    para que sus datos sobrevivan a cada redespliegue, HOTWHEELS_DATOS en el
+    volumen (/app/datos/hotwheels). En la PC (HOTWHEELS_ACTIVO=1) no hace nada:
+    ahí corre el monitor completo con iniciar_servicios().
+    """
+    global _NUBE
+    if _NUBE is not None:
+        return True
+    if os.environ.get("HOTWHEELS_MONITOR_NUBE") != "1" or activo():
+        return False
+    if str(CARPETA) not in sys.path:
+        sys.path.insert(0, str(CARPETA))
+    import monitor
+
+    if not monitor._tomar_instancia_unica():
+        print("  Monitor de relevo: otra copia ya lo corre.")
+        return False
+    monitor._tomar_instancia_unica = lambda: True
+    monitor.activar_relevo()
+    threading.Thread(target=monitor.main, name="monitor_relevo", daemon=True).start()
+    _NUBE = monitor
+    print("  Monitor de relevo activo: vigila Mattel y avisa solo si la PC calla.")
+    return True
+
+
+def _enviar_latido(monitor):
+    """PC: le dice a Railway que sigue vigilando. Va en un hilo para no frenar
+    al monitor; si Railway no contesta, se avisa una sola vez en la consola."""
+    import collecthub_bridge
+
+    def enviar():
+        try:
+            r = collecthub_bridge.pedir("POST", "/api/bot/latido-pc", timeout=8)
+            if r.status_code != 200:
+                raise RuntimeError(f"Railway respondió {r.status_code}")
+            datos = r.json() or {}
+            _AVISO_RELEVO["fallo"] = False
+        except Exception as e:
+            if not _AVISO_RELEVO["fallo"]:
+                print(f"  [relevo] Railway no recibió el latido ({e}); se reintenta en el próximo barrido")
+            _AVISO_RELEVO["fallo"] = True
+            return
+        # El relevo solo sirve si Railway de verdad ve la tienda.
+        ciego = (datos.get("revisiones", 0) > 0
+                 and (datos.get("minutos_sin_ver") or 0) > MINUTOS_RELEVO_CIEGO)
+        ultimo = _AVISO_RELEVO["ts"]
+        if ciego and (ultimo is None or datetime.now(timezone.utc) - ultimo
+                      > timedelta(hours=HORAS_AVISO_RELEVO_CIEGO)):
+            _AVISO_RELEVO["ts"] = datetime.now(timezone.utc)
+            monitor.enviar_telegram_texto(
+                "⚠️ <b>EL RELEVO EN RAILWAY ESTÁ CIEGO</b>\n\n"
+                f"Lleva {int(datos['minutos_sin_ver'])} min sin poder leer Mattel. "
+                "La PC sigue vigilando bien, pero si se apaga, Railway no vería nada. "
+                "Puede ser un bloqueo a la IP de Railway: revisa sus logs.")
+
+    threading.Thread(target=enviar, name="latido_railway", daemon=True).start()
 
 
 def _proteger(panel):
@@ -172,6 +253,9 @@ def iniciar_servicios() -> bool:
         print("  Bot Hot Wheels: otra copia ya corre el monitor; aquí solo el panel.")
         return False
     monitor._tomar_instancia_unica = lambda: True   # este proceso ya tiene el candado
+    if not destino_local():
+        # El inventario vive en Railway: ahí también corre el monitor de relevo.
+        monitor.AL_BARRIDO_OK = lambda: _enviar_latido(monitor)
     dashboard_bot.iniciar_servicios()
     threading.Thread(target=monitor.main, name="monitor_hw", daemon=True).start()
     return True

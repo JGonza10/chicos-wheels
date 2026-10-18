@@ -21,7 +21,29 @@ Monitor + bot de compra de Mattel Creations. Antes era el proyecto `15 Bot Hot W
   - Monta `dashboard_bot.app` en `/bot` y arranca el monitor, el scheduler, la cola de compras y Telegram (`collecthub/bot.py`).
   - Si otra copia de la app ya los corre (candado `monitor.lock`), esta copia solo sirve el panel.
 - La tarea programada `HotWheels_MonitorSiempre` corre `vigilar_siempre.ps1`. Si nada escucha en el puerto 3000, o si `latido.txt` lleva más de 10 minutos sin cambiar, relanza la app.
-- En Railway no existe: sin la variable, `/bot` no se monta y el enlace no aparece.
+- En Railway el bot de compra no existe: sin `HOTWHEELS_ACTIVO`, `/bot` no se monta y el enlace no aparece.
+
+## Monitor de relevo en Railway
+
+Para que siempre haya alguien vigilando aunque la PC esté apagada.
+
+1. En Railway corre **solo el monitor** (`HOTWHEELS_MONITOR_NUBE=1`), dentro del mismo proceso de gunicorn.
+2. La PC, tras cada barrido bueno, manda un latido a `POST /api/bot/latido-pc` con la cuenta `COLLECTHUB_EMAIL`. Solo pasa si `COLLECTHUB_URL` apunta a Railway.
+3. Mientras llegue el latido, Railway vigila pero no manda nada: no hay avisos dobles.
+4. Si la PC calla 5 min, Railway avisa "RAILWAY TOMA EL RELEVO" y desde ahí manda los avisos. Llevan carrito y "Ver producto", pero no Comprar/Ignorar, porque no hay bot de compra en Railway. Cuando la PC vuelve, avisa y se calla.
+5. Si Railway lleva más de 30 min sin poder leer Mattel (por ejemplo, un bloqueo a su IP), la PC te avisa una vez cada 6 h.
+
+Variables en Railway:
+
+| Variable | Valor |
+|---|---|
+| `HOTWHEELS_MONITOR_NUBE` | `1` |
+| `HOTWHEELS_DATOS` | `/app/datos/hotwheels` (dentro del volumen ya montado en `/app/datos`) |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | los mismos de `config.env` |
+| `TELEGRAM_CANAL_ID`, `MERCADOLIBRE_ACCESS_TOKEN` | opcionales |
+| `BOT_EMAILS` | la cuenta de `COLLECTHUB_EMAIL` de la PC |
+
+Las listas (deseados, colecciones, vigilar) de Railway son independientes de las de la PC y empiezan con los valores de siempre.
 
 ## Acceso
 
@@ -35,7 +57,7 @@ Solo las cuentas de `BOT_EMAILS` (por defecto `juangonza@live.com.mx`):
 ```powershell
 python prueba_extras.py; python prueba_admin.py; python prueba_integraciones.py
 python prueba_hallazgos.py; python prueba_evento_reintentos.py; python prueba_habilidades.py
-python prueba_velocidad.py      # express, francotirador, modo drop, 429, Telegram
+python prueba_velocidad.py      # express, francotirador, modo drop, 429, Telegram, relevo
 cd ..; python -m unittest tests.test_bot -v      # montaje, acceso y alta en el inventario
 ```
 

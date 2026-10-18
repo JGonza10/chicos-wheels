@@ -49,10 +49,30 @@ except Exception as _e:
     print(f"  [aviso] hallazgos.py no disponible ({_e}). Las piezas solo se avisaran por Telegram.")
 
 _DIR_SCRIPT = os.path.dirname(os.path.abspath(__file__))
+# Donde viven los datos (estado, historial, listas, config.env). En la PC es la
+# carpeta del script, como siempre. En Railway HOTWHEELS_DATOS apunta al
+# volumen (/app/datos/hotwheels) para que sobrevivan a cada redespliegue.
+_DIR_DATOS = os.environ.get("HOTWHEELS_DATOS") or _DIR_SCRIPT
+os.makedirs(_DIR_DATOS, exist_ok=True)
+
+# Claves que tambien pueden llegar como variables de entorno (Railway no tiene
+# config.env). Si el archivo trae la clave, gana el archivo: en la PC nada cambia.
+_CLAVES_ENTORNO = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_CANAL_ID",
+                   "MERCADOLIBRE_ACCESS_TOKEN", "URL_PANEL")
+
+
+def _cargar_config():
+    datos = EX.cargar_config(os.path.join(_DIR_DATOS, "config.env")) if EX else {}
+    claves = _CLAVES_ENTORNO + tuple(getattr(EX, "AJUSTES_PERMITIDOS", {}) or ())
+    for clave in claves:
+        if not datos.get(clave) and os.environ.get(clave):
+            datos[clave] = os.environ[clave]
+    return datos
+
 
 # config.env vive junto a monitor.py y NO se comparte con nadie: ahi va el
 # token del bot. Si el archivo no existe, se usan los valores de abajo.
-CONFIG = EX.cargar_config(os.path.join(_DIR_SCRIPT, "config.env")) if EX else {}
+CONFIG = _cargar_config()
 
 
 # ============================================================
@@ -89,22 +109,21 @@ URL_PANEL = CONFIG.get("URL_PANEL", "http://127.0.0.1:3000/bot/")
 # Ruta ABSOLUTA anclada a la carpeta del script. Asi el monitor y el
 # dashboard siempre usan el MISMO estado.json sin importar desde donde
 # se ejecute (terminal, cron, systemd con otro WorkingDirectory, etc.).
-_DIR_SCRIPT = os.path.dirname(os.path.abspath(__file__))
-ARCHIVO_ESTADO = os.path.join(_DIR_SCRIPT, "estado.json")
-ARCHIVO_HISTORIAL = os.path.join(_DIR_SCRIPT, "historial.db")
-ARCHIVO_DESEADOS = os.path.join(_DIR_SCRIPT, "deseados.json")
-ARCHIVO_DESEADOS_LEGACY = os.path.join(_DIR_SCRIPT, "deseados.txt")
+ARCHIVO_ESTADO = os.path.join(_DIR_DATOS, "estado.json")
+ARCHIVO_HISTORIAL = os.path.join(_DIR_DATOS, "historial.db")
+ARCHIVO_DESEADOS = os.path.join(_DIR_DATOS, "deseados.json")
+ARCHIVO_DESEADOS_LEGACY = os.path.join(_DIR_DATOS, "deseados.txt")
 # Misma idea que deseados.json pero al reves: modelos que NUNCA quieres que
 # te avisen, sin importar el impacto (ej. una linea que no coleccionas).
 # Usa exactamente las mismas funciones de hw_extras.py -- es el mismo tipo
 # de archivo, solo que este apaga en vez de marcar.
-ARCHIVO_BLOQUEADOS = os.path.join(_DIR_SCRIPT, "no_deseados.json")
-ARCHIVO_LATIDO = os.path.join(_DIR_SCRIPT, "latido.txt")
+ARCHIVO_BLOQUEADOS = os.path.join(_DIR_DATOS, "no_deseados.json")
+ARCHIVO_LATIDO = os.path.join(_DIR_DATOS, "latido.txt")
 # Que se vigila, administrable desde el tablero (ver hw_extras seccion 10).
-ARCHIVO_COLECCIONES = os.path.join(_DIR_SCRIPT, "colecciones.json")
-ARCHIVO_VIGILAR = os.path.join(_DIR_SCRIPT, "vigilar.json")
-ARCHIVO_BUSQUEDAS_ML = os.path.join(_DIR_SCRIPT, "busquedas_ml.json")
-ARCHIVO_CONFIG = os.path.join(_DIR_SCRIPT, "config.env")
+ARCHIVO_COLECCIONES = os.path.join(_DIR_DATOS, "colecciones.json")
+ARCHIVO_VIGILAR = os.path.join(_DIR_DATOS, "vigilar.json")
+ARCHIVO_BUSQUEDAS_ML = os.path.join(_DIR_DATOS, "busquedas_ml.json")
+ARCHIVO_CONFIG = os.path.join(_DIR_DATOS, "config.env")
 TIPO_CAMBIO = 20.0
 CACHE_EBAY = {}
 REVISIONES_CALENTAMIENTO = 3
@@ -154,12 +173,27 @@ COMISION_REVENTA_PCT = EX.config_num(CONFIG, "COMISION_REVENTA_PCT", 13.0) if EX
 # ------------------------------------------------------------
 MINUTOS_ALERTA_CIEGO = int(EX.config_num(CONFIG, "MINUTOS_ALERTA_CIEGO", 15)) if EX else 15
 
+# ------------------------------------------------------------
+# RELEVO PC <-> RAILWAY
+# En Railway el monitor corre siempre, pero callado mientras la PC le mande
+# su latido (cada barrido bueno). Si la PC deja de mandarlo MINUTOS_RELEVO
+# minutos, Railway toma el relevo y avisa el; cuando la PC vuelve, se calla.
+# Asi no hay avisos dobles y el bot de compra (que solo vive en la PC) sigue
+# siendo el unico con botones Comprar/Ignorar.
+# ------------------------------------------------------------
+MODO_RELEVO = False      # True solo en Railway (activar_relevo, desde collecthub/bot.py)
+MINUTOS_RELEVO = 5
+_PC_LATIDO = None        # time.monotonic() del ultimo latido de la PC
+_RELEVO_ACTIVO = False   # True mientras Railway avisa porque la PC callo
+AL_BARRIDO_OK = None     # En la PC: funcion que manda el latido a Railway
+
 # Objetos que se llenan al arrancar (ver main)
 HISTORIAL = None       # conexion a la base del historial
 DESEADOS = []          # tu lista de autos deseados
 BLOQUEADOS = []        # lo que nunca quieres que te avise
 PATRON_DROPS = None    # dia y hora de drop aprendidos del historial
 _TS_ULTIMO_BARRIDO_OK = 0.0
+_REVISIONES_HECHAS = 0
 _TS_ULTIMA_ALERTA_CIEGO = None   # None = nunca se ha avisado (ver registrar_salud_coleccion)
 
 # Varios navegadores reales en vez de uno fijo: reduce la huella repetitiva
@@ -206,6 +240,56 @@ def rearmar_aviso(*keys):
     regresan stock a los pocos minutos y ese segundo restock SI importa."""
     for k in keys:
         NOTIFICACIONES_ENVIADAS.pop(k, None)
+
+
+def activar_relevo():
+    """Modo Railway: sin panel ni compras aqui, asi que las piezas no se
+    registran (HALLAZGOS) y los avisos salen sin botones Comprar/Ignorar.
+    Arranca suponiendo que la PC vigila: le da MINUTOS_RELEVO para mandar su
+    primer latido antes de hablar (si no, cada redespliegue duplicaria avisos)."""
+    global MODO_RELEVO, _PC_LATIDO, HALLAZGOS
+    MODO_RELEVO = True
+    HALLAZGOS = None
+    _PC_LATIDO = time.monotonic()
+
+
+def registrar_latido_pc():
+    """La PC acaba de terminar un barrido bueno. Devuelve como esta Railway,
+    para que la PC se entere si el relevo de verdad podria ver la tienda."""
+    global _PC_LATIDO
+    _PC_LATIDO = time.monotonic()
+    return {"relevo": _RELEVO_ACTIVO,
+            "minutos_sin_ver": round((time.monotonic() - _TS_ULTIMO_BARRIDO_OK) / 60.0, 1),
+            "revisiones": _REVISIONES_HECHAS}
+
+
+def pc_vigilando():
+    """True si este monitor es el de Railway y la PC esta vigilando: callarse."""
+    if not MODO_RELEVO or _PC_LATIDO is None:
+        return False
+    return (time.monotonic() - _PC_LATIDO) < MINUTOS_RELEVO * 60
+
+
+def revisar_relevo():
+    """Avisa (una vez) cuando Railway toma el relevo y cuando lo suelta."""
+    global _RELEVO_ACTIVO
+    if not MODO_RELEVO:
+        return
+    vigila = pc_vigilando()
+    if not vigila and not _RELEVO_ACTIVO:
+        _RELEVO_ACTIVO = True
+        minutos = int((time.monotonic() - _PC_LATIDO) / 60) if _PC_LATIDO else 0
+        print(f"  [relevo] la PC lleva {minutos} min sin latido: Railway avisa")
+        enviar_telegram_texto(
+            "☁️ <b>RAILWAY TOMA EL RELEVO</b>\n\n"
+            f"La PC lleva {minutos} min sin vigilar (apagada, sin internet o la app cerrada).\n"
+            "Sigo vigilando Mattel desde Railway. Los avisos llegan con la liga del carrito, "
+            "pero sin el botón <i>Comprar con el bot</i>: el bot de compra vive en la PC.", forzar=True)
+    elif vigila and _RELEVO_ACTIVO:
+        _RELEVO_ACTIVO = False
+        print("  [relevo] la PC volvio: Railway se calla")
+        enviar_telegram_texto("🖥️ <b>La PC volvió a vigilar.</b> Railway se queda en silencio.",
+                              forzar=True)
 
 
 def ya_notificado(key):
@@ -745,7 +829,7 @@ def recargar_ajustes():
     global SEGUNDOS_CICLO_DROP, MINUTOS_ANTES_DROP, MINUTOS_DESPUES_DROP
     if not EX:
         return
-    CONFIG = EX.cargar_config(ARCHIVO_CONFIG)
+    CONFIG = _cargar_config()
     SEGUNDOS_CICLO_RAPIDO = int(EX.config_num(CONFIG, "SEGUNDOS_CICLO_RAPIDO", SEGUNDOS_CICLO_RAPIDO))
     MAX_FRANCOTIRADOR = int(EX.config_num(CONFIG, "MAX_FRANCOTIRADOR", MAX_FRANCOTIRADOR))
     MINUTOS_ALERTA_CIEGO = int(EX.config_num(CONFIG, "MINUTOS_ALERTA_CIEGO", MINUTOS_ALERTA_CIEGO))
@@ -1095,6 +1179,9 @@ def enviar_telegram(texto, foto_url=None, link=None, link_compra=None, hallazgo_
     panel) suma los botones Comprar / Ignorar: al pulsarlos, telegram_control.py
     (dentro del panel) pide confirmacion y ejecuta. Esos botones van SOLO al
     chat personal, nunca al canal (en un canal los podria pulsar cualquiera)."""
+    if pc_vigilando():
+        print("    -> [relevo] la PC vigila: aviso omitido en Railway")
+        return
     api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
     filas = []
     # El carrito va arriba a proposito: es el boton que se aprieta con prisa.
@@ -1122,6 +1209,8 @@ def enviar_express(producto, tipo, link, link_compra, hallazgo_id=None, motivo="
     (foto, impacto, ganancia con eBay y Mercado Libre) puede tardar 30 s o
     mas y sale despues. Para lo que de verdad quieres, esos segundos son la
     diferencia entre alcanzarla o no."""
+    if pc_vigilando():
+        return False
     etiqueta = {"nuevo": "NUEVO", "restock": "RESTOCK",
                 "pocas_unidades": "POCAS UNIDADES"}.get(tipo, tipo.upper())
     texto = (f"⚡ <b>{etiqueta} — CORRE</b>{(' · ' + html.escape(motivo)) if motivo else ''}\n\n"
@@ -1167,8 +1256,11 @@ def es_urgente(estado, producto, tipo, deseado, bloqueado, veces_agotado=0):
     return ""
 
 
-def enviar_telegram_texto(texto):
-    """Envia solo texto sin foto ni boton (para resumen diario)."""
+def enviar_telegram_texto(texto, forzar=False):
+    """Envia solo texto sin foto ni boton (para resumen diario). En Railway
+    se calla mientras la PC vigila, salvo `forzar` (avisos del relevo)."""
+    if not forzar and pc_vigilando():
+        return True
     api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
     try:
         r = SESION_TG.post(f"{api}/sendMessage", data={
@@ -1462,7 +1554,7 @@ def notificar(estado, producto, tipo, precio_anterior=None, previo=None):
 
     print(f"  {tipo.upper()}: {titulo}")
     mensaje = formato_mensaje(producto, tipo, precio_anterior, va, previo)
-    if compra and tipo != "agotado":
+    if compra and tipo != "agotado" and not MODO_RELEVO:
         mensaje += "\n\n<i>Decide en el panel o con los botones: " + URL_PANEL + "</i>"
 
     # Registro en el bot (proyecto fusionado): la pieza queda en la lista
@@ -1679,7 +1771,7 @@ def revisar(estado, productos=None, parcial=False):
 
     Devuelve (estado, numero_de_cambios).
     """
-    global _TS_ULTIMO_BARRIDO_OK
+    global _TS_ULTIMO_BARRIDO_OK, _REVISIONES_HECHAS
     hora = datetime.now().strftime('%H:%M:%S')
     revisiones = estado.get("revisiones", 0)
     en_calentamiento = revisiones < REVISIONES_CALENTAMIENTO
@@ -1755,6 +1847,7 @@ def revisar(estado, productos=None, parcial=False):
 
     # Solo un barrido COMPLETO cuenta como "el monitor esta viendo bien".
     _TS_ULTIMO_BARRIDO_OK = time.monotonic()
+    _REVISIONES_HECHAS += 1
 
     estado["revisiones"] = revisiones + 1
     if incompleto:
@@ -1785,7 +1878,7 @@ def revisar(estado, productos=None, parcial=False):
     return estado, cambios
 
 
-_ARCHIVO_INSTANCIA = os.path.join(_DIR_SCRIPT, "monitor.lock")
+_ARCHIVO_INSTANCIA = os.path.join(_DIR_DATOS, "monitor.lock")
 _INSTANCIA = None   # se guarda el archivo abierto: el candado vive mientras viva el proceso
 
 
@@ -1867,7 +1960,11 @@ def main():
     print(f"  Modo drop: ciclo rapido cada {SEGUNDOS_CICLO_DROP} s de {MINUTOS_ANTES_DROP} min antes "
           f"a {MINUTOS_DESPUES_DROP} min despues del drop")
     print(f"  Resumen diario: {HORA_RESUMEN_DIARIO}:00 CDMX")
-    print(f"  Panel (donde decides que comprar): {URL_PANEL}")
+    if not MODO_RELEVO:
+        print(f"  Panel (donde decides que comprar): {URL_PANEL}")
+    if MODO_RELEVO:
+        print(f"  Modo relevo (Railway): callado mientras la PC mande latido; "
+              f"avisa si calla {MINUTOS_RELEVO} min")
     print("  Para detener: Ctrl + C")
     print("=" * 60)
 
@@ -1933,6 +2030,9 @@ def main():
                 except Exception as e:
                     print(f"  Error revisando Mercado Libre: {e}")
 
+            # --- Relevo (solo Railway): tomar o soltar los avisos ---
+            revisar_relevo()
+
             # --- VIGILANTE: el monitor corre pero no ve nada ---
             sin_ver = (time.monotonic() - _TS_ULTIMO_BARRIDO_OK) / 60.0
             if sin_ver > MINUTOS_ALERTA_CIEGO:
@@ -1967,6 +2067,13 @@ def main():
                 if EX:
                     EX.latido(ARCHIVO_LATIDO,
                               f"{len(estado.get('productos', {}))} productos")
+                # PC: si el barrido de verdad vio la tienda, avisa a Railway
+                # que sigue vigilando (para que el relevo se quede callado).
+                if AL_BARRIDO_OK and (time.monotonic() - _TS_ULTIMO_BARRIDO_OK) < 120:
+                    try:
+                        AL_BARRIDO_OK()
+                    except Exception as e:
+                        print(f"  [relevo] no se pudo mandar el latido: {e}")
 
             # ---------- CICLO RAPIDO ----------
             elif ahora >= proximo_rapido:

@@ -318,6 +318,31 @@ check("sin duplicados", sorted(p["id"] for p in prods) == sorted(set(p["id"] for
 check("reporta cual fallo", fallaron == ["caida"], fallaron)
 check("y lleva la salud de cada coleccion", salud["salud_colecciones"]["caida"]["fallos"] == 1, salud)
 
+# ============================================================
+print("\n--- 11. Relevo PC <-> Railway ---")
+# ============================================================
+textos = []
+import importlib  # noqa: E402
+M = importlib.reload(M)   # monitor limpio: las secciones de arriba sustituyeron funciones
+M.SESION_TG = SesionFalsa()
+M.SESION_TG.post = lambda url, data=None, timeout=None, **kw: (textos.append(data["text"]), Resp())[1]
+check("en la PC nunca se calla", M.pc_vigilando() is False)
+M.activar_relevo()
+check("Railway arranca callado (espera el latido de la PC)", M.pc_vigilando() and M.HALLAZGOS is None)
+M.enviar_telegram("aviso", None, "https://x/p", "https://x/cart/1:1")
+check("mientras la PC vigila, Railway no manda avisos", textos == [], textos)
+M._PC_LATIDO = M.time.monotonic() - 6 * 60
+M.revisar_relevo()
+check("si la PC calla 5 min, avisa que toma el relevo", len(textos) == 1 and "RELEVO" in textos[0], textos)
+M.revisar_relevo()
+check("ese aviso sale una sola vez", len(textos) == 1, textos)
+M.enviar_telegram_texto("resumen")
+check("y ya manda los avisos normales", textos[-1] == "resumen", textos)
+r = M.registrar_latido_pc()
+check("el latido devuelve como ve la tienda Railway", "minutos_sin_ver" in r and r["relevo"] is True, r)
+M.revisar_relevo()
+check("cuando la PC vuelve, avisa y se calla", "volvió" in textos[-1] and M.pc_vigilando(), textos)
+
 print()
 os.chdir(DIR)
 shutil.rmtree(TMP, ignore_errors=True)
