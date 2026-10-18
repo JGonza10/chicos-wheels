@@ -108,6 +108,15 @@ class PruebasBot(unittest.TestCase):
         self.assertEqual(estado.status_code, 200)
         self.assertIn("monitor", estado.get_json())
 
+    def test_00_destino_de_las_compras(self):
+        os.environ.pop("COLLECTHUB_URL", None)
+        self.assertTrue(bot.destino_local(), "sin URL: inventario de esta misma app")
+        for url, local in (("http://localhost:3000", True), ("http://127.0.0.1:3000", True),
+                           ("https://erikg.up.railway.app", False)):
+            os.environ["COLLECTHUB_URL"] = url
+            self.assertEqual(bot.destino_local(), local, url)
+        os.environ.pop("COLLECTHUB_URL", None)
+
     def test_06_compra_va_directo_al_inventario(self):
         import collecthub_bridge as CH
         ok, mensaje = CH.registrar_compra(url="https://creations.mattel.com/products/prueba-bot",

@@ -5,7 +5,11 @@ Monitor + bot de compra de Mattel Creations. Antes era el proyecto `15 Bot Hot W
 1. **El monitor busca** (`monitor.py`, hilo de fondo): piezas nuevas, restock y pocas unidades.
 2. **Avisa y registra**: por Telegram (foto + botones) y en la tabla `hallazgos` de `bot.db`.
 3. **Gonza decide** en el panel (`/bot/`, menú "🤖 Bot Hot Wheels" de Chicos Wheels) o en Telegram. **Nada se compra solo.**
-4. Lo comprado se da de alta en el inventario de Chicos Wheels (cuenta `COLLECTHUB_EMAIL`). La llamada se atiende dentro del mismo proceso.
+4. Lo comprado se da de alta en el inventario de Chicos Wheels con la cuenta `COLLECTHUB_EMAIL`.
+   - Desde 2026-10-18 el destino es Railway (`COLLECTHUB_URL=https://erikg.up.railway.app`, cuenta juangonza@live.com.mx), porque ahí vive el inventario real. Hace login con `COLLECTHUB_PASSWORD`.
+   - Si falla, la compra queda en cola (`registros_collecthub`) y se reintenta cada 10 min.
+   - Con URL vacía o local, la llamada se atiende en el mismo proceso, sin contraseña.
+   - Railway también alimenta "Ya tienes esta", los apartados por vencer y el PDF semanal.
 
 ## Arranque
 

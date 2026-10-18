@@ -6,7 +6,7 @@
 
 Incluye una tienda pública para clientes en `/tienda/` (solo muestra stock, apartar sin anticipo y asistente). Desplegada en Railway.
 
-**Bot Hot Wheels** (antes proyecto 15): monitor + bot de compra de Mattel Creations, en el mismo proceso, panel en `/bot/` (menú "🤖 Bot Hot Wheels", solo cuentas de `BOT_EMAILS`). Solo en esta PC con `HOTWHEELS_ACTIVO=1`; en Railway no existe. Detalle y reglas de compra: `hotwheels/README.md`. **El monitor debe quedar vigilando siempre** (tarea `HotWheels_MonitorSiempre` → `hotwheels/vigilar_siempre.ps1`).
+**Bot Hot Wheels** (antes proyecto 15): monitor + bot de compra de Mattel Creations, en el mismo proceso, panel en `/bot/` (menú "🤖 Bot Hot Wheels", solo cuentas de `BOT_EMAILS`). Solo en esta PC con `HOTWHEELS_ACTIVO=1`; en Railway no existe. Las compras del bot se anotan en el inventario de Railway (`https://erikg.up.railway.app`, cuenta de Gonza; contraseña en `hotwheels/.env`). Detalle y reglas de compra: `hotwheels/README.md`. **El monitor debe quedar vigilando siempre** (tarea `HotWheels_MonitorSiempre` → `hotwheels/vigilar_siempre.ps1`).
 
 ## Comandos
 

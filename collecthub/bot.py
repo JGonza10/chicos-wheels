@@ -133,6 +133,13 @@ def _transporte(app):
     return llamar
 
 
+def destino_local() -> bool:
+    """True si las compras van a esta misma app (en memoria); False si COLLECTHUB_URL
+    apunta a otra (Railway, desde 2026-10-18: ahí vive el inventario real)."""
+    url = os.environ.get("COLLECTHUB_URL", "").strip().lower()
+    return not url or "://localhost" in url or "://127.0.0.1" in url
+
+
 def montar(app) -> bool:
     """Monta el panel en /bot. Devuelve False si el bot no está activo."""
     if not activo():
@@ -140,10 +147,11 @@ def montar(app) -> bool:
     if str(CARPETA) not in sys.path:
         sys.path.insert(0, str(CARPETA))
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
-    import collecthub_bridge
-    import dashboard_bot
+    import dashboard_bot      # primero: su bot_logic carga hotwheels/.env
+    import collecthub_bridge  # lee COLLECTHUB_URL/EMAIL/PASSWORD al importarse
 
-    collecthub_bridge.EN_PROCESO = _transporte(app)
+    if destino_local():
+        collecthub_bridge.EN_PROCESO = _transporte(app)
     _proteger(dashboard_bot.app)
     app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {"/bot": dashboard_bot.app})
     app.config["BOT_MONTADO"] = True
