@@ -74,7 +74,10 @@ def crear_esquema():
             "compradores": [("faltas", "INTEGER NOT NULL DEFAULT 0")],
             "encargos": [("origen", "TEXT NOT NULL DEFAULT ''"), ("confirmado", "INTEGER NOT NULL DEFAULT 1")],
             "ajustes": [("ultimo_respaldo", "TEXT NOT NULL DEFAULT ''")],
-            "articulos": [("fecha_llegada", "TEXT NOT NULL DEFAULT ''")],
+            "articulos": [("fecha_llegada", "TEXT NOT NULL DEFAULT ''"),
+                          # Publicación en la página de Facebook (collecthub/facebook.py).
+                          ("fb_post", "TEXT NOT NULL DEFAULT ''"),
+                          ("fb_publicado_en", "TEXT NOT NULL DEFAULT ''")],
         })
         _apartados_a_pedidos(con)
         # Canal de entrega en persona (Balderas) para cuentas que ya existían.

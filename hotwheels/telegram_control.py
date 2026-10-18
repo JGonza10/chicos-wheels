@@ -102,9 +102,16 @@ class Control:
                 self._api("answerCallbackQuery", callback_query_id=cq["id"],
                           text="Ya está agotada.", show_alert=True)
                 return "agotada"
+            # Mientras confirmas, el navegador ya abre la pieza (navegador.py).
+            precalentar = self.acciones.get("precalentar")
+            if precalentar and pieza.get("url"):
+                precalentar(pieza["url"])
             precio = pieza.get("precio_mxn")
             texto = "¿Comprar esta pieza?\n%s\nPrecio: %s × 1" % (
                 titulo, ("$%s MXN" % format(precio, ",.0f")) if precio else "sin precio")
+            nota = self.acciones.get("nota_pago")
+            if nota and nota():
+                texto += "\n" + nota()
             self._api("answerCallbackQuery", callback_query_id=cq["id"], text="Confirma abajo")
             self._api("sendMessage", chat_id=self.chat_id, text=texto,
                       reply_markup={"inline_keyboard": [[

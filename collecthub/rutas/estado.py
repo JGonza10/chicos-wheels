@@ -120,6 +120,52 @@ def stats():
     })
 
 
+# Piezas que compró el Bot Hot Wheels: el puente las anota con estas marcas en las notas.
+SQL_DEL_BOT = "(a.notas LIKE '%Origen: bot%' OR a.notas LIKE '%Resultado del bot:%')"
+
+
+def reporte_bot(u: str, dias: int | None = None) -> dict:
+    """Cuánto te deja el bot, en SQL (una sola verdad): lo que compró, lo que
+    ya vendiste de eso y su ganancia neta (la columna GENERATED de ventas)."""
+    desde = "AND a.fecha_adq >= date('now', ?)" if dias else ""
+    p = (u, f"-{int(dias)} days") if dias else (u,)
+    compras = uno(f"""SELECT COUNT(*) AS piezas_distintas,
+        COALESCE(SUM(a.cant_inicial),0)                         AS compradas,
+        COALESCE(SUM(a.precio_compra*a.cant_inicial),0)         AS invertido,
+        COALESCE(SUM(CASE WHEN a.notas LIKE '%Cobrado %' THEN 1 ELSE 0 END),0) AS con_costo_real,
+        COALESCE(SUM(CASE WHEN lower(a.ubicacion)='por recibir' AND a.cantidad>0
+                          THEN a.cantidad ELSE 0 END),0)         AS por_recibir,
+        COALESCE(SUM(CASE WHEN lower(a.ubicacion)<>'por recibir' THEN a.cantidad ELSE 0 END),0) AS en_stock,
+        COALESCE(SUM(a.valor_estimado*a.cantidad),0)            AS valor_stock
+      FROM articulos a WHERE a.usuario_id=? AND {SQL_DEL_BOT} {desde}""", p)
+    ventas = uno(f"""SELECT COALESCE(SUM(v.cantidad),0) AS vendidas,
+        COALESCE(SUM(v.precio),0)        AS ingresos,
+        COALESCE(SUM(v.ganancia_neta),0) AS ganancia,
+        AVG(julianday(v.fecha)-julianday(a.fecha_adq)) AS dias_para_vender
+      FROM ventas v JOIN articulos a ON a.id=v.articulo_id
+      WHERE v.usuario_id=? AND {SQL_DEL_BOT} {desde}""", p)
+    mejores = todos(f"""SELECT a.nombre, SUM(v.cantidad) AS vendidas,
+        SUM(v.ganancia_neta) AS ganancia
+      FROM ventas v JOIN articulos a ON a.id=v.articulo_id
+      WHERE v.usuario_id=? AND {SQL_DEL_BOT} {desde}
+      GROUP BY a.id ORDER BY ganancia DESC LIMIT 5""", p)
+    costo_vendido = uno(f"""SELECT COALESCE(SUM(v.costo_unit*v.cantidad),0) AS c
+      FROM ventas v JOIN articulos a ON a.id=v.articulo_id
+      WHERE v.usuario_id=? AND {SQL_DEL_BOT} {desde}""", p)["c"]
+    return {
+        **compras, **ventas,
+        "dias_para_vender": round(ventas["dias_para_vender"]) if ventas["dias_para_vender"] is not None else None,
+        "retorno": (ventas["ganancia"] / costo_vendido) if costo_vendido else None,
+        "mejores": mejores,
+    }
+
+
+@bp.get("/bot-reporte")
+def ver_reporte_bot():
+    dias = request.args.get("dias", type=int)
+    return jsonify(reporte_bot(g.usuario_id, dias if dias and 0 < dias <= 3650 else None))
+
+
 @bp.post("/reporte-pdf")
 def reporte_pdf():
     """PDF configurable: secciones, categoría, estatus, orden y rango de fechas de ventas."""
