@@ -4,6 +4,10 @@ Monitor + bot de compra de Mattel Creations. Antes era el proyecto `15 Bot Hot W
 
 1. **El monitor busca** (`monitor.py`, hilo de fondo): piezas nuevas, restock y pocas unidades.
 2. **Avisa y registra**: por Telegram (foto + botones) y en la tabla `hallazgos` de `bot.db`.
+   - Lo urgente (deseados, vigilados a mano o "Alto impacto" ya calculado) sale primero como **aviso express**: solo texto, con carrito y Comprar/Ignorar, antes de consultar eBay y Mercado Libre. La tarjeta con foto y ganancia llega después.
+   - El francotirador revisa primero deseados y vigilados a mano, luego "coming soon" y al final el resto.
+   - **Modo drop**: de `MINUTOS_ANTES_DROP` antes a `MINUTOS_DESPUES_DROP` después del drop (día y hora aprendidos; sin datos, martes 11 am CDMX), el ciclo rápido va cada `SEGUNDOS_CICLO_DROP` s.
+   - Una sola sesión HTTP (keep-alive). El ciclo rápido rompe la caché de Shopify. Ante un 429, pausa todo lo que pida `Retry-After` (60 s si no dice).
 3. **Gonza decide** en el panel (`/bot/`, menú "🤖 Bot Hot Wheels" de Chicos Wheels) o en Telegram. **Nada se compra solo.**
 4. Lo comprado se da de alta en el inventario de Chicos Wheels con la cuenta `COLLECTHUB_EMAIL`.
    - Desde 2026-10-18 el destino es Railway (`COLLECTHUB_URL=https://erikg.up.railway.app`, cuenta juangonza@live.com.mx), porque ahí vive el inventario real. Hace login con `COLLECTHUB_PASSWORD`.
@@ -31,6 +35,7 @@ Solo las cuentas de `BOT_EMAILS` (por defecto `juangonza@live.com.mx`):
 ```powershell
 python prueba_extras.py; python prueba_admin.py; python prueba_integraciones.py
 python prueba_hallazgos.py; python prueba_evento_reintentos.py; python prueba_habilidades.py
+python prueba_velocidad.py      # express, francotirador, modo drop, 429, Telegram
 cd ..; python -m unittest tests.test_bot -v      # montaje, acceso y alta en el inventario
 ```
 
