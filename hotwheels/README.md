@@ -63,6 +63,7 @@ python prueba_hallazgos.py; python prueba_evento_reintentos.py; python prueba_ha
 python prueba_velocidad.py      # express, francotirador, modo drop, 429, Telegram, relevo
 python prueba_rapidez_compra.py # compra sin esperas fijas y cronómetro (Chromium real, páginas locales)
 python prueba_navegador_caliente.py # navegador caliente + sesión RLC contra una tienda Mattel falsa (DRY RUN)
+python prueba_postcompra.py     # pedido y total cobrado, seguimiento del envío y resumen semanal
 cd ..; python -m unittest tests.test_bot -v      # montaje, acceso y alta en el inventario
 ```
 
@@ -90,6 +91,14 @@ Cada prueba corre en una copia temporal: no toca `bot.db`, `estado.json` ni Tele
   - El navegador caliente usa ese perfil (`perfil_mattel/`, fuera de git). Solo se guardan las cookies, nunca la contraseña.
   - Con sesión, el checkout no llena correo ni dirección si ya vienen puestos.
   - Si una pieza RLC no tiene botón y no hay sesión, el error dice qué hacer.
+- **Después de pagar** (`pedidos_mattel.py`):
+  - El bot lee la página de gracias de Mattel: número de pedido, total cobrado y liga del estado del pedido.
+  - El inventario guarda como precio de compra **lo cobrado ÷ piezas** (incluye envío e impuestos). En USD se convierte con el tipo de cambio del monitor; sin él queda el estimado y la nota lo dice.
+- **Seguimiento del envío** (7:20, 13:20 y 19:20):
+  - Abre la página de estado de cada pedido en camino (últimos 45 días).
+  - Pasa al inventario la guía, la paquetería y la fecha real de llegada ("Por llegar"), y te avisa por Telegram.
+  - Nunca cambia la ubicación: "Ya llegó" lo marcas tú.
+- **Resumen semanal** (domingo 20:00): corridas, compra promedio con el cronómetro, piezas avisadas que se agotaron sin decidir y cuánto dejó lo comprado (`/api/bot-reporte`).
 - El resultado de cada compra (y de cada DRY RUN) trae el cronómetro por paso: `⏱ 21.4 s (navegador 1.2 · producto 4.0 · ...)`. Los pop-ups que pueden no salir se revisan sin esperas fijas.
 - Una pieza comprada nunca se reabre sola.
 - Los botones de Telegram van solo al chat personal (`TELEGRAM_CHAT_ID`).

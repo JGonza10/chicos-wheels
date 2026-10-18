@@ -274,6 +274,19 @@ def resumen(dias=30, db=None):
     return total
 
 
+def escapadas(dias=7, db=None):
+    """Piezas que el monitor aviso y se agotaron sin que se decidiera nada
+    (siguen 'pendiente'). Las ignoradas a proposito no cuentan."""
+    init_db(db)
+    conn = _conn(db)
+    desde = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat()
+    filas = conn.execute(
+        "SELECT titulo, url, precio_mxn FROM hallazgos WHERE estado='pendiente' "
+        "AND disponible=0 AND detectado_at >= ? ORDER BY detectado_at DESC", (desde,)).fetchall()
+    conn.close()
+    return [dict(f) for f in filas]
+
+
 # --- Gasto del mes (para los topes de confirmacion) -----------------------------
 
 def gastado_mes(db=None):

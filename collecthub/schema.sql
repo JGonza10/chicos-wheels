@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS articulos (
   valor_estimado REAL NOT NULL DEFAULT 0 CHECK (valor_estimado >= 0),
   fecha_adq      TEXT NOT NULL DEFAULT '',
   fecha_llegada  TEXT NOT NULL DEFAULT '',  -- compras en camino ("Por recibir"): cuándo llega aprox.
+  fb_post        TEXT NOT NULL DEFAULT '',  -- id del post en la página de Facebook
+  fb_publicado_en TEXT NOT NULL DEFAULT '',
   fuente         TEXT NOT NULL DEFAULT '',
   ubicacion      TEXT NOT NULL DEFAULT '',
   codigo         TEXT NOT NULL DEFAULT '',

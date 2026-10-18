@@ -336,20 +336,17 @@ def desde_mattel():
     return jsonify(traer_producto((request.get_json(silent=True) or {}).get("url")))
 
 
-@bp.get("/<id_art>/foto-publicar")
-def foto_para_publicar(id_art):
-    """La foto del artículo lista para Facebook: cuadrada 1080x1080, fondo claro liso,
-    contraste automático y un poco de nitidez. Solo fotos locales (las de URL externa
-    no se descargan desde aquí)."""
+def _jpg_para_publicar(a: dict) -> bytes | None:
+    """La foto propia de la pieza lista para Facebook: cuadrada 1080x1080, fondo
+    claro liso, contraste automático y un poco de nitidez. None si no tiene foto
+    local (las de URL externa no se descargan desde aquí)."""
     import io
 
-    from flask import Response
     from PIL import Image, ImageEnhance, ImageOps
-    a = mio(id_art)
     foto = a.get("foto") or ""
     nombre = foto[len("local:"):] if foto.startswith("local:") else ""
     if not NOMBRE_FOTO_VALIDO.match(nombre) or not (CARPETA_FOTOS / g.usuario_id / nombre).is_file():
-        raise ErrorApp("Esta pieza no tiene una foto propia guardada. Súbela con 📷 Con foto o al editar.")
+        return None
     with Image.open(CARPETA_FOTOS / g.usuario_id / nombre) as im:
         im = ImageOps.autocontrast(im.convert("RGB"), cutoff=1)
         im = ImageEnhance.Sharpness(im).enhance(1.35)
@@ -357,8 +354,49 @@ def foto_para_publicar(id_art):
         im = ImageOps.pad(im, (1080, 1080), color=(246, 247, 249), method=Image.LANCZOS)
         salida = io.BytesIO()
         im.save(salida, "JPEG", quality=90, optimize=True)
-    return Response(salida.getvalue(), mimetype="image/jpeg", headers={
+    return salida.getvalue()
+
+
+@bp.get("/<id_art>/foto-publicar")
+def foto_para_publicar(id_art):
+    from flask import Response
+    jpg = _jpg_para_publicar(mio(id_art))
+    if jpg is None:
+        raise ErrorApp("Esta pieza no tiene una foto propia guardada. Súbela con 📷 Con foto o al editar.")
+    return Response(jpg, mimetype="image/jpeg", headers={
         "Content-Disposition": f'attachment; filename="{id_art}-facebook.jpg"', "Cache-Control": "no-store"})
+
+
+@bp.post("/<id_art>/publicar-facebook")
+def publicar_facebook(id_art):
+    """Publica la pieza en la página de Facebook (collecthub/facebook.py) con el
+    texto que el dueño revisó. Una pieza ya publicada pide confirmar otra vez."""
+    from .. import facebook as FB
+    a = mio(id_art)
+    b = request.get_json(silent=True) or {}
+    texto_pub = texto(b.get("texto"), 5000)
+    if not texto_pub:
+        raise ErrorApp("Escribe el texto de la publicación")
+    if a.get("fb_post") and not b.get("otra_vez"):
+        raise ErrorApp("Esta pieza ya está publicada en tu página. Confirma si la quieres publicar otra vez.", 409)
+    jpg = _jpg_para_publicar(a)
+    foto = a.get("foto") or ""
+    try:
+        post = FB.publicar(texto_pub, foto_jpg=jpg,
+                           foto_url=foto if not jpg and foto.startswith("https://") else None)
+    except FB.ErrorFacebook as e:
+        raise ErrorApp(str(e), 502)
+    bd().execute("UPDATE articulos SET fb_post=?, fb_publicado_en=datetime('now'), "
+                 "actualizado_en=datetime('now') WHERE id=? AND usuario_id=?",
+                 (post, id_art, g.usuario_id))
+    bd().commit()
+    return jsonify(ok=True, post=post, link=FB.link_post(post))
+
+
+@bp.get("/facebook")
+def estado_facebook():
+    from .. import facebook as FB
+    return jsonify(configurado=FB.configurado())
 
 
 @bp.get("/foto/<archivo>")

@@ -542,7 +542,12 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         await dismiss_shop_modal(page, espera_ms=800)
         await page.click("#checkout-pay-button")
         reloj.marca("pagar")
-        resultado = f"🎉 Pedido realizado para: {url}\n{reloj.texto()}"
+        # Lo que de verdad se cobro y la liga del estado del pedido (para el
+        # costo real en el inventario y para seguir el envio, pedidos_mattel.py).
+        import pedidos_mattel
+        conf, url_estado = await pedidos_mattel.esperar_confirmacion(page)
+        extra = pedidos_mattel.texto_confirmacion(conf, url_estado)
+        resultado = f"🎉 Pedido realizado para: {url}" + (f" | {extra}" if extra else "") + f"\n{reloj.texto()}"
         print("  " + reloj.texto())
         if notificar:
             notify(resultado)

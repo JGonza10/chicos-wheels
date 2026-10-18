@@ -79,7 +79,10 @@ def init_db():
                 )""")
     # Columnas agregadas después (cantidad y resultado del bot, para reintentar y anotar).
     cols = {r[1] for r in c.execute("PRAGMA table_info(registros_collecthub)")}
-    for col, tipo in (("cantidad", "INTEGER DEFAULT 1"), ("pedido", "TEXT"), ("intentos", "INTEGER DEFAULT 0")):
+    for col, tipo in (("cantidad", "INTEGER DEFAULT 1"), ("pedido", "TEXT"), ("intentos", "INTEGER DEFAULT 0"),
+                      # Seguimiento del envio (pedidos_mattel.py): pagina de estado, guia y llegada.
+                      ("url_estado", "TEXT"), ("guia", "TEXT"), ("llegada", "TEXT"),
+                      ("entregado", "INTEGER DEFAULT 0"), ("revisado_at", "TEXT")):
         if col not in cols:
             c.execute(f"ALTER TABLE registros_collecthub ADD COLUMN {col} {tipo}")
     conn.commit()
@@ -120,6 +123,40 @@ def _guardar(url, titulo, precio_mxn, origen, articulo_id_remoto, resultado, can
                    pedido=COALESCE(excluded.pedido, pedido),
                    intentos=COALESCE(intentos,0)+1, created_at=datetime('now','localtime')""",
               (url, titulo, precio_mxn, origen, articulo_id_remoto, resultado, cantidad, pedido))
+    conn.commit()
+    conn.close()
+
+
+def datos_del_resultado(pedido):
+    from pedidos_mattel import datos_del_resultado as leer
+    return leer(pedido)
+
+
+def costo_real_mxn(conf, cantidad=1):
+    """Costo por pieza en pesos con lo que Mattel cobro. En dolares se usa el
+    tipo de cambio del monitor (mismo proceso); sin el, None: mejor el
+    estimado que un numero mal convertido."""
+    total = conf.get("total")
+    if not total:
+        return None
+    if conf.get("moneda") == "USD":
+        import sys
+        tc = getattr(sys.modules.get("monitor"), "TIPO_CAMBIO", None)
+        if not tc:
+            return None
+        total = total * tc
+    return round(total / max(1, int(cantidad or 1)), 2)
+
+
+def _marcar_envio(url, **campos):
+    """Actualiza las columnas de seguimiento del envio de un registro."""
+    permitidas = {"url_estado", "guia", "llegada", "entregado", "revisado_at"}
+    campos = {k: v for k, v in campos.items() if k in permitidas}
+    if not campos:
+        return
+    conn = sqlite3.connect(DB)
+    conn.execute("UPDATE registros_collecthub SET " + ", ".join(f"{k}=?" for k in campos)
+                 + " WHERE url=?", (*campos.values(), url))
     conn.commit()
     conn.close()
 
@@ -182,6 +219,11 @@ def registrar_compra(url, titulo=None, precio_mxn=None, imagen=None, origen="man
         cantidad = 1
     extra = _datos_hallazgo(url)
     imagen = imagen or extra.get("imagen")
+    # Lo que Mattel cobro de verdad (pagina de confirmacion), si el bot lo leyo.
+    conf = datos_del_resultado(pedido)
+    cobrado = costo_real_mxn(conf, cantidad)
+    if cobrado:
+        precio = cobrado
     reventa = extra.get("reventa") or 0
     if not configurado():
         mensaje = "falta configurar COLLECTHUB_EMAIL/COLLECTHUB_PASSWORD en .env"
@@ -212,6 +254,12 @@ def registrar_compra(url, titulo=None, precio_mxn=None, imagen=None, origen="man
         "fecha_llegada": (date.today() + timedelta(days=14)).isoformat(),
         "fuente": fuente[:60],
         "notas": "\n".join(x for x in (f"Link original: {url}",
+                                        f"Origen: bot ({origen})",
+                                        f"Pedido Mattel #{conf['pedido']}" if conf.get("pedido") else "",
+                                        (f"Cobrado {conf['moneda']} ${conf['total']:,.2f} en total "
+                                         f"(incluye envío e impuestos; costo por pieza ${cobrado:,.2f})")
+                                        if cobrado else "Costo estimado por el monitor: corrígelo con lo que te cobró Mattel.",
+                                        f"Estado del pedido: {conf['url_estado']}" if conf.get("url_estado") else "",
                                         f"Resultado del bot: {pedido}" if pedido else "",
                                         "Llega por paquetería: cambia la ubicación al recibirla.") if x)[:1000],
         "foto": (imagen or "")[:500],
@@ -226,11 +274,78 @@ def registrar_compra(url, titulo=None, precio_mxn=None, imagen=None, origen="man
         resp.raise_for_status()
         articulo = resp.json()
         _guardar(url, titulo, precio, origen, articulo.get("id"), "ok", cantidad, pedido)
+        if conf.get("url_estado"):
+            _marcar_envio(url, url_estado=conf["url_estado"])
         return True, f"registrado en Chicos Wheels (id {articulo.get('id')})"
     except Exception as e:
         mensaje = f"no se pudo registrar en Chicos Wheels: {e}"
         _guardar(url, titulo, precio, origen, None, mensaje, cantidad, pedido)
         return False, mensaje
+
+
+def pendientes_de_envio(dias=45, horas_entre_revisiones=5):
+    """Compras anotadas con pagina de estado que aun no se entregan, de los
+    ultimos `dias`, que no se revisaron en las ultimas horas."""
+    init_db()
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    filas = conn.execute(
+        """SELECT url, titulo, articulo_id_remoto, url_estado, guia, llegada
+           FROM registros_collecthub
+           WHERE resultado='ok' AND url_estado IS NOT NULL AND COALESCE(entregado,0)=0
+             AND articulo_id_remoto IS NOT NULL
+             AND created_at >= datetime('now', 'localtime', ?)
+             AND (revisado_at IS NULL OR revisado_at <= datetime('now', 'localtime', ?))
+           ORDER BY id""", (f"-{int(dias)} days", f"-{int(horas_entre_revisiones)} hours")).fetchall()
+    conn.close()
+    return [dict(f) for f in filas]
+
+
+def aplicar_envio(fila, envio):
+    """Pasa al inventario lo nuevo de la pagina de estado (guia, llegada,
+    entregado). Devuelve el texto para avisar por Telegram, o None si no
+    cambio nada. Nunca cambia la ubicacion: "Ya llegó" lo marcas tu al
+    tenerla en la mano."""
+    from datetime import datetime as _dt
+    url = fila["url"]
+    ahora = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    guia_nueva = envio.get("guia") and envio["guia"] != fila.get("guia")
+    llega_nueva = envio.get("llega") and envio["llega"] != fila.get("llegada")
+    entregado = bool(envio.get("entregado"))
+    if not (guia_nueva or llega_nueva or entregado):
+        _marcar_envio(url, revisado_at=ahora)
+        return None
+    cambios = {}
+    lineas = []
+    if guia_nueva:
+        lineas.append(f"Guía: {envio['guia']}" + (f" ({envio['paqueteria']})" if envio.get("paqueteria") else ""))
+    if llega_nueva:
+        cambios["fecha_llegada"] = envio["llega"]
+    if entregado:
+        lineas.append(f"La paquetería la marcó como entregada ({ahora[:10]}): márcala como \"Ya llegó\" al recibirla.")
+    try:
+        if lineas:
+            actual = pedir("GET", f"/api/articulos/{fila['articulo_id_remoto']}")
+            actual.raise_for_status()
+            notas = (actual.json().get("notas") or "").rstrip()
+            cambios["notas"] = (notas + "\n" + "\n".join(lineas)).strip()[:1000]
+        if cambios:
+            r = pedir("PATCH", f"/api/articulos/{fila['articulo_id_remoto']}", cambios)
+            r.raise_for_status()
+    except Exception as e:
+        print(f"⚠️ No se pudo actualizar el envío de {fila.get('titulo') or url}: {e}")
+        return None            # sin marcar revisado: se reintenta en la siguiente vuelta
+    _marcar_envio(url, revisado_at=ahora, guia=envio.get("guia") or fila.get("guia"),
+                  llegada=envio.get("llega") or fila.get("llegada"), entregado=1 if entregado else 0)
+    nombre = fila.get("titulo") or "Tu pieza"
+    if entregado:
+        return f"📬 {nombre}: la paquetería dice que ya se entregó."
+    partes = [f"📦 {nombre} ya va en camino"]
+    if envio.get("guia"):
+        partes.append(f"guía {envio['guia']}" + (f" ({envio['paqueteria']})" if envio.get("paqueteria") else ""))
+    if envio.get("llega"):
+        partes.append(f"llega aprox. {envio['llega']}")
+    return ": ".join([partes[0], ", ".join(partes[1:])]) if len(partes) > 1 else partes[0]
 
 
 def reintentar_pendientes(maximo=20):
@@ -266,6 +381,19 @@ def reporte_semanal_pdf(dias=7):
         return r.content
     except Exception as e:
         print(f"⚠️ No se pudo pedir el reporte semanal a Chicos Wheels: {e}")
+        return None
+
+
+def reporte_bot(dias=7):
+    """Lo que dejó el bot en el inventario (estado.py reporte_bot), o None."""
+    try:
+        if not configurado():
+            return None
+        r = pedir("GET", f"/api/bot-reporte?dias={int(dias)}", timeout=15)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"⚠️ No se pudo pedir el reporte del bot a Chicos Wheels: {e}")
         return None
 
 

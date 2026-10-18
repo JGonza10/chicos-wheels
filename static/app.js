@@ -165,6 +165,8 @@ async function cargarEstado() {
   CUR = db.ajustes.moneda || 'MXN';
   /* Bot Hot Wheels: solo en esta PC y para la cuenta dueña (collecthub/bot.py) */
   try { ui.bot = (await GET('/bot/disponible')).disponible; } catch (e) { ui.bot = false; }
+  /* Cuánto deja el bot: calculado en SQL (estado.py reporte_bot) */
+  try { db.botRep = await GET('/bot-reporte'); } catch (e) { db.botRep = null; }
   render();
 }
 
@@ -539,6 +541,7 @@ function vPanel() {
   ${tarjetaEspera()}
   ${tarjetaRespaldo()}
   ${tarjetaRotacion()}
+  ${tarjetaBot()}
   <div class="sec"><h2>Qué necesita tu atención</h2><span class="ln"></span></div>
   <div class="g3">
     ${alerta('Capital estancado', s.estancados.length, `piezas con más de ${db.ajustes.diasEstancado} días sin venderse · toca para armar ofertas`, 'var(--yellow)', 'inventario').replace('data-a="nav" data-v="inventario"', 'data-a="ofertas"')}
@@ -596,6 +599,24 @@ function tarjetaRespaldo() {
       <div style="font-size:12.5px;color:var(--muted)">${ult ? `El último fue hace ${dias(ult)} días.` : 'Aún no descargas ninguno.'} Guárdalo en tu PC o en tu nube: si el servidor falla, con él recuperas todo (datos y fotos).</div></div>
     <button class="btn pri sm" data-a="respzip">Descargar respaldo</button></div>`;
 }
+function tarjetaBot() {
+  const b = db.botRep; if (!b || !b.compradas) return '';
+  const kpi = (t, v, cls = '') => `<div><span style="font-size:11.5px;color:var(--muted)">${t}</span><br><b class="mn ${cls}">${v}</b></div>`;
+  return `<div class="pnl" style="margin-top:16px"><h2>🤖 Lo que te deja el bot</h2>
+    <p style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Piezas que compró el Bot Hot Wheels: lo invertido, lo que ya vendiste de eso y su ganancia neta.${b.con_costo_real < b.piezas_distintas ? ` ${b.piezas_distintas - b.con_costo_real} de ${b.piezas_distintas} tienen costo <b>estimado</b> (de antes de leer lo que cobra Mattel): corrígelo en la pieza para que la ganancia sea exacta.` : ''}</p>
+    <div class="g3" style="gap:10px;margin-bottom:12px">
+      ${kpi('Compradas', `${b.compradas} pzs · ${money(b.invertido)}`)}
+      ${kpi('Vendidas', `${b.vendidas} pzs · ${money(b.ingresos)}`)}
+      ${kpi('Ganancia neta', money(b.ganancia), b.ganancia >= 0 ? 'pos' : 'neg')}
+      ${kpi('Retorno', b.retorno === null ? '—' : pct(b.retorno), (b.retorno || 0) >= 0 ? 'pos' : 'neg')}
+      ${kpi('Días para vender', b.dias_para_vender === null ? '—' : b.dias_para_vender + ' d')}
+      ${kpi('En stock / en camino', `${b.en_stock} / ${b.por_recibir} pzs · ${money(b.valor_stock)}`)}
+    </div>
+    ${(b.mejores || []).length ? `<div class="feed">${b.mejores.map((m) => `<div class="fi"><span class="dot" style="background:var(--green)"></span>
+      <span class="tx"><b>${esc(m.nombre)}</b><span>${m.vendidas} vendida(s)</span></span><span class="am ${m.ganancia >= 0 ? 'pos' : 'neg'}">${money(m.ganancia)}</span></div>`).join('')}</div>` : ''}
+  </div>`;
+}
+
 function tarjetaRotacion() {
   const r = rotacionCategorias(); if (!r.length) return '';
   return `<div class="pnl" style="margin-top:16px"><h2>Qué se vende más rápido</h2>
@@ -1734,11 +1755,13 @@ MOD.pedido = function () {
 MOD.publicacion = function () {
   const a = ui.ctx || {};
   return shell('Publicación lista para copiar', a.nombre || '', `
-  <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Copia esto en Facebook Marketplace o en tu grupo de Facebook. Ajusta lo que quieras antes de publicar.</p>
+  <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Ajusta lo que quieras. <b>Publicar en mi página</b> lo sube directo a tu página de Facebook (con su foto); para Marketplace o grupos, cópialo.</p>
+  ${a.fb_post ? `<p style="font-size:12.5px;margin-bottom:10px">✅ Ya la publicaste en tu página${a.fb_publicado_en ? ' el ' + esc(a.fb_publicado_en.slice(0, 10)) : ''} · <a href="https://www.facebook.com/${esc(a.fb_post)}" target="_blank" rel="noopener">ver publicación</a></p>` : ''}
   <textarea class="ta" id="pub_txt" rows="15" style="font-family:var(--m);font-size:12px">${esc(textoPub(a))}</textarea>
   `, `<button class="btn gh" data-a="cerrar">Cerrar</button>
      <button class="btn gh" data-a="fotofb" data-id="${a.id}" title="Foto cuadrada con contraste y nitidez, lista para Facebook">📸 Foto lista</button>
-     <button class="btn pri" data-a="copiar">Copiar texto</button>`);
+     <button class="btn gh" data-a="copiar">Copiar texto</button>
+     <button class="btn pri" data-a="pubfb" data-id="${a.id}" title="Sube foto y texto a tu página de Facebook">📣 Publicar en mi página</button>`);
 };
 const LUGAR_ENTREGA = 'Balderas';
 function textoPub(a) {
@@ -1753,8 +1776,15 @@ function textoPub(a) {
   L.push(`Precio: ${money(a.valor_estimado)}`, '');
   if (vendible(a) && linkTienda(a)) L.push(`🔗 ${linkTienda(a)}`, '');
   L.push(`📍 Entrega en persona en ${LUGAR_ENTREGA}.`, '· Acepto preguntas y fotos extra por mensaje.', '· Te la aparto a tu nombre.');
-  if (a.notas) L.push('', `Nota: ${a.notas}`);
+  const notas = notasPublicas(a.notas);
+  if (notas) L.push('', `Nota: ${notas}`);
   return L.join('\n');
+}
+// Las notas que agregan el bot y el seguimiento del envío son internas (liga
+// original, pedido, lo que costó, guía): nunca van en una publicación.
+const NOTAS_INTERNAS = /^(Link original|Origen|Pedido Mattel|Cobrado|Costo estimado|Estado del pedido|Resultado del bot|Llega por paquetería|Guía|La paquetería)\b/i;
+function notasPublicas(n) {
+  return String(n || '').split('\n').map((x) => x.trim()).filter((x) => x && !NOTAS_INTERNAS.test(x)).join(' ');
 }
 MOD.escaner = function () {
   return shell('Escanear código', 'Apunta al código de barras', `
@@ -1999,6 +2029,13 @@ document.addEventListener('click', async (e) => {
 
     /* --- herramientas --- */
     case 'publicacion': abrir('publicacion', art(id)); break;
+    case 'pubfb': {
+      const texto = ($('#pub_txt') || {}).value || '';
+      const ya = (art(id) || {}).fb_post;
+      if (!confirm(ya ? '¿Publicarla OTRA VEZ en tu página de Facebook?' : '¿Publicar esta pieza en tu página de Facebook?')) break;
+      const r = await accion(() => POST(`/articulos/${id}/publicar-facebook`, { texto, otra_vez: !!ya }), 'Publicada en tu página ✔').catch(() => null);
+      if (r && r.link) { cerrar(); window.open(r.link, '_blank', 'noopener'); }
+      break; }
     case 'copiar': {
       const t = $('#pub_txt'); t.select();
       try { document.execCommand('copy'); toast('Texto copiado'); } catch (x) { toast('Selecciona y copia manualmente', true); }

@@ -497,6 +497,25 @@ def run_smoke_route():
     return redirect(url_for("index"))
 
 
+def texto_resumen_semanal(mensajes, exitos, carritos, fallos, escapadas, rep):
+    """Resumen de la semana: lo que hizo el bot, cuanto tardo, lo que se te
+    escapo y (si el inventario contesta) cuanto te dejo."""
+    import re as _re
+    tiempos = [float(t) for m in mensajes for t in _re.findall(r"⏱ ([\d.]+) s", m or "")]
+    lineas = [f"📋 Resumen semanal del bot: {len(mensajes)} corridas — "
+              f"{exitos} pedidos completados, {carritos} agregados al carrito, {fallos} fallidos."]
+    if tiempos:
+        lineas.append(f"⏱ Compra promedio: {sum(tiempos) / len(tiempos):.1f} s (la más rápida {min(tiempos):.1f} s).")
+    if escapadas:
+        lineas.append(f"😬 Se agotaron {len(escapadas)} pieza(s) que te avisó el monitor sin que las compraras: "
+                      + ", ".join(e["titulo"] or "?" for e in escapadas[:5]) + ("…" if len(escapadas) > 5 else ""))
+    if rep and rep.get("compradas"):
+        lineas.append(f"💰 Esta semana compró {rep['compradas']} pieza(s) por ${rep['invertido']:,.0f}; "
+                      f"de lo comprado en la semana ya vendiste {rep['vendidas']} con ganancia neta "
+                      f"${rep['ganancia']:,.0f}.")
+    return "\n".join(lineas)
+
+
 def _job_resumen_semanal():
     """Resumen semanal por notificacion (mejora 2026-09-16): que se intento,
     que se compro y que se perdio en los ultimos 7 dias."""
@@ -510,9 +529,8 @@ def _job_resumen_semanal():
         exitos = sum(1 for m in mensajes if "🎉" in m)
         carritos = sum(1 for m in mensajes if "✅" in m)
         fallos = len(mensajes) - exitos - carritos
-        notify(f"📋 Resumen semanal del bot: {len(mensajes)} corridas — "
-               f"{exitos} pedidos completados, {carritos} agregados al carrito, "
-               f"{fallos} fallidos.")
+        notify(texto_resumen_semanal(mensajes, exitos, carritos, fallos,
+                                     HALLAZGOS.escapadas(7), COLLECTHUB.reporte_bot(7)))
     except Exception as e:
         print(f"⚠️ Error armando el resumen semanal: {e}")
 
@@ -525,6 +543,60 @@ def _job_reintentar_collecthub():
             notify(f"📦 Se anotaron {n} compra(s) pendientes en Chicos Wheels.")
     except Exception as e:
         print(f"⚠️ Error reintentando registros de Chicos Wheels: {e}")
+
+
+async def _leer_texto(url):
+    """Texto visible de una pagina, en Chromium sin ventana. Con el perfil de
+    Mattel activo se usa el navegador caliente (la pagina del pedido puede
+    pedir la sesion y el perfil no se puede abrir dos veces)."""
+    nav = NAVEGADOR.obtener() if NAVEGADOR.perfil_activo() else None
+    if nav is not None:
+        async def leer():
+            ctx = await nav._contexto()
+            page = await ctx.new_page()
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                return await page.inner_text("body")
+            finally:
+                await page.close()
+        return await asyncio.wrap_future(nav.enviar(leer()))
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            return await page.inner_text("body")
+        finally:
+            await browser.close()
+
+
+def seguimiento_envios():
+    """Abre la pagina de estado de cada pedido en camino y pasa al inventario
+    la guia y la fecha de llegada. Devuelve cuantas piezas cambiaron."""
+    import pedidos_mattel
+    cambiaron = 0
+    for fila in COLLECTHUB.pendientes_de_envio():
+        try:
+            texto = asyncio.run(_leer_texto(fila["url_estado"]))
+        except Exception as e:
+            print(f"⚠️ No se pudo abrir el estado del pedido de {fila.get('titulo')}: {e}")
+            continue
+        aviso = COLLECTHUB.aplicar_envio(fila, pedidos_mattel.leer_envio(texto))
+        if aviso:
+            cambiaron += 1
+            notify(aviso)
+    return cambiaron
+
+
+def _job_seguimiento_envios():
+    """Cada 6 h: guia y fecha de llegada de lo que compro el bot."""
+    if _LOCK_DISPARO.locked():
+        return                    # comprando de verdad: no estorbar
+    try:
+        seguimiento_envios()
+    except Exception as e:
+        print(f"⚠️ Error en el seguimiento de envíos: {e}")
 
 
 def _job_apartados_por_vencer():
@@ -664,6 +736,7 @@ scheduler.add_job(_job_resumen_semanal, "cron", day_of_week="sun", hour=20, minu
 scheduler.add_job(_job_reintentar_collecthub, "cron", minute="*/10")
 scheduler.add_job(_job_apartados_por_vencer, "cron", hour=9, minute=0)
 scheduler.add_job(_job_reporte_chicos_wheels, "cron", day_of_week="sun", hour=20, minute=5)
+scheduler.add_job(_job_seguimiento_envios, "cron", hour="7,13,19", minute=20)
 
 # --- API para gráficos ---
 @app.route("/chart_data")

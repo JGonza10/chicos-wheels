@@ -67,7 +67,7 @@ CHECKOUT = """<html><body>
 <input type="checkbox" id="basic-creditCards">
 <script>setTimeout(() => {{ for (const m of ['number-ltr','expiry-ltr','verification_value-ltr','name-ltr']) {{
  const f = document.createElement('iframe'); f.src = 'https://checkout.pci.shopifyinc.com/' + m; document.body.appendChild(f); }} }}, 300);</script>
-<button id="checkout-pay-button">Pagar</button>
+<button id="checkout-pay-button" onclick="location.href='/checkouts/cn/abc/thank_you'">Pagar</button>
 </body></html>"""
 DIRECCION = """<input name="firstName"><input name="lastName"><input name="address1"><input name="address2">
 <input name="city"><input name="postalCode"><input name="phone">
@@ -97,6 +97,9 @@ async def responder(route):
         return await html(PRODUCTO.format(n=TIENDA["carrito"], cid=123 if TIENDA["con_sesion"] else "null"))
     if url.endswith("/cart"):
         return await html(CARRITO)
+    if url.endswith("/thank_you"):
+        return await html("<h1>Thank you!</h1><p>Confirmation #MX777</p><p>Subtotal $1,100.00</p>"
+                          "<p>Shipping $150.00</p><p>Total MXN $1,250.00</p>")
     if "/checkouts/" in url:
         sesion = TIENDA["con_sesion"]
         return await html(CHECKOUT.format(email="" if sesion else '<input id="email">',
@@ -186,7 +189,15 @@ check("explica que falta la sesion RLC", "iniciar_sesion_mattel.py" in r, r)
 PRODUCTO = PRODUCTO_ORIGINAL
 check("solo para piezas RLC", B.es_pieza_rlc(URL) and not B.es_pieza_rlc("https://creations.mattel.com/products/hw-datsun"))
 
-print("\n--- 6. Limpieza ---")
+print("\n--- 6. Pago (tienda falsa): lee pedido y total ---")
+TIENDA.update(carrito=0, con_sesion=False)
+r = nav.comprar(URL, cantidad=1, dry_run=False, permitir_pausa=False, notificar=False).result(90)
+check("el resultado trae el pedido y lo cobrado", "🎉" in r and "Pedido #MX777" in r and "Cobrado MXN $1,250.00" in r, r)
+check("y la liga del estado del pedido", "Estado: https://creations.mattel.com/checkouts/cn/abc/thank_you" in r, r)
+import pedidos_mattel as PM  # noqa: E402
+check("el inventario lo puede volver a leer", PM.datos_del_resultado(r)["total"] == 1250.0)
+
+print("\n--- 7. Limpieza ---")
 nav.precalentar(URL).result(30)
 nav.enviar(nav.limpiar(ahora=time.monotonic() + N.MINUTOS_PAGINA * 60 + 1)).result(30)
 check("la pagina que nadie uso se cierra", not nav.paginas)
