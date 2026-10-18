@@ -12,6 +12,7 @@ import re
 import sys
 import time
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 import requests
 
@@ -197,6 +198,14 @@ TAGS_REBAJA = [
 # Dedup temporal (15 min)
 NOTIFICACIONES_ENVIADAS = {}
 HORAS_BLOQUEO_DUPLICADOS = 0.25
+
+
+def rearmar_aviso(*keys):
+    """Borra el candado de duplicados de estos avisos. Se usa cuando la pieza
+    cambio de verdad (se agoto o volvio): en un drop los carritos que vencen
+    regresan stock a los pocos minutos y ese segundo restock SI importa."""
+    for k in keys:
+        NOTIFICACIONES_ENVIADAS.pop(k, None)
 
 
 def ya_notificado(key):
@@ -427,20 +436,32 @@ def registrar_salud_coleccion(estado, coleccion, respondio, cuantos):
         "<b>Administrar</b> del tablero.")
 
 
+COLECCIONES_EN_PARALELO = 3   # pocas a la vez: rapido sin parecer ataque
+
+
 def obtener_todos_los_productos(estado=None):
-    """Consulta todas las colecciones y combina sin duplicados."""
+    """Consulta todas las colecciones y combina sin duplicados.
+
+    Van de COLECCIONES_EN_PARALELO en paralelo: antes iban una por una con
+    pausas y el barrido tardaba lo suficiente para frenar al ciclo rapido.
+    Los resultados se juntan en el orden de COLECCIONES, como siempre.
+    Devuelve (productos, colecciones_que_fallaron)."""
+    colecciones = list(COLECCIONES)
+    print(f"    Consultando {len(colecciones)} colecciones...")
+    with ThreadPoolExecutor(max_workers=COLECCIONES_EN_PARALELO) as pool:
+        resultados = list(pool.map(obtener_productos_coleccion, colecciones))
     productos_por_id = {}
-    for coleccion in COLECCIONES:
-        print(f"    Consultando: {coleccion}...")
-        items, respondio = obtener_productos_coleccion(coleccion)
+    fallaron = []
+    for coleccion, (items, respondio) in zip(colecciones, resultados):
         for p in items:
             pid = str(p["id"])
             if pid not in productos_por_id:
                 productos_por_id[pid] = p
+        if not respondio:
+            fallaron.append(coleccion)
         if estado is not None:
             registrar_salud_coleccion(estado, coleccion, respondio, len(items))
-        time.sleep(1)
-    return list(productos_por_id.values())
+    return list(productos_por_id.values()), fallaron
 
 
 # ============================================================
@@ -855,6 +876,21 @@ def obtener_productos_rapidos(estado):
 # EBAY + EVALUACION DE IMPACTO
 # ============================================================
 
+_RE_PRECIO_USD = re.compile(r'\$(\d{1,3}(?:,\d{3})+|\d{1,5})\.(\d{2})')
+
+
+def extraer_precios_ebay(texto):
+    """Precios en dolares de la pagina de vendidos de eBay. Acepta "$1,250.00"
+    (antes solo leia hasta $9999 sin coma, y con el tope de 800 las piezas
+    caras salian con reventa baja y se silenciaban como "Bajo interes")."""
+    precios = []
+    for entero, centavos in _RE_PRECIO_USD.findall(texto):
+        valor = float(entero.replace(",", "") + "." + centavos)
+        if 3.0 <= valor <= 5000.0:
+            precios.append(valor)
+    return precios
+
+
 def buscar_ebay(termino, tag_cache=None):
     cache_key = (tag_cache or termino).lower().strip()
     if cache_key in CACHE_EBAY:
@@ -866,7 +902,7 @@ def buscar_ebay(termino, tag_cache=None):
             headers={"User-Agent": HEADERS["User-Agent"], "Accept-Language": "en-US,en;q=0.9"},
             timeout=15)
         r.raise_for_status()
-        precios = [float(p) for p in re.findall(r'\$(\d{1,4}\.\d{2})', r.text) if 3.0 <= float(p) <= 800.0]
+        precios = extraer_precios_ebay(r.text)
         if len(precios) >= 3:
             ordenados = sorted(precios)
             recortados = ordenados[1:-1] if len(ordenados) > 4 else ordenados
@@ -1552,6 +1588,10 @@ def _procesar_producto(estado, p, productos_previos, nuevo_catalogo,
     # --- Agotado ---
     elif previo and previo.get("disponible") and not disponible and not coming_soon:
         if not ya_notificado(f"agotado:{notif_key}"):
+            # Se agoto de verdad: el siguiente restock se avisa aunque no
+            # hayan pasado los 15 minutos del candado.
+            rearmar_aviso(f"restock:{notif_key}", f"disponible:{notif_key}",
+                          f"pocas:{notif_key}")
             va_nuevo = previo.get("veces_agotado", 0) + 1
             nuevo_catalogo[pid]["veces_agotado"] = va_nuevo
 
@@ -1603,6 +1643,7 @@ def _procesar_producto(estado, p, productos_previos, nuevo_catalogo,
     # --- Restock ---
     elif not previo.get("disponible") and disponible:
         if not ya_notificado(f"restock:{notif_key}"):
+            rearmar_aviso(f"agotado:{notif_key}")   # y el siguiente agotado tambien
             notificar(estado, p, "restock", precio_anterior, previo)
             stats["restocks"] += 1
 
@@ -1650,8 +1691,9 @@ def revisar(estado, productos=None, parcial=False):
             print(f"\n[{hora}] Revisando {len(COLECCIONES)} colecciones...")
 
     productos_previos = estado.get("productos", {})
+    fallaron = []
     if productos is None:
-        productos = obtener_todos_los_productos(estado)
+        productos, fallaron = obtener_todos_los_productos(estado)
         print(f"  Total productos unicos: {len(productos)}")
 
     if not productos:
@@ -1659,10 +1701,20 @@ def revisar(estado, productos=None, parcial=False):
             print("  Sin productos. Reintentando despues.")
         return estado, 0
 
-    if (not parcial and productos_previos
-            and len(productos) < len(productos_previos) * 0.5):
-        print(f"  Respuesta parcial ({len(productos)} vs {len(productos_previos)} esperados). Saltando.")
+    # Barrido incompleto (alguna coleccion no contesto o trajo muy poco).
+    # Ya calentado, se procesa lo que SI llego: lo que falto conserva su
+    # estado anterior, asi que no se inventan agotados ni nuevos, y un
+    # restock en otra coleccion no se pierde. En el calentamiento se salta
+    # como antes: si no, lo que faltara se anunciaria luego como "nuevo".
+    incompleto = (not parcial and (bool(fallaron) or (
+        productos_previos and len(productos) < len(productos_previos) * 0.5)))
+    if incompleto and en_calentamiento:
+        print(f"  Respuesta parcial en calentamiento ({len(productos)} vs "
+              f"{len(productos_previos)} esperados). Saltando.")
         return estado, 0
+    if incompleto:
+        print(f"  Barrido incompleto ({', '.join(fallaron) or 'respuesta corta'}): "
+              "se procesa lo que si respondio")
 
     nuevo_catalogo = dict(productos_previos)
     pocas_unidades_lista = None if parcial else []
@@ -1704,8 +1756,11 @@ def revisar(estado, productos=None, parcial=False):
     # Solo un barrido COMPLETO cuenta como "el monitor esta viendo bien".
     _TS_ULTIMO_BARRIDO_OK = time.monotonic()
 
-    estado["pocas_unidades"] = pocas_unidades_lista
     estado["revisiones"] = revisiones + 1
+    if incompleto:
+        # Totales y "pocas unidades" saldrian mal con datos parciales.
+        return estado, sum(stats.values())
+    estado["pocas_unidades"] = pocas_unidades_lista
 
     total = len(nuevo_catalogo)
     disponibles = sum(1 for p in nuevo_catalogo.values() if p.get("disponible"))

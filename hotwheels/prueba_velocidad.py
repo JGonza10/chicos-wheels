@@ -233,6 +233,91 @@ M.registrar_salud_coleccion({}, "hot-wheels-premium", False, 0)
 M.time.monotonic = reloj_real
 check("avisa de coleccion caida aunque la PC lleve <1 h prendida", len(avisos) == 1, avisos)
 
+# ============================================================
+print("\n--- 7. Segundo restock dentro de los 15 min ---")
+# ============================================================
+avisados = []
+M.notificar = lambda estado, p, tipo, precio_anterior=None, previo=None: avisados.append(tipo)
+M.NOTIFICACIONES_ENVIADAS.clear()
+p_disp, p_agot = producto("RLC Vuelve", "rlc-vuelve"), producto("RLC Vuelve", "rlc-vuelve", disponible=False)
+cat = {}
+
+
+def paso(p):
+    previos = dict(cat)
+    nuevo = dict(previos)
+    M._procesar_producto({}, p, previos, nuevo, None,
+                         {k: 0 for k in ("nuevos", "restocks", "proximamente", "cambios_precio",
+                                         "pocas_unidades", "agotados", "rebajas")}, False)
+    cat.clear()
+    cat.update(nuevo)
+
+
+paso(p_agot)                              # ya conocido, agotado
+for p in (p_disp, p_agot, p_disp, p_agot, p_disp):
+    paso(p)
+check("restock -> agotado -> restock avisa los dos restocks", avisados.count("restock") == 3, avisados)
+check("y cada agotado (el panel se entera)", avisados.count("agotado") == 2, avisados)
+avisados.clear()
+paso(p_disp)
+check("sin cambio real no repite aviso", avisados == [], avisados)
+
+# ============================================================
+print("\n--- 8. Barrido incompleto: se procesa lo que si llego ---")
+# ============================================================
+previos = {str(i): {"titulo": "Auto %d" % i, "disponible": False, "handle": "a%d" % i} for i in range(10)}
+llego = producto("Auto 1", "a1")
+llego["id"] = 1
+todos_original = M.obtener_todos_los_productos
+M.obtener_todos_los_productos = lambda estado=None: ([llego], ["hot-wheels-collectors"])
+avisados.clear()
+est = {"productos": dict(previos), "revisiones": 5, "pocas_unidades": ["se queda"], "stats": {"total": 10}}
+est, cambios = M.revisar(est)
+check("el restock de lo que si respondio se avisa", avisados == ["restock"], avisados)
+check("lo que no llego conserva su estado", est["productos"]["3"] == previos["3"], est["productos"]["3"])
+check("no rearma totales ni pocas unidades con datos parciales",
+      est["pocas_unidades"] == ["se queda"] and est["stats"] == {"total": 10}, est)
+avisados.clear()
+est = {"productos": dict(previos), "revisiones": 0}
+est, cambios = M.revisar(est)
+check("en el calentamiento se salta como antes", avisados == [] and est["revisiones"] == 0, (avisados, est))
+
+# ============================================================
+print("\n--- 9. eBay: precios con coma y piezas caras ---")
+# ============================================================
+html_ebay = "Vendido $1,250.00 · $45.99 + $5.00 envio · $12,500.00 · $2.00 · $999.50"
+check("lee $1,250.00 y $999.50", M.extraer_precios_ebay(html_ebay) == [1250.0, 45.99, 5.0, 999.5],
+      M.extraer_precios_ebay(html_ebay))
+
+# ============================================================
+print("\n--- 10. Colecciones en paralelo, mismo resultado ---")
+# ============================================================
+import threading  # noqa: E402
+import time as _t  # noqa: E402
+hilos = set()
+
+
+def coleccion_falsa(nombre):
+    hilos.add(threading.get_ident())
+    _t.sleep(0.2)
+    if nombre == "caida":
+        return [], False
+    return [{"id": 1, "title": "repetido"}, {"id": hash(nombre) % 1000 + 10, "title": nombre}], True
+
+
+M.obtener_productos_coleccion = coleccion_falsa
+M.COLECCIONES = ["c1", "c2", "caida", "c3"]
+M.obtener_todos_los_productos = todos_original
+M.enviar_telegram_texto = lambda t: None
+salud = {}
+inicio = _t.monotonic()
+prods, fallaron = M.obtener_todos_los_productos(salud)
+tardo = _t.monotonic() - inicio
+check("consulta varias colecciones a la vez", len(hilos) > 1 and tardo < 0.7, (len(hilos), tardo))
+check("sin duplicados", sorted(p["id"] for p in prods) == sorted(set(p["id"] for p in prods)) and len(prods) == 4, prods)
+check("reporta cual fallo", fallaron == ["caida"], fallaron)
+check("y lleva la salud de cada coleccion", salud["salud_colecciones"]["caida"]["fallos"] == 1, salud)
+
 print()
 os.chdir(DIR)
 shutil.rmtree(TMP, ignore_errors=True)
