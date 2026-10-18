@@ -183,9 +183,11 @@ MINUTOS_ALERTA_CIEGO = int(EX.config_num(CONFIG, "MINUTOS_ALERTA_CIEGO", 15)) if
 # ------------------------------------------------------------
 MODO_RELEVO = False      # True solo en Railway (activar_relevo, desde collecthub/bot.py)
 MINUTOS_RELEVO = 5
-_PC_LATIDO = None        # time.monotonic() del ultimo latido de la PC
+_PC_LATIDO = None        # time.monotonic() del ultimo latido con el monitor de la PC sano
+_PC_APP = None           # time.monotonic() del ultimo latido (aunque su monitor este ciego)
+ESTADO_RELEVO = {}       # En la PC: como respondio Railway al ultimo latido (para el panel)
 _RELEVO_ACTIVO = False   # True mientras Railway avisa porque la PC callo
-AL_BARRIDO_OK = None     # En la PC: funcion que manda el latido a Railway
+AL_BARRIDO_OK = None     # En la PC: funcion(monitor_ok) que manda el latido a Railway
 
 # Objetos que se llenan al arrancar (ver main)
 HISTORIAL = None       # conexion a la base del historial
@@ -194,6 +196,7 @@ BLOQUEADOS = []        # lo que nunca quieres que te avise
 PATRON_DROPS = None    # dia y hora de drop aprendidos del historial
 _TS_ULTIMO_BARRIDO_OK = 0.0
 _REVISIONES_HECHAS = 0
+_ULTIMO_BARRIDO_FUE_OK = False  # el ultimo barrido completo si vio la tienda
 _TS_ULTIMA_ALERTA_CIEGO = None   # None = nunca se ha avisado (ver registrar_salud_coleccion)
 
 # Varios navegadores reales en vez de uno fijo: reduce la huella repetitiva
@@ -244,23 +247,35 @@ def rearmar_aviso(*keys):
 
 def activar_relevo():
     """Modo Railway: sin panel ni compras aqui, asi que las piezas no se
-    registran (HALLAZGOS) y los avisos salen sin botones Comprar/Ignorar.
+    registran (HALLAZGOS). Los botones de compra solo salen si la app de la PC
+    esta viva para atenderlos (ver guardar_pieza_relevo).
     Arranca suponiendo que la PC vigila: le da MINUTOS_RELEVO para mandar su
     primer latido antes de hablar (si no, cada redespliegue duplicaria avisos)."""
-    global MODO_RELEVO, _PC_LATIDO, HALLAZGOS
+    global MODO_RELEVO, _PC_LATIDO, _PC_APP, HALLAZGOS
     MODO_RELEVO = True
     HALLAZGOS = None
-    _PC_LATIDO = time.monotonic()
+    _PC_LATIDO = _PC_APP = time.monotonic()
 
 
-def registrar_latido_pc():
-    """La PC acaba de terminar un barrido bueno. Devuelve como esta Railway,
-    para que la PC se entere si el relevo de verdad podria ver la tienda."""
-    global _PC_LATIDO
-    _PC_LATIDO = time.monotonic()
-    return {"relevo": _RELEVO_ACTIVO,
-            "minutos_sin_ver": round((time.monotonic() - _TS_ULTIMO_BARRIDO_OK) / 60.0, 1),
-            "revisiones": _REVISIONES_HECHAS}
+def registrar_latido_pc(monitor_ok=True, listas=None):
+    """Latido de la PC, tras cada barrido completo.
+
+    monitor_ok=False: la app de la PC vive pero su monitor no ve la tienda.
+    Railway toma el relevo, y como la PC SI puede comprar, sus avisos llevan
+    el boton "Comprar con el bot (PC)". `listas` trae deseados, bloqueados,
+    colecciones y vigilados de la PC cuando cambiaron (ver aplicar_listas_pc).
+    Devuelve como esta Railway, para el panel de la PC."""
+    global _PC_LATIDO, _PC_APP
+    _PC_APP = time.monotonic()
+    if monitor_ok:
+        _PC_LATIDO = _PC_APP
+    respuesta = {"relevo": _RELEVO_ACTIVO,
+                 "minutos_sin_ver": round((time.monotonic() - _TS_ULTIMO_BARRIDO_OK) / 60.0, 1),
+                 "revisiones": _REVISIONES_HECHAS,
+                 "listas_hash": _LISTAS_HASH}
+    if listas is not None:
+        respuesta["listas_hash"] = aplicar_listas_pc(listas)
+    return respuesta
 
 
 def pc_vigilando():
@@ -268,6 +283,123 @@ def pc_vigilando():
     if not MODO_RELEVO or _PC_LATIDO is None:
         return False
     return (time.monotonic() - _PC_LATIDO) < MINUTOS_RELEVO * 60
+
+
+def pc_app_viva():
+    """True si la app de la PC sigue mandando latido (aunque su monitor este
+    ciego): hay quien atienda el boton de compra."""
+    return bool(MODO_RELEVO and _PC_APP is not None
+                and (time.monotonic() - _PC_APP) < MINUTOS_RELEVO * 60)
+
+
+# --- Listas de la PC -> Railway ---
+# Mismas listas que se editan en el panel de la PC. Viajan con el latido solo
+# cuando cambian (la PC compara el hash que Railway le devuelve).
+ARCHIVOS_LISTAS = {"deseados": "ARCHIVO_DESEADOS", "bloqueados": "ARCHIVO_BLOQUEADOS",
+                   "colecciones": "ARCHIVO_COLECCIONES", "vigilar": "ARCHIVO_VIGILAR"}
+MAX_ENTRADAS_LISTA = 2000
+MAX_BYTES_LISTA = 256 * 1024
+_LISTAS_HASH = None
+
+
+def _hash_listas(listas):
+    import hashlib
+    texto = json.dumps(listas, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(texto.encode("utf-8")).hexdigest()[:16]
+
+
+def listas_para_relevo():
+    """PC: el contenido de las listas, tal como estan en disco. La que no
+    existe no viaja: mandarla vacia borraria la de Railway sin razon."""
+    listas = {}
+    for nombre, var in ARCHIVOS_LISTAS.items():
+        if not os.path.exists(globals()[var]):
+            continue
+        try:
+            with open(globals()[var], encoding="utf-8") as f:
+                datos = json.load(f)
+            listas[nombre] = datos if isinstance(datos, list) else []
+        except Exception:
+            listas[nombre] = []
+    return listas, _hash_listas(listas)
+
+
+def _lista_valida(datos):
+    """Lista de objetos planos (texto, numero, booleano o nulo), con tope de
+    tamaño. Lo que no cumpla se rechaza entero: nunca se escribe a medias."""
+    if not isinstance(datos, list) or len(datos) > MAX_ENTRADAS_LISTA:
+        return False
+    for e in datos:
+        if not isinstance(e, dict) or len(e) > 20:
+            return False
+        for k, v in e.items():
+            if not isinstance(k, str) or not (v is None or isinstance(v, (str, int, float, bool))):
+                return False
+            if isinstance(v, str) and len(v) > 500:
+                return False
+    return len(json.dumps(datos, ensure_ascii=False).encode("utf-8")) <= MAX_BYTES_LISTA
+
+
+def aplicar_listas_pc(listas):
+    """Railway: guarda las listas que mando la PC (escritura atomica). El
+    monitor las toma solo en su siguiente recarga (cada 60 s). Devuelve el
+    hash de lo que quedo guardado; si algo no es valido no toca nada."""
+    global _LISTAS_HASH
+    if not isinstance(listas, dict) or set(listas) - set(ARCHIVOS_LISTAS):
+        raise ValueError("listas desconocidas")
+    if not all(_lista_valida(v) for v in listas.values()):
+        raise ValueError("lista con formato invalido")
+    for nombre, datos in listas.items():
+        ruta = globals()[ARCHIVOS_LISTAS[nombre]]
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(ruta), prefix=".lista_", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(datos, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, ruta)
+        except Exception:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
+    _LISTAS_HASH = _hash_listas(listas)
+    print(f"  [relevo] listas de la PC guardadas ({', '.join(sorted(listas))})")
+    return _LISTAS_HASH
+
+
+# --- Piezas que Railway encontro y la PC puede comprar ---
+PIEZAS_RELEVO = {}          # id -> datos de la pieza (en memoria, se pierden al reiniciar)
+MAX_PIEZAS_RELEVO = 200
+_ID_PIEZA_RELEVO = 0
+
+
+def guardar_pieza_relevo(url, titulo=None, url_carrito=None, imagen=None,
+                         precio_mxn=None, tipo=None):
+    """Railway: anota una pieza comprable y devuelve su id para el boton
+    "Comprar con el bot (PC)" (callback rc:<id>). Al tocarlo, la PC la pide
+    con GET /api/bot/pieza-relevo/<id> y sigue su flujo normal de compra."""
+    global _ID_PIEZA_RELEVO
+    for pid, d in PIEZAS_RELEVO.items():
+        if d["url"] == url:
+            d.update(url_carrito=url_carrito, precio_mxn=precio_mxn, tipo=tipo)
+            return pid
+    _ID_PIEZA_RELEVO += 1
+    PIEZAS_RELEVO[_ID_PIEZA_RELEVO] = {
+        "url": url, "titulo": titulo, "url_carrito": url_carrito, "imagen": imagen,
+        "precio_mxn": precio_mxn, "tipo": tipo,
+        "cuando": datetime.now(timezone.utc).isoformat()}
+    while len(PIEZAS_RELEVO) > MAX_PIEZAS_RELEVO:
+        PIEZAS_RELEVO.pop(min(PIEZAS_RELEVO))
+    return _ID_PIEZA_RELEVO
+
+
+def fila_decision(hallazgo_id=None, relevo_id=None):
+    """Botones de decidir (solo chat personal): los del panel local o, en
+    Railway, el que le pide a la PC que compre."""
+    if hallazgo_id:
+        return [{"text": "🛒 Comprar con el bot", "callback_data": f"c:{hallazgo_id}"},
+                {"text": "🙈 Ignorar", "callback_data": f"i:{hallazgo_id}"}]
+    if relevo_id:
+        return [{"text": "🛒 Comprar con el bot (PC)", "callback_data": f"rc:{relevo_id}"}]
+    return None
 
 
 def revisar_relevo():
@@ -279,12 +411,18 @@ def revisar_relevo():
     if not vigila and not _RELEVO_ACTIVO:
         _RELEVO_ACTIVO = True
         minutos = int((time.monotonic() - _PC_LATIDO) / 60) if _PC_LATIDO else 0
-        print(f"  [relevo] la PC lleva {minutos} min sin latido: Railway avisa")
+        print(f"  [relevo] la PC lleva {minutos} min sin vigilar: Railway avisa")
+        if pc_app_viva():
+            como = ("La app de la PC sigue prendida pero su monitor no ve la tienda.\n"
+                    "Te aviso desde Railway, y el botón <i>Comprar con el bot (PC)</i> "
+                    "hace que la PC compre como siempre.")
+        else:
+            como = ("La PC está apagada, sin internet o con la app cerrada.\n"
+                    "Te aviso desde Railway con la liga del carrito. Sin la PC no hay "
+                    "botón <i>Comprar con el bot</i>: el bot de compra vive ahí.")
         enviar_telegram_texto(
             "☁️ <b>RAILWAY TOMA EL RELEVO</b>\n\n"
-            f"La PC lleva {minutos} min sin vigilar (apagada, sin internet o la app cerrada).\n"
-            "Sigo vigilando Mattel desde Railway. Los avisos llegan con la liga del carrito, "
-            "pero sin el botón <i>Comprar con el bot</i>: el bot de compra vive en la PC.", forzar=True)
+            f"La PC lleva {minutos} min sin vigilar. {como}", forzar=True)
     elif vigila and _RELEVO_ACTIVO:
         _RELEVO_ACTIVO = False
         print("  [relevo] la PC volvio: Railway se calla")
@@ -1174,7 +1312,8 @@ def _enviar_a_chat(api, chat_id, texto, foto_url=None, boton=None):
     return enviado
 
 
-def enviar_telegram(texto, foto_url=None, link=None, link_compra=None, hallazgo_id=None):
+def enviar_telegram(texto, foto_url=None, link=None, link_compra=None, hallazgo_id=None,
+                    relevo_id=None):
     """Aviso con foto y botones. Con `hallazgo_id` (pieza registrada en el
     panel) suma los botones Comprar / Ignorar: al pulsarlos, telegram_control.py
     (dentro del panel) pide confirmacion y ejecuta. Esos botones van SOLO al
@@ -1191,9 +1330,9 @@ def enviar_telegram(texto, foto_url=None, link=None, link_compra=None, hallazgo_
         filas.append([{"text": "Ver producto", "url": link}])
     boton_canal = json.dumps({"inline_keyboard": filas}) if filas else None
     filas_chat = list(filas)
-    if hallazgo_id:
-        filas_chat.insert(0, [{"text": "🛒 Comprar con el bot", "callback_data": f"c:{hallazgo_id}"},
-                              {"text": "🙈 Ignorar", "callback_data": f"i:{hallazgo_id}"}])
+    decision = fila_decision(hallazgo_id, relevo_id)
+    if decision:
+        filas_chat.insert(0, decision)
     boton_chat = json.dumps({"inline_keyboard": filas_chat}) if filas_chat else None
     ok = _enviar_a_chat(api, TELEGRAM_CHAT_ID, texto, foto_url, boton_chat)
     print(f"    -> {'Enviado' if ok else 'ERROR'} a Telegram")
@@ -1202,7 +1341,8 @@ def enviar_telegram(texto, foto_url=None, link=None, link_compra=None, hallazgo_
         print(f"    -> {'Enviado' if ok2 else 'ERROR'} al canal")
 
 
-def enviar_express(producto, tipo, link, link_compra, hallazgo_id=None, motivo=""):
+def enviar_express(producto, tipo, link, link_compra, hallazgo_id=None, motivo="",
+                   relevo_id=None):
     """Aviso corto, solo texto, solo al chat personal, ANTES de calcular nada.
 
     sendMessage sin foto ni vista previa llega en ~1 s; la tarjeta completa
@@ -1217,9 +1357,9 @@ def enviar_express(producto, tipo, link, link_compra, hallazgo_id=None, motivo="
              f"{html.escape(producto.get('title', ''))}\n"
              f"🟢 {formato_precio(precio_minimo(producto))}")
     filas = []
-    if hallazgo_id:
-        filas.append([{"text": "🛒 Comprar con el bot", "callback_data": f"c:{hallazgo_id}"},
-                      {"text": "🙈 Ignorar", "callback_data": f"i:{hallazgo_id}"}])
+    decision = fila_decision(hallazgo_id, relevo_id)
+    if decision:
+        filas.append(decision)
     if link_compra:
         filas.append([{"text": "COMPRAR AHORA - carrito listo", "url": link_compra}])
     if link:
@@ -1527,6 +1667,16 @@ def notificar(estado, producto, tipo, precio_anterior=None, previo=None):
     # puede tardar 30 s). La pieza se registra en el panel en ese momento
     # para que los botones Comprar/Ignorar funcionen desde el primer aviso.
     hallazgo_id = None
+    # Railway con la app de la PC viva: la pieza se anota para que el boton
+    # "Comprar con el bot (PC)" funcione (la PC la pide al tocarlo).
+    relevo_id = None
+    if (MODO_RELEVO and disponible_ahora and tipo in ("nuevo", "restock", "pocas_unidades")
+            and pc_app_viva() and not pc_vigilando()):
+        precio = precio_minimo(producto)
+        relevo_id = guardar_pieza_relevo(
+            link, titulo=titulo, url_carrito=compra, imagen=imagen_thumbnail(producto),
+            precio_mxn=usd_a_mxn_ajustado(precio) if precio else None, tipo=tipo)
+    extra_relevo = {"relevo_id": relevo_id} if relevo_id else {}
     urgente = es_urgente(estado, producto, tipo, deseado, bloqueado, va)
     if urgente:
         if HALLAZGOS is not None:
@@ -1536,7 +1686,7 @@ def notificar(estado, producto, tipo, precio_anterior=None, previo=None):
                 imagen=imagen_thumbnail(producto),
                 precio_mxn=usd_a_mxn_ajustado(precio) if precio else None,
                 tipo=tipo, deseado=deseado)
-        enviar_express(producto, tipo, link, compra, hallazgo_id, motivo=urgente)
+        enviar_express(producto, tipo, link, compra, hallazgo_id, motivo=urgente, **extra_relevo)
 
     impacto_actual = evaluar_impacto(producto, va) if tipo != "agotado" else None
 
@@ -1576,7 +1726,8 @@ def notificar(estado, producto, tipo, precio_anterior=None, previo=None):
                 precio_mxn=usd_a_mxn_ajustado(precio) if precio else None,
                 tipo=tipo, impacto=impacto_actual, deseado=deseado, **extra)
 
-    enviar_telegram(mensaje, imagen_principal(producto), link, compra, hallazgo_id=hallazgo_id)
+    enviar_telegram(mensaje, imagen_principal(producto), link, compra, hallazgo_id=hallazgo_id,
+                    **extra_relevo)
     agregar_alerta(estado, producto, tipo, precio_anterior, va)
 
     # Historial: cada aviso queda guardado para poder analizarlo despues.
@@ -1771,8 +1922,10 @@ def revisar(estado, productos=None, parcial=False):
 
     Devuelve (estado, numero_de_cambios).
     """
-    global _TS_ULTIMO_BARRIDO_OK, _REVISIONES_HECHAS
+    global _TS_ULTIMO_BARRIDO_OK, _REVISIONES_HECHAS, _ULTIMO_BARRIDO_FUE_OK
     hora = datetime.now().strftime('%H:%M:%S')
+    if not parcial:
+        _ULTIMO_BARRIDO_FUE_OK = False
     revisiones = estado.get("revisiones", 0)
     en_calentamiento = revisiones < REVISIONES_CALENTAMIENTO
 
@@ -1848,6 +2001,7 @@ def revisar(estado, productos=None, parcial=False):
     # Solo un barrido COMPLETO cuenta como "el monitor esta viendo bien".
     _TS_ULTIMO_BARRIDO_OK = time.monotonic()
     _REVISIONES_HECHAS += 1
+    _ULTIMO_BARRIDO_FUE_OK = True
 
     estado["revisiones"] = revisiones + 1
     if incompleto:
@@ -2067,11 +2221,12 @@ def main():
                 if EX:
                     EX.latido(ARCHIVO_LATIDO,
                               f"{len(estado.get('productos', {}))} productos")
-                # PC: si el barrido de verdad vio la tienda, avisa a Railway
-                # que sigue vigilando (para que el relevo se quede callado).
-                if AL_BARRIDO_OK and (time.monotonic() - _TS_ULTIMO_BARRIDO_OK) < 120:
+                # PC: latido a Railway tras cada barrido. monitor_ok dice si
+                # de verdad vio la tienda: si no, Railway avisa por ella, pero
+                # con el boton de compra que atiende esta PC.
+                if AL_BARRIDO_OK:
                     try:
-                        AL_BARRIDO_OK()
+                        AL_BARRIDO_OK(_ULTIMO_BARRIDO_FUE_OK)
                     except Exception as e:
                         print(f"  [relevo] no se pudo mandar el latido: {e}")
 

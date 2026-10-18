@@ -2,6 +2,7 @@
 import asyncio
 import os
 import sqlite3
+import sys
 import threading
 import time
 import requests
@@ -718,6 +719,8 @@ def api_estado():
         "checkout": ultimo_checkout,
         "limites": LIMITES.obtener(),
         "ensayo": os.environ.get("HOTWHEELS_DRY_RUN") == "1",
+        # Como respondio el monitor de relevo de Railway al ultimo latido.
+        "relevo": dict(getattr(sys.modules.get("monitor"), "ESTADO_RELEVO", None) or {}) or None,
     })
 
 
@@ -902,6 +905,15 @@ def host_seguro(host, usuario, password):
     return host, None
 
 
+# Lo pone collecthub/bot.py cuando el inventario vive en Railway: trae una
+# pieza que encontro el monitor de relevo (boton "Comprar con el bot (PC)").
+IMPORTAR_RELEVO = None
+
+
+def _importar_relevo(pid):
+    return IMPORTAR_RELEVO(pid) if IMPORTAR_RELEVO else None
+
+
 def iniciar_servicios():
     """Hilos de fondo (solo cuando corre como programa, no al importar en pruebas):
     la cola de compras, el scheduler de trabajos programados y los botones
@@ -916,6 +928,7 @@ def iniciar_servicios():
                 "evaluar": LIMITES.evaluar,
                 "comprar": solicitar_compra,
                 "ignorar": lambda hid: HALLAZGOS.cambiar_estado(hid, "ignorado"),
+                "importar_relevo": _importar_relevo,
             }).iniciar_hilo()
             print("  Botones de Telegram (Comprar/Ignorar): activos")
         except Exception as e:

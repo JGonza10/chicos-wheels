@@ -28,10 +28,13 @@ Monitor + bot de compra de Mattel Creations. Antes era el proyecto `15 Bot Hot W
 Para que siempre haya alguien vigilando aunque la PC esté apagada.
 
 1. En Railway corre **solo el monitor** (`HOTWHEELS_MONITOR_NUBE=1`), dentro del mismo proceso de gunicorn.
-2. La PC, tras cada barrido bueno, manda un latido a `POST /api/bot/latido-pc` con la cuenta `COLLECTHUB_EMAIL`. Solo pasa si `COLLECTHUB_URL` apunta a Railway.
-3. Mientras llegue el latido, Railway vigila pero no manda nada: no hay avisos dobles.
-4. Si la PC calla 5 min, Railway avisa "RAILWAY TOMA EL RELEVO" y desde ahí manda los avisos. Llevan carrito y "Ver producto", pero no Comprar/Ignorar, porque no hay bot de compra en Railway. Cuando la PC vuelve, avisa y se calla.
-5. Si Railway lleva más de 30 min sin poder leer Mattel (por ejemplo, un bloqueo a su IP), la PC te avisa una vez cada 6 h.
+2. La PC, tras cada barrido completo, manda un latido a `POST /api/bot/latido-pc` con la cuenta `COLLECTHUB_EMAIL`. Lleva `monitor_ok`, que dice si ese barrido sí vio la tienda. Solo pasa si `COLLECTHUB_URL` apunta a Railway.
+3. Mientras lleguen latidos con `monitor_ok`, Railway vigila pero no manda nada: no hay avisos dobles.
+4. Si pasan 5 min sin un latido sano, Railway avisa "RAILWAY TOMA EL RELEVO" y desde ahí manda los avisos con carrito y "Ver producto". Cuando la PC vuelve, avisa y se calla.
+5. **Comprar a distancia:** si la app de la PC sigue viva pero su monitor está ciego, los avisos de Railway traen "🛒 Comprar con el bot (PC)" (`rc:<id>`). Al tocarlo, la PC pide la pieza a `GET /api/bot/pieza-relevo/<id>`, la da de alta en su panel y sigue el flujo de siempre: confirmar, revisar el tope de gasto y comprar. Solo acepta URLs de `creations.mattel.com/products/`. Si la PC está apagada, ese botón no sale.
+6. **Listas sincronizadas:** el latido lleva deseados, bloqueados, colecciones y vigilados de la PC cuando cambian (por hash). Railway los valida (listas de objetos planos, con topes de tamaño) y los guarda; si algo no es válido, no toca nada. Las listas que no existen en la PC no viajan.
+7. **Pastilla en el panel** `/bot/`: "Relevo Railway listo / ciego / sin respuesta / apagado / avisando por la PC".
+8. Si Railway lleva más de 30 min sin poder leer Mattel (por ejemplo, un bloqueo a su IP), la PC te avisa una vez cada 6 h.
 
 Variables en Railway:
 
@@ -43,7 +46,7 @@ Variables en Railway:
 | `TELEGRAM_CANAL_ID`, `MERCADOLIBRE_ACCESS_TOKEN` | opcionales |
 | `BOT_EMAILS` | la cuenta de `COLLECTHUB_EMAIL` de la PC |
 
-Las listas (deseados, colecciones, vigilar) de Railway son independientes de las de la PC y empiezan con los valores de siempre.
+Las piezas que encuentra Railway viven en memoria: si Railway se reinicia, un botón "Comprar con el bot (PC)" viejo responde "No pude traer esa pieza de Railway".
 
 ## Acceso
 

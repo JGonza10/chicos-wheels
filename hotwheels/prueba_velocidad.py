@@ -343,6 +343,92 @@ check("el latido devuelve como ve la tienda Railway", "minutos_sin_ver" in r and
 M.revisar_relevo()
 check("cuando la PC vuelve, avisa y se calla", "volvió" in textos[-1] and M.pc_vigilando(), textos)
 
+# ============================================================
+print("\n--- 12. Listas de la PC -> Railway ---")
+# ============================================================
+M.ARCHIVO_DESEADOS = os.path.join(TMP, "deseados.json")
+M.ARCHIVO_BLOQUEADOS = os.path.join(TMP, "no_deseados.json")
+M.ARCHIVO_COLECCIONES = os.path.join(TMP, "colecciones.json")
+M.ARCHIVO_VIGILAR = os.path.join(TMP, "vigilar.json")
+json.dump([{"texto": "Skyline R34", "categoria": None}], io.open(M.ARCHIVO_DESEADOS, "w", encoding="utf-8"))
+listas, h1 = M.listas_para_relevo()
+for f in (M.ARCHIVO_BLOQUEADOS, M.ARCHIVO_COLECCIONES, M.ARCHIVO_VIGILAR):
+    if os.path.exists(f):
+        os.remove(f)
+listas, h1 = M.listas_para_relevo()
+check("la PC manda sus listas", listas["deseados"][0]["texto"] == "Skyline R34", listas)
+check("la que no existe no viaja (no borra la de Railway)", set(listas) == {"deseados"}, listas)
+_, h2 = M.listas_para_relevo()
+check("mismo contenido, mismo hash (no se reenvia)", h1 == h2)
+os.remove(M.ARCHIVO_DESEADOS)
+r = M.registrar_latido_pc(monitor_ok=True, listas=listas)
+check("Railway las guarda y devuelve el mismo hash", r["listas_hash"] == h1, r)
+check("y el monitor las lee como siempre", M.EX.cargar_deseados(M.ARCHIVO_DESEADOS) == ["skyline r34"],
+      M.EX.cargar_deseados(M.ARCHIVO_DESEADOS))
+for malo, porque in (({"otra": []}, "lista desconocida"),
+                     ({"deseados": "texto"}, "no es lista"),
+                     ({"deseados": [{"texto": {"anidado": 1}}]}, "objeto anidado"),
+                     ({"deseados": [{"texto": "x" * 600}]}, "texto enorme")):
+    try:
+        M.aplicar_listas_pc(malo)
+        check("rechaza " + porque, False)
+    except ValueError:
+        check("rechaza " + porque, True)
+check("lo rechazado no toca lo guardado", M.EX.cargar_deseados(M.ARCHIVO_DESEADOS) == ["skyline r34"])
+
+# ============================================================
+print("\n--- 13. Comprar a distancia: monitor de la PC ciego, app viva ---")
+# ============================================================
+botones_vistos = []
+M.SESION_TG = SesionFalsa()
+M.SESION_TG.post = lambda url, data=None, timeout=None, **kw: (
+    botones_vistos.append(json.loads(data.get("reply_markup") or "{}")), Resp())[1]
+M._enviar_a_chat = lambda api, chat, texto, foto=None, boton=None: (
+    botones_vistos.append(json.loads(boton or "{}")), True)[1]
+M.precio_reventa_estimado = lambda titulo: (None, 0)
+M._PC_LATIDO = M.time.monotonic() - 3600   # el ultimo barrido bueno de la PC fue hace 1 h
+M.registrar_latido_pc(monitor_ok=False)
+check("monitor de la PC ciego: Railway habla", not M.pc_vigilando())
+check("pero sabe que la app de la PC vive", M.pc_app_viva())
+M.NOTIFICACIONES_ENVIADAS.clear()
+M.notificar({}, producto("Skyline R34 RLC", "sky-rlc"), "restock")
+rc = [b["callback_data"] for t in botones_vistos for fila in t.get("inline_keyboard", [])
+      for b in fila if b.get("callback_data", "").startswith("rc:")]
+check("los avisos llevan 'Comprar con el bot (PC)'", rc and len(set(rc)) == 1, botones_vistos)
+pid = int(rc[0].split(":")[1])
+check("Railway guarda la pieza para que la PC la pida",
+      M.PIEZAS_RELEVO[pid]["url"].endswith("/products/sky-rlc")
+      and M.PIEZAS_RELEVO[pid]["url_carrito"].endswith("/cart/111:1"), M.PIEZAS_RELEVO.get(pid))
+check("misma pieza, mismo id", M.guardar_pieza_relevo(M.PIEZAS_RELEVO[pid]["url"]) == pid)
+botones_vistos.clear()
+M._PC_APP = M._PC_LATIDO = M.time.monotonic() - 3600
+M.notificar({}, producto("Otro Skyline", "otro-sky"), "nuevo")
+check("PC apagada: sin boton de compra (nadie lo atenderia)",
+      not any("rc:" in json.dumps(t) for t in botones_vistos) and botones_vistos, botones_vistos)
+
+import telegram_control as TC  # noqa: E402
+llamadas = []
+importadas = []
+tg = TC.Control("tok", 42, {
+    "obtener": lambda hid: {"titulo": "Skyline R34 RLC", "disponible": 1, "precio_mxn": 900} if hid == 77 else None,
+    "importar_relevo": lambda rid: (importadas.append(rid), 77 if rid == 5 else None)[1],
+}, llamar=lambda metodo, **p: (llamadas.append((metodo, p)), {"ok": True})[1], log=lambda *a: None)
+
+
+def toque(datos):
+    return {"callback_query": {"id": "q", "data": datos, "from": {"id": 42},
+                               "message": {"chat": {"id": 42}, "date": int(_t.time())}}}
+
+
+check("rc: trae la pieza y pide confirmacion como siempre", tg.procesar(toque("rc:5")) == "confirmacion_pedida"
+      and importadas == [5], (importadas, llamadas))
+confirma = [p for m, p in llamadas if m == "sendMessage"][-1]
+check("la confirmacion usa el id LOCAL de la PC",
+      confirma["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "cc:77:n", confirma)
+check("si Railway ya no la tiene, lo dice", tg.procesar(toque("rc:9")) == "relevo_fallo")
+check("rc: de otro chat se ignora", tg.procesar({"callback_query": {"id": "q", "data": "rc:5", "from": {"id": 1},
+                                                                     "message": {"chat": {"id": 1}}}}) is None)
+
 print()
 os.chdir(DIR)
 shutil.rmtree(TMP, ignore_errors=True)

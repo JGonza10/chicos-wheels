@@ -102,6 +102,29 @@ class PruebasRelevo(unittest.TestCase):
         self.assertIn("minutos_sin_ver", r.get_json())
         self.assertTrue(m.pc_vigilando(), "el latido de la PC calla al relevo")
 
+    def test_04_listas_y_pieza_de_relevo(self):
+        os.environ["HOTWHEELS_MONITOR_NUBE"] = "1"
+        self.assertTrue(bot.iniciar_monitor_nube())
+        m = bot._NUBE
+        auth = {"Authorization": f"Bearer {self.token}"}
+        listas = {"deseados": [{"texto": "Datsun 510"}], "vigilar": [{"handle": "rlc-datsun"}]}
+        r = self.c.post("/api/bot/latido-pc", json={"monitor_ok": False, "listas": listas}, headers=auth)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertTrue(r.get_json()["listas_hash"])
+        self.assertEqual(m.EX.cargar_deseados(m.ARCHIVO_DESEADOS), ["datsun 510"])
+        self.assertTrue(m.pc_app_viva())
+
+        r = self.c.post("/api/bot/latido-pc", json={"listas": {"config": []}}, headers=auth)
+        self.assertEqual(r.status_code, 400, "solo las 4 listas conocidas")
+
+        pid = m.guardar_pieza_relevo("https://creations.mattel.com/products/rlc-datsun",
+                                     titulo="RLC Datsun", precio_mxn=900.0)
+        r = self.c.get(f"/api/bot/pieza-relevo/{pid}", headers=auth)
+        self.assertEqual(r.get_json()["pieza"]["titulo"], "RLC Datsun")
+        self.assertEqual(self.c.get("/api/bot/pieza-relevo/99999", headers=auth).status_code, 404)
+        otro = {"Authorization": f"Bearer {self.token_otro}"}
+        self.assertEqual(self.c.get(f"/api/bot/pieza-relevo/{pid}", headers=otro).status_code, 403)
+
     def _pedir_sin_sesion(self):
         return self.c.post("/api/bot/latido-pc")
 
