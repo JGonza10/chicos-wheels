@@ -18,6 +18,7 @@ import limites as LIMITES
 import precios as PRECIOS
 import salud as SALUD
 import telegram_control
+import navegador as NAVEGADOR
 
 app = Flask(__name__)
 # La base vive junto al codigo: no depende de desde donde se arranque.
@@ -292,8 +293,11 @@ async def run_one(url, cantidad=None, dry_run=None, permitir_pausa=False):
     Deliberadamente NO reusa run_all(): run_all compra todas las URLs activas
     de la tabla, y "Comprar" en una pieza debe comprar solo esa pieza.
     """
+    # Navegador caliente (si esta prendido): la pagina puede estar ya cargada
+    # (precalentar) y, con el perfil de Mattel, con tu sesion RLC iniciada.
     resultado = await comprar_producto(url, cantidad=cantidad, dry_run=dry_run,
-                                       permitir_pausa=permitir_pausa)
+                                       permitir_pausa=permitir_pausa,
+                                       navegador=NAVEGADOR.obtener())
     add_result(resultado)
     if "🎉" in resultado:
         marcar_producto_completado(url)
@@ -719,6 +723,7 @@ def api_estado():
         "checkout": ultimo_checkout,
         "limites": LIMITES.obtener(),
         "ensayo": os.environ.get("HOTWHEELS_DRY_RUN") == "1",
+        "navegador": NAVEGADOR._NAVEGADOR.estado() if NAVEGADOR._NAVEGADOR else None,
         # Como respondio el monitor de relevo de Railway al ultimo latido.
         "relevo": dict(getattr(sys.modules.get("monitor"), "ESTADO_RELEVO", None) or {}) or None,
     })
@@ -905,6 +910,17 @@ def host_seguro(host, usuario, password):
     return host, None
 
 
+def precalentar(url):
+    """Abre la pieza en el navegador caliente para que la compra arranque con
+    la pagina lista. Nunca truena ni frena a quien la llama."""
+    try:
+        nav = NAVEGADOR.obtener()
+        if nav is not None and url:
+            nav.precalentar(url)
+    except Exception as e:
+        print(f"  ⚠️ No se pudo precalentar: {e}")
+
+
 # Lo pone collecthub/bot.py cuando el inventario vive en Railway: trae una
 # pieza que encontro el monitor de relevo (boton "Comprar con el bot (PC)").
 IMPORTAR_RELEVO = None
@@ -929,6 +945,7 @@ def iniciar_servicios():
                 "comprar": solicitar_compra,
                 "ignorar": lambda hid: HALLAZGOS.cambiar_estado(hid, "ignorado"),
                 "importar_relevo": _importar_relevo,
+                "precalentar": precalentar,
             }).iniciar_hilo()
             print("  Botones de Telegram (Comprar/Ignorar): activos")
         except Exception as e:

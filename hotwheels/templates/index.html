@@ -400,7 +400,9 @@
             "Si sigue así, arranca 'python monitor.py' desde Nexus (proyecto 15)";
         const pb = $("pillBot");
         pb.className = "pill " + (d.comprando ? "warn" : "ok");
-        pb.querySelector("span").textContent = d.comprando ? ("Bot comprando…" + (d.en_cola ? " · " + d.en_cola + " en cola" : "")) : "Bot libre";
+        pb.querySelector("span").textContent = (d.comprando ? ("Bot comprando…" + (d.en_cola ? " · " + d.en_cola + " en cola" : "")) : "Bot libre")
+            + (d.navegador && d.navegador.abierto ? " · 🔥" + (d.navegador.paginas ? " " + d.navegador.paginas + " lista(s)" : "") : "");
+        pb.title = d.navegador ? ((d.navegador.abierto ? "Navegador caliente abierto" : "Navegador caliente en espera") + (d.navegador.con_sesion ? " · con tu sesión de Mattel (RLC)" : " · sin sesión de Mattel")) : "";
         // prueba diaria del checkout
         const pc = $("pillCheckout"), c = d.checkout;
         const mapa = {ok: ["ok", "Checkout OK"], roto: ["mal", "Checkout con falla"], sin_producto: ["", "Checkout sin probar (nada disponible)"], captcha: ["warn", "Checkout pidió captcha"]};

@@ -318,6 +318,7 @@ def iniciar_servicios() -> bool:
         print("  Bot Hot Wheels: otra copia ya corre el monitor; aquí solo el panel.")
         return False
     monitor._tomar_instancia_unica = lambda: True   # este proceso ya tiene el candado
+    monitor.AL_URGENTE = dashboard_bot.precalentar     # aviso urgente -> navegador listo
     if not destino_local():
         # El inventario vive en Railway: ahí también corre el monitor de relevo.
         monitor.AL_BARRIDO_OK = lambda monitor_ok: _enviar_latido(monitor, monitor_ok)

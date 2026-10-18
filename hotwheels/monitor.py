@@ -188,6 +188,7 @@ _PC_APP = None           # time.monotonic() del ultimo latido (aunque su monitor
 ESTADO_RELEVO = {}       # En la PC: como respondio Railway al ultimo latido (para el panel)
 _RELEVO_ACTIVO = False   # True mientras Railway avisa porque la PC callo
 AL_BARRIDO_OK = None     # En la PC: funcion(monitor_ok) que manda el latido a Railway
+AL_URGENTE = None        # En la PC: funcion(url) que precalienta el navegador de compra
 
 # Objetos que se llenan al arrancar (ver main)
 HISTORIAL = None       # conexion a la base del historial
@@ -1687,6 +1688,12 @@ def notificar(estado, producto, tipo, precio_anterior=None, previo=None):
                 precio_mxn=usd_a_mxn_ajustado(precio) if precio else None,
                 tipo=tipo, deseado=deseado)
         enviar_express(producto, tipo, link, compra, hallazgo_id, motivo=urgente, **extra_relevo)
+        # Mientras lees el aviso, el navegador de compra ya abre la pieza.
+        if AL_URGENTE and compra and not MODO_RELEVO:
+            try:
+                AL_URGENTE(link)
+            except Exception as e:
+                print(f"    -> no se pudo precalentar: {e}")
 
     impacto_actual = evaluar_impacto(producto, va) if tipo != "agotado" else None
 

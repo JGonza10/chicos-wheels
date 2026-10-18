@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import time
@@ -166,7 +167,7 @@ async def _cerrar_si_aparece(page, selector_css, espera_ms=0):
     except Exception:
         return False
 
-async def dismiss_overlays(page, selector):
+async def dismiss_overlays(page, selector, espera_cookies_ms=1500):
     """
     Cierra banners de cookies y pop-ups promocionales que puedan tapar
     el botón de compra. Cada intento es best-effort: si el overlay no
@@ -176,7 +177,7 @@ async def dismiss_overlays(page, selector):
     # (10 s por llamada). El banner de cookies sale casi siempre en una
     # sesion nueva: se le da 1.5 s. El pop-up promocional puede no salir: se
     # mira al instante; si sale tarde, el reintento del clic lo cierra.
-    esperas = {"cookie_consent": 1500, "popup_close": 0}
+    esperas = {"cookie_consent": espera_cookies_ms, "popup_close": 0}
     for key in ("cookie_consent", "popup_close"):
         overlay_selector = selector.get(key)
         if overlay_selector:
@@ -362,6 +363,239 @@ async def esperar_captcha(page, url, headless, avisar=True, espera_max=180, inte
     return f"🧩 Captcha sin resolver a tiempo ({espera_max}s): {url}"
 
 
+async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
+                     headless, pausa, ya_cargada=False, limpiar_carrito=False):
+    """El recorrido de compra sobre una pagina ya abierta: la nueva de
+    comprar_producto o la precalentada del navegador caliente (navegador.py),
+    que llega con el producto ya cargado (ya_cargada) y un carrito que puede
+    traer sobras de un intento anterior (limpiar_carrito)."""
+    if not ya_cargada:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await dismiss_overlays(page, selector)
+    if limpiar_carrito and selector["store"] == "mattel" and await vaciar_carrito(page, url):
+        # Habia algo de un intento anterior: se recarga para que el contador
+        # del carrito no engañe a la espera de "Add to Bag".
+        await page.reload(wait_until="domcontentloaded", timeout=30000)
+    reloj.marca("producto")
+    fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
+    if fallo_captcha:
+        await guardar_captura_error(page, url, "captcha")
+        return fallo_captcha
+
+    try:
+        sold_out = await page.query_selector(selector["sold_out"])
+        if sold_out:
+            return f"❌ Producto agotado: {url}"
+
+        add_to_cart_button = await page.wait_for_selector(
+            selector["buy_button"], state="attached", timeout=10000
+        )
+        if await add_to_cart_button.is_disabled():
+            return f"❌ Producto agotado (botón deshabilitado): {url}"
+        try:
+            await add_to_cart_button.wait_for_element_state("visible", timeout=10000)
+        except Exception:
+            # Igual que con el click: un pop-up con retraso puede tapar
+            # el botón justo aquí. Se cierra y se reintenta una vez.
+            await dismiss_overlays(page, selector)
+            await add_to_cart_button.wait_for_element_state("visible", timeout=10000)
+
+        qty = await set_quantity(page, selector, qty_objetivo)
+
+        try:
+            await add_to_cart_button.click(timeout=5000)
+        except Exception:
+            # Un pop-up (p.ej. el de suscripción de Klaviyo en Mattel) puede
+            # aparecer con retraso y tapar el botón — reintenta tras cerrarlo.
+            await dismiss_overlays(page, selector)
+            await add_to_cart_button.click(timeout=10000)
+        resultado = f"✅ Producto agregado al carrito (cantidad: {qty}): {url}"
+        reloj.marca("agregar")
+        if not dry and notificar:
+            notify(resultado)
+
+        # El clic en "Add to Bag" dispara una llamada AJAX de Shopify;
+        # si se navega de inmediato al carrito esa llamada puede no
+        # haber terminado y el carrito llega vacío (detectado
+        # 2026-09-28). Se confirma esperando a que el contador del
+        # carrito en el header deje de marcar 0 antes de seguir.
+        contador_carrito = selector.get("cart_count")
+        if contador_carrito:
+            try:
+                await page.wait_for_function(
+                    "(sel) => { const el = document.querySelector(sel); "
+                    "const t = el && el.textContent.trim(); return t && t !== '0'; }",
+                    arg=contador_carrito,
+                    timeout=8000,
+                )
+            except Exception:
+                pass  # best-effort: si no se puede confirmar, se sigue igual
+    except Exception as e:
+        await guardar_captura_error(page, url, "boton")
+        resultado = f"❌ No se encontró el botón en: {url} | Error: {e}"
+        if es_pieza_rlc(url) and not await sesion_mattel_activa(page):
+            resultado += ("\n🔐 Es pieza RLC y el bot no tiene sesión de Mattel: corre "
+                          "'python iniciar_sesion_mattel.py' en la PC y entra con tu cuenta Red Line Club.")
+        if not dry and notificar:
+            notify(resultado)
+        return resultado
+
+    # El flujo de checkout automático solo está implementado para Mattel Creations.
+    if selector["store"] != "mattel":
+        return resultado
+
+    try:
+        # Ir directo a /checkout redirige al home desde que Mattel
+        # cambió su flujo de carrito (detectado 2026-09-28): hay que
+        # pasar por /cart (respetando el idioma de la URL del
+        # producto) y usar el botón real "Checkout" del carrito, que
+        # sí arrastra el token de sesión al checkout de invitado.
+        prefijo_idioma = url.split("/products/")[0].split("creations.mattel.com")[-1]
+        await page.goto(f"https://creations.mattel.com{prefijo_idioma}/cart")
+        fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
+        if fallo_captcha:
+            await guardar_captura_error(page, url, "captcha")
+            return f"⚠️ Producto en carrito pero el checkout pidio captcha: {fallo_captcha}"
+
+        # Las cookies ya se aceptaron en la pagina del producto: aqui solo pop-ups.
+        await dismiss_overlays(page, selector, espera_cookies_ms=0)
+        boton_checkout = await page.wait_for_selector(
+            selector["cart_checkout"], state="visible", timeout=10000
+        )
+        await boton_checkout.click(timeout=10000)
+        await page.wait_for_load_state("domcontentloaded", timeout=20000)
+        reloj.marca("carrito_y_checkout")
+
+        fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
+        if fallo_captcha:
+            await guardar_captura_error(page, url, "captcha")
+            return f"⚠️ Producto en carrito pero el checkout pidio captcha: {fallo_captcha}"
+
+        # Con sesion de Mattel (perfil RLC) el correo ya viene puesto y puede
+        # no haber campo: se llena solo si esta.
+        if await page.locator("#email").count():
+            await page.fill("#email", USER_EMAIL)
+        await dismiss_shop_modal(page)
+
+        try:
+            await page.select_option("select[name='countryCode']", label="Mexico", timeout=5000)
+        except Exception:
+            pass
+
+        # Con sesion iniciada, Shopify suele mostrar la direccion guardada en
+        # vez de los campos: si no estan visibles, se usa la guardada.
+        not_autofill = ":not([id*='autofill'])"
+        campo_direccion = page.locator(f"input[name='address1']{not_autofill}").first
+        if await campo_direccion.count() and await campo_direccion.is_visible():
+            await page.fill(f"input[name='firstName']{not_autofill}", SHIP_FIRST_NAME)
+            await page.fill(f"input[name='lastName']{not_autofill}", SHIP_LAST_NAME)
+            await page.fill(f"input[name='address1']{not_autofill}", SHIP_ADDRESS1)
+            if SHIP_ADDRESS2:
+                await page.fill(f"input[name='address2']{not_autofill}", SHIP_ADDRESS2)
+            await page.fill(f"input[name='city']{not_autofill}", SHIP_CITY)
+            await page.fill(f"input[name='postalCode']{not_autofill}", SHIP_POSTAL_CODE)
+            await page.fill(f"input[name='phone']{not_autofill}", SHIP_PHONE)
+
+            # El estado de .env primero, con margen; los de respaldo ya
+            # con la pagina lista, sin 5 s cada uno.
+            for i, candidate in enumerate(c for c in (SHIP_STATE, "Ciudad de Mexico", "Ciudad de México") if c):
+                try:
+                    await page.select_option("select[name='zone']", label=candidate,
+                                             timeout=5000 if i == 0 else 1000)
+                    break
+                except Exception:
+                    continue
+
+            # El campo RFC no siempre existe: si no esta, no se esperan 5 s.
+            if RFC and await page.locator("input[name*='rfc' i]").count():
+                try:
+                    await page.fill("input[name*='rfc' i]", RFC, timeout=3000)
+                except Exception:
+                    pass
+        reloj.marca("datos_envio")
+
+        await dismiss_shop_modal(page)
+        await page.check("#basic-creditCards")
+        # Antes: 2 s fijos. Ahora se sigue en cuanto los iframes de
+        # la tarjeta (checkout.pci.shopifyinc.com) estan cargados.
+        await esperar_frames(page, ("number-ltr", "expiry-ltr",
+                                    "verification_value-ltr", "name-ltr"))
+
+        def find_frame(marker):
+            return next(f for f in page.frames if marker in f.url)
+
+        await find_frame("number-ltr").fill("input[name='number']", CARD_NUMBER)
+        await find_frame("expiry-ltr").fill("input[name='expiry']", CARD_EXPIRY)
+        await find_frame("verification_value-ltr").fill("input[name='verification_value']", CARD_CVV)
+        await find_frame("name-ltr").fill("input[name='name']", CARD_NAME)
+        reloj.marca("tarjeta")
+
+        if dry:
+            resultado = f"🧪 DRY RUN: checkout llenado, sin pagar: {url}\n{reloj.texto()}"
+            print("  " + reloj.texto())
+            if pausa:
+                print(resultado)
+                print("🧪 Ventana abierta para inspección — ciérrala manualmente para continuar.")
+                await page.wait_for_event("close", timeout=0)
+            return resultado
+
+        await dismiss_shop_modal(page, espera_ms=800)
+        await page.click("#checkout-pay-button")
+        reloj.marca("pagar")
+        resultado = f"🎉 Pedido realizado para: {url}\n{reloj.texto()}"
+        print("  " + reloj.texto())
+        if notificar:
+            notify(resultado)
+    except Exception as e:
+        resultado = f"⚠️ Producto en carrito pero falló el checkout automático: {url} | Error: {e}"
+        await guardar_captura_error(page, url, "checkout")
+        if not dry and notificar:
+            notify(resultado)
+        if pausa:
+            print(resultado)
+            print(f"🧪 URL actual al fallar: {page.url}")
+            print("🧪 Ventana abierta para inspección — ciérrala manualmente para continuar.")
+            await page.wait_for_event("close", timeout=0)
+
+    return resultado
+
+
+def es_pieza_rlc(url):
+    """Las piezas Red Line Club piden membresia y sesion iniciada en Mattel."""
+    return "rlc" in (url or "").lower().split("/products/")[-1]
+
+
+async def sesion_mattel_activa(page):
+    """True si la pagina se ve con una cuenta de Mattel iniciada (Shopify pone
+    el id del cliente en __st.cid / ShopifyAnalytics). Best-effort."""
+    try:
+        cid = await page.evaluate(
+            "() => (window.__st && window.__st.cid) || (window.ShopifyAnalytics && "
+            "ShopifyAnalytics.meta && ShopifyAnalytics.meta.page && "
+            "ShopifyAnalytics.meta.page.customerId) || null")
+        return bool(cid)
+    except Exception:
+        return False
+
+
+async def vaciar_carrito(page, url):
+    """Vacia el carrito de Mattel (API AJAX de Shopify) si tiene algo. Hace
+    falta con el navegador caliente: el carrito vive entre compras y un
+    intento fallido no debe colarse en el siguiente pago. Devuelve cuantas
+    piezas habia (0 si estaba vacio o no se pudo leer)."""
+    prefijo = url.split("/products/")[0].split("creations.mattel.com")[-1]
+    try:
+        n = await page.evaluate(
+            "async (pref) => { const r = await fetch(pref + '/cart.js', {credentials: 'same-origin'});"
+            " const c = await r.json(); if (c.item_count > 0) {"
+            " await fetch(pref + '/cart/clear.js', {method: 'POST', credentials: 'same-origin'}); }"
+            " return c.item_count; }", prefijo)
+        return int(n or 0)
+    except Exception as e:
+        print(f"  ⚠️ No se pudo revisar el carrito antes de comprar: {e}")
+        return 0
+
+
 class Cronometro:
     """Cuanto tarda cada paso de una compra, para saber donde se van los
     segundos. Sale en el mensaje final: "⏱ 21.4 s (navegador 1.2 · ...)"."""
@@ -395,7 +629,8 @@ async def esperar_frames(page, marcas, timeout_ms=10000, intervalo_ms=150):
 
 
 async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
-                           permitir_pausa=True, notificar=True, headless=False):
+                           permitir_pausa=True, notificar=True, headless=False,
+                           navegador=None):
     """Compra (o intenta) UNA URL.
 
     cantidad/dry_run/permitir_pausa permiten compras puntuales (boton
@@ -410,7 +645,13 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
     UNA vez al final con el desenlace real.
     headless=True (prueba diaria del checkout) corre sin ventana; las compras
     normales usan ventana visible para poder resolver captchas a mano.
+    navegador: un NavegadorCaliente (navegador.py). Si viene, la compra corre
+    ahi, sobre la pagina precalentada si existe, en vez de abrir Chromium.
     """
+    if navegador is not None:
+        return await asyncio.wrap_future(navegador.comprar(
+            url, cantidad=cantidad, dry_run=dry_run, permitir_pausa=permitir_pausa,
+            notificar=notificar))
     selector = get_selector(url)
     if selector is None:
         return f"❌ Tienda no soportada: {url}"
@@ -429,179 +670,8 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
                 page = await context.new_page()
                 reloj.marca("navegador")
 
-                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                await dismiss_overlays(page, selector)
-                reloj.marca("producto")
-                fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
-                if fallo_captcha:
-                    await guardar_captura_error(page, url, "captcha")
-                    return fallo_captcha
-
-                try:
-                    sold_out = await page.query_selector(selector["sold_out"])
-                    if sold_out:
-                        return f"❌ Producto agotado: {url}"
-
-                    add_to_cart_button = await page.wait_for_selector(
-                        selector["buy_button"], state="attached", timeout=10000
-                    )
-                    if await add_to_cart_button.is_disabled():
-                        return f"❌ Producto agotado (botón deshabilitado): {url}"
-                    try:
-                        await add_to_cart_button.wait_for_element_state("visible", timeout=10000)
-                    except Exception:
-                        # Igual que con el click: un pop-up con retraso puede tapar
-                        # el botón justo aquí. Se cierra y se reintenta una vez.
-                        await dismiss_overlays(page, selector)
-                        await add_to_cart_button.wait_for_element_state("visible", timeout=10000)
-
-                    qty = await set_quantity(page, selector, qty_objetivo)
-
-                    try:
-                        await add_to_cart_button.click(timeout=5000)
-                    except Exception:
-                        # Un pop-up (p.ej. el de suscripción de Klaviyo en Mattel) puede
-                        # aparecer con retraso y tapar el botón — reintenta tras cerrarlo.
-                        await dismiss_overlays(page, selector)
-                        await add_to_cart_button.click(timeout=10000)
-                    resultado = f"✅ Producto agregado al carrito (cantidad: {qty}): {url}"
-                    reloj.marca("agregar")
-                    if not dry and notificar:
-                        notify(resultado)
-
-                    # El clic en "Add to Bag" dispara una llamada AJAX de Shopify;
-                    # si se navega de inmediato al carrito esa llamada puede no
-                    # haber terminado y el carrito llega vacío (detectado
-                    # 2026-09-28). Se confirma esperando a que el contador del
-                    # carrito en el header deje de marcar 0 antes de seguir.
-                    contador_carrito = selector.get("cart_count")
-                    if contador_carrito:
-                        try:
-                            await page.wait_for_function(
-                                "(sel) => { const el = document.querySelector(sel); "
-                                "const t = el && el.textContent.trim(); return t && t !== '0'; }",
-                                arg=contador_carrito,
-                                timeout=8000,
-                            )
-                        except Exception:
-                            pass  # best-effort: si no se puede confirmar, se sigue igual
-                except Exception as e:
-                    await guardar_captura_error(page, url, "boton")
-                    resultado = f"❌ No se encontró el botón en: {url} | Error: {e}"
-                    if not dry and notificar:
-                        notify(resultado)
-                    return resultado
-
-                # El flujo de checkout automático solo está implementado para Mattel Creations.
-                if selector["store"] != "mattel":
-                    return resultado
-
-                try:
-                    # Ir directo a /checkout redirige al home desde que Mattel
-                    # cambió su flujo de carrito (detectado 2026-09-28): hay que
-                    # pasar por /cart (respetando el idioma de la URL del
-                    # producto) y usar el botón real "Checkout" del carrito, que
-                    # sí arrastra el token de sesión al checkout de invitado.
-                    prefijo_idioma = url.split("/products/")[0].split("creations.mattel.com")[-1]
-                    await page.goto(f"https://creations.mattel.com{prefijo_idioma}/cart")
-                    fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
-                    if fallo_captcha:
-                        await guardar_captura_error(page, url, "captcha")
-                        return f"⚠️ Producto en carrito pero el checkout pidio captcha: {fallo_captcha}"
-
-                    await dismiss_overlays(page, selector)
-                    boton_checkout = await page.wait_for_selector(
-                        selector["cart_checkout"], state="visible", timeout=10000
-                    )
-                    await boton_checkout.click(timeout=10000)
-                    await page.wait_for_load_state("domcontentloaded", timeout=20000)
-                    reloj.marca("carrito_y_checkout")
-
-                    fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
-                    if fallo_captcha:
-                        await guardar_captura_error(page, url, "captcha")
-                        return f"⚠️ Producto en carrito pero el checkout pidio captcha: {fallo_captcha}"
-
-                    await page.fill("#email", USER_EMAIL)
-                    await dismiss_shop_modal(page)
-
-                    try:
-                        await page.select_option("select[name='countryCode']", label="Mexico", timeout=5000)
-                    except Exception:
-                        pass
-
-                    not_autofill = ":not([id*='autofill'])"
-                    await page.fill(f"input[name='firstName']{not_autofill}", SHIP_FIRST_NAME)
-                    await page.fill(f"input[name='lastName']{not_autofill}", SHIP_LAST_NAME)
-                    await page.fill(f"input[name='address1']{not_autofill}", SHIP_ADDRESS1)
-                    if SHIP_ADDRESS2:
-                        await page.fill(f"input[name='address2']{not_autofill}", SHIP_ADDRESS2)
-                    await page.fill(f"input[name='city']{not_autofill}", SHIP_CITY)
-                    await page.fill(f"input[name='postalCode']{not_autofill}", SHIP_POSTAL_CODE)
-                    await page.fill(f"input[name='phone']{not_autofill}", SHIP_PHONE)
-
-                    # El estado de .env primero, con margen; los de respaldo ya
-                    # con la pagina lista, sin 5 s cada uno.
-                    for i, candidate in enumerate(c for c in (SHIP_STATE, "Ciudad de Mexico", "Ciudad de México") if c):
-                        try:
-                            await page.select_option("select[name='zone']", label=candidate,
-                                                     timeout=5000 if i == 0 else 1000)
-                            break
-                        except Exception:
-                            continue
-
-                    # El campo RFC no siempre existe: si no esta, no se esperan 5 s.
-                    if RFC and await page.locator("input[name*='rfc' i]").count():
-                        try:
-                            await page.fill("input[name*='rfc' i]", RFC, timeout=3000)
-                        except Exception:
-                            pass
-                    reloj.marca("datos_envio")
-
-                    await dismiss_shop_modal(page)
-                    await page.check("#basic-creditCards")
-                    # Antes: 2 s fijos. Ahora se sigue en cuanto los iframes de
-                    # la tarjeta (checkout.pci.shopifyinc.com) estan cargados.
-                    await esperar_frames(page, ("number-ltr", "expiry-ltr",
-                                                "verification_value-ltr", "name-ltr"))
-
-                    def find_frame(marker):
-                        return next(f for f in page.frames if marker in f.url)
-
-                    await find_frame("number-ltr").fill("input[name='number']", CARD_NUMBER)
-                    await find_frame("expiry-ltr").fill("input[name='expiry']", CARD_EXPIRY)
-                    await find_frame("verification_value-ltr").fill("input[name='verification_value']", CARD_CVV)
-                    await find_frame("name-ltr").fill("input[name='name']", CARD_NAME)
-                    reloj.marca("tarjeta")
-
-                    if dry:
-                        resultado = f"🧪 DRY RUN: checkout llenado, sin pagar: {url}\n{reloj.texto()}"
-                        print("  " + reloj.texto())
-                        if pausa:
-                            print(resultado)
-                            print("🧪 Ventana abierta para inspección — ciérrala manualmente para continuar.")
-                            await page.wait_for_event("close", timeout=0)
-                        return resultado
-
-                    await dismiss_shop_modal(page, espera_ms=800)
-                    await page.click("#checkout-pay-button")
-                    reloj.marca("pagar")
-                    resultado = f"🎉 Pedido realizado para: {url}\n{reloj.texto()}"
-                    print("  " + reloj.texto())
-                    if notificar:
-                        notify(resultado)
-                except Exception as e:
-                    resultado = f"⚠️ Producto en carrito pero falló el checkout automático: {url} | Error: {e}"
-                    await guardar_captura_error(page, url, "checkout")
-                    if not dry and notificar:
-                        notify(resultado)
-                    if pausa:
-                        print(resultado)
-                        print(f"🧪 URL actual al fallar: {page.url}")
-                        print("🧪 Ventana abierta para inspección — ciérrala manualmente para continuar.")
-                        await page.wait_for_event("close", timeout=0)
-
-                return resultado
+                return await _comprar_en(page, url, selector, reloj, dry, qty_objetivo,
+                                         notificar, headless, pausa)
             finally:
                 await browser.close()
     except Exception as e:

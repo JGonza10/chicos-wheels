@@ -62,6 +62,7 @@ python prueba_extras.py; python prueba_admin.py; python prueba_integraciones.py
 python prueba_hallazgos.py; python prueba_evento_reintentos.py; python prueba_habilidades.py
 python prueba_velocidad.py      # express, francotirador, modo drop, 429, Telegram, relevo
 python prueba_rapidez_compra.py # compra sin esperas fijas y cronómetro (Chromium real, páginas locales)
+python prueba_navegador_caliente.py # navegador caliente + sesión RLC contra una tienda Mattel falsa (DRY RUN)
 cd ..; python -m unittest tests.test_bot -v      # montaje, acceso y alta en el inventario
 ```
 
@@ -72,13 +73,23 @@ Cada prueba corre en una copia temporal: no toca `bot.db`, `estado.json` ni Tele
 - `.env`: tarjeta, envío, SMTP y `COLLECTHUB_EMAIL`.
 - `config.env`: Telegram del monitor y ajustes.
 - `config.json`: canales de aviso.
-- `bot.db`, `historial.db`, `estado.json`, listas `*.json`, `latido.txt` y `capturas_error/`.
+- `bot.db`, `historial.db`, `estado.json`, listas `*.json`, `latido.txt`, `capturas_error/` y `perfil_mattel/` (sesión de Mattel).
 
 ## Reglas
 
 - **Sin `HOTWHEELS_DRY_RUN=1`, "Comprar" paga de verdad.**
 - Toda compra pasa por `solicitar_compra()`, con un solo navegador a la vez (`_LOCK_DISPARO`). `run_one(url)` sirve para una pieza; nunca `run_all()`.
 - `comprar_producto` corre con `headless=False` porque los captchas se resuelven a mano.
+- **Navegador caliente** (`navegador.py`, `HOTWHEELS_PRECALENTAR`, encendido por defecto): un Chromium en su propio hilo.
+  - Se precalienta con el aviso urgente del monitor y al tocar "Comprar" en Telegram. La compra del panel, de Telegram o de la cola usa esa página ya cargada.
+  - Antes de agregar, vacía el carrito (`/cart/clear.js`), porque el carrito vive entre compras.
+  - Las páginas sin usar se cierran a los 10 min y el navegador a los 20 min sin uso.
+  - Los eventos programados, `run_all` y la prueba diaria siguen abriendo Chromium desde cero.
+- **Piezas RLC:** piden membresía y sesión iniciada.
+  - Corre `python iniciar_sesion_mattel.py` con la app cerrada, entra una vez con tu cuenta Red Line Club y cierra la ventana. Luego pon `HOTWHEELS_PERFIL_MATTEL=1`.
+  - El navegador caliente usa ese perfil (`perfil_mattel/`, fuera de git). Solo se guardan las cookies, nunca la contraseña.
+  - Con sesión, el checkout no llena correo ni dirección si ya vienen puestos.
+  - Si una pieza RLC no tiene botón y no hay sesión, el error dice qué hacer.
 - El resultado de cada compra (y de cada DRY RUN) trae el cronómetro por paso: `⏱ 21.4 s (navegador 1.2 · producto 4.0 · ...)`. Los pop-ups que pueden no salir se revisan sin esperas fijas.
 - Una pieza comprada nunca se reabre sola.
 - Los botones de Telegram van solo al chat personal (`TELEGRAM_CHAT_ID`).
