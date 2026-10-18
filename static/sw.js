@@ -1,9 +1,11 @@
-/* Service worker mínimo: cachea los estáticos para que la app abra rápido
- * (y algo funcione sin conexión). Nunca cachea /api/* — el inventario debe
+/* Service worker mínimo: guarda los estáticos para que la app abra sin conexión.
+ * RED PRIMERO (desde 2026-10-18): siempre se pide la versión nueva y la copia
+ * guardada solo se usa sin internet. Antes era "caché primero" y después de
+ * cada despliegue el navegador seguía mostrando la versión vieja. Nunca cachea /api/* — el inventario debe
  * verse siempre fresco, nunca una copia vieja servida "offline" por error.
  * Sube CACHE_VERSION cuando cambien app.js/styles.css para forzar a los
  * navegadores con la app ya instalada a bajar la versión nueva. */
-const CACHE_VERSION = 'chicoswheels-v34';
+const CACHE_VERSION = 'chicoswheels-v35';
 const ESTATICOS = ['/', '/app.js', '/styles.css', '/manifest.json', '/logo.webp'];
 
 self.addEventListener('install', (e) => {
@@ -29,10 +31,12 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/tienda') ||
       url.pathname.startsWith('/bot') || e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request).then((cacheado) => cacheado || fetch(e.request).then((resp) => {
-      const copia = resp.clone();
-      caches.open(CACHE_VERSION).then((c) => c.put(e.request, copia));
+    fetch(e.request).then((resp) => {
+      if (resp.ok) {
+        const copia = resp.clone();
+        caches.open(CACHE_VERSION).then((c) => c.put(e.request, copia));
+      }
       return resp;
-    }).catch(() => cacheado))
+    }).catch(() => caches.match(e.request))
   );
 });

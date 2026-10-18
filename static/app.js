@@ -64,6 +64,8 @@ function temaGuardado() {
 
 /* ---------- Capa de API ---------- */
 const TOKEN_KEY = 'collecthub_token';
+/** Versión visible en el menú: súbela junto con CACHE_VERSION de sw.js. */
+const APP_VERSION = 'v35 · 2026-10-18';
 let token = localStorage.getItem(TOKEN_KEY) || '';
 
 async function api(ruta, opciones = {}) {
@@ -399,10 +401,11 @@ function render() {
         ? `<div class="navsep">${n[2]}</div>`
         : `<button data-a="nav" data-v="${n[0]}" class="${ui.vista === n[0] ? 'on' : ''}"><span class="ic">${n[1]}</span>${n[2]}<span class="cnt">${CNT[n[0]] ? (CNT[n[0]]() || '') : ''}</span></button>`)).join('')}
         ${botVisible() ? `<div class="navsep">Bot</div><button data-a="bot" title="Monitor y compra en Mattel Creations"><span class="ic">🤖</span>Bot Hot Wheels${ui.bot ? '' : '<span class="cnt">en tu PC</span>'}</button>` : ''}
-        <div class="salir"><button data-a="salir"><span class="ic">⏻</span>Cerrar sesión</button></div>
+        <div class="salir"><button data-a="salir"><span class="ic">⏻</span>Cerrar sesión</button>
+          <div style="font-size:10.5px;color:var(--muted);padding:6px 10px 0">Versión ${APP_VERSION}</div></div>
       </nav>
     </aside>
-    <main class="main">${V()}</main>
+    <main class="main">${V()}<div class="np" style="text-align:center;font-size:10.5px;color:var(--muted);margin-top:28px">Erik G · versión ${APP_VERSION}</div></main>
   </div>
   <button class="fab" data-a="nuevo" title="Registrar pieza" aria-label="Registrar pieza">+</button>
   <nav class="mob">${botVisible() ? '<button data-a="bot"><span class="ic">🤖</span>Bot</button>' : ''}${NAV.filter((n) => !n[0].startsWith('SEP') && (n[0] !== 'apartados' || db.apartados.length)).map((n) =>
