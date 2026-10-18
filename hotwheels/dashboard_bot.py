@@ -21,6 +21,9 @@ import telegram_control
 import navegador as NAVEGADOR
 
 app = Flask(__name__)
+# Panel solo local (http): cookie de Flask cerrada, pero sin Secure para que funcione en 127.0.0.1.
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict",
+                  SESSION_COOKIE_SECURE=bool(os.environ.get("RAILWAY_ENVIRONMENT")))
 # La base vive junto al codigo: no depende de desde donde se arranque.
 DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.db")
 

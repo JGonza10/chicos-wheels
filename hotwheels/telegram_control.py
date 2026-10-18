@@ -39,8 +39,11 @@ class Control:
     # --- Telegram ---------------------------------------------------------
     def _llamar_telegram(self, metodo, **params):
         params = {k: v for k, v in params.items() if v is not None}
-        r = requests.post("https://api.telegram.org/bot%s/%s" % (self.token, metodo),
-                          json=params, timeout=params.get("timeout", 0) + 15)
+        # Tiempo limite = la espera larga de getUpdates + 15 s de margen. Bandit no
+        # evalua la suma y lo marca como "sin timeout"; si lo tiene.
+        espera = params.get("timeout", 0) + 15
+        r = requests.post("https://api.telegram.org/bot%s/%s" % (self.token, metodo),  # nosec B113
+                          json=params, timeout=espera)
         return r.json()
 
     def _api(self, metodo, **params):

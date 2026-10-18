@@ -23,8 +23,19 @@ except Exception:
 _DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_DIR, ".env"))
 
-with open(os.path.join(_DIR, "config.json"), "r") as f:
-    config = json.load(f)
+# config.json no va a git (trae correo y telefono). Sin el, el bot arranca con
+# los avisos apagados en vez de tronar; la plantilla es config.json.example.
+_CONFIG_VACIA = {"notifications": {
+    "email": {"enabled": False, "smtp_server": "", "smtp_port": 587, "sender": "", "recipient": ""},
+    "whatsapp": {"enabled": False, "from_number": "", "to_number": ""},
+    "telegram": {"enabled": False}}}
+try:
+    with open(os.path.join(_DIR, "config.json"), "r") as f:
+        config = json.load(f)
+except FileNotFoundError:
+    print("  [bot] Sin hotwheels/config.json: avisos por correo/WhatsApp/Telegram apagados "
+          "(copia config.json.example).")
+    config = json.loads(json.dumps(_CONFIG_VACIA))
 
 USER_EMAIL = os.environ.get("HOTWHEELS_USER_EMAIL", "")
 CARD_NUMBER = os.environ.get("HOTWHEELS_CARD_NUMBER", "")

@@ -6,6 +6,7 @@
 !*.py
 !*.ps1
 !.env.example
+!config.json.example
 !requirements.txt
 !README.md
 !templates/

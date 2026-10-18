@@ -31,6 +31,10 @@ def crear_app() -> Flask:
         from werkzeug.middleware.proxy_fix import ProxyFix
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     app.config["JSON_SORT_KEYS"] = False
+    # La sesión va por JWT, no por la cookie de Flask; si algún día se usa, que
+    # salga cerrada. Secure solo en Railway (HTTPS); en la PC es http://localhost.
+    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                      SESSION_COOKIE_SECURE=bool(os.environ.get("RAILWAY_ENVIRONMENT")))
 
     # Tope al tamaño de cualquier petición (también acota la carga de la
     # plantilla .xlsx de inventario): sin esto, Flask acepta un cuerpo de
