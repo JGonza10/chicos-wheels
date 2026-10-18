@@ -31,6 +31,31 @@ CARD_NUMBER = os.environ.get("HOTWHEELS_CARD_NUMBER", "")
 CARD_EXPIRY = os.environ.get("HOTWHEELS_CARD_EXPIRY", "")
 CARD_CVV = os.environ.get("HOTWHEELS_CARD_CVV", "")
 CARD_NAME = os.environ.get("HOTWHEELS_CARD_NAME", "")
+
+
+def tarjetas_configuradas():
+    """La tarjeta principal (HOTWHEELS_CARD_*) y las de respaldo
+    (HOTWHEELS_CARD2_* ... HOTWHEELS_CARD10_*), en ese orden. Una de respaldo
+    sin numero, vencimiento o CVV se salta. Se lee al momento de comprar:
+    cambiar el .env y reiniciar basta."""
+    tarjetas = []
+    for n in range(1, 11):
+        pre = "HOTWHEELS_CARD_" if n == 1 else f"HOTWHEELS_CARD{n}_"
+        t = {k: os.environ.get(pre + k.upper(), "").strip()
+             for k in ("number", "expiry", "cvv", "name")}
+        if n == 1:
+            t = {"number": CARD_NUMBER, "expiry": CARD_EXPIRY, "cvv": CARD_CVV, "name": CARD_NAME}
+        if t["number"] and t["expiry"] and t["cvv"]:
+            t["name"] = t["name"] or CARD_NAME
+            t["n"] = n
+            tarjetas.append(t)
+    return tarjetas
+
+
+def etiqueta_tarjeta(t):
+    """'tarjeta 2 (•••• 4321)': nunca el numero completo en mensajes ni logs."""
+    digitos = "".join(ch for ch in t.get("number", "") if ch.isdigit())
+    return f"tarjeta {t.get('n', '?')} (•••• {digitos[-4:] or '????'})"
 SHIP_FIRST_NAME = os.environ.get("HOTWHEELS_SHIP_FIRST_NAME", "")
 SHIP_LAST_NAME = os.environ.get("HOTWHEELS_SHIP_LAST_NAME", "")
 SHIP_ADDRESS1 = os.environ.get("HOTWHEELS_SHIP_ADDRESS1", "")
@@ -521,13 +546,9 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         await esperar_frames(page, ("number-ltr", "expiry-ltr",
                                     "verification_value-ltr", "name-ltr"))
 
-        def find_frame(marker):
-            return next(f for f in page.frames if marker in f.url)
-
-        await find_frame("number-ltr").fill("input[name='number']", CARD_NUMBER)
-        await find_frame("expiry-ltr").fill("input[name='expiry']", CARD_EXPIRY)
-        await find_frame("verification_value-ltr").fill("input[name='verification_value']", CARD_CVV)
-        await find_frame("name-ltr").fill("input[name='name']", CARD_NAME)
+        tarjetas = tarjetas_configuradas() or [
+            {"number": CARD_NUMBER, "expiry": CARD_EXPIRY, "cvv": CARD_CVV, "name": CARD_NAME, "n": 1}]
+        await llenar_tarjeta(page, tarjetas[0])
         reloj.marca("tarjeta")
 
         if dry:
@@ -539,15 +560,43 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
                 await page.wait_for_event("close", timeout=0)
             return resultado
 
-        await dismiss_shop_modal(page, espera_ms=800)
-        await page.click("#checkout-pay-button")
-        reloj.marca("pagar")
-        # Lo que de verdad se cobro y la liga del estado del pedido (para el
-        # costo real en el inventario y para seguir el envio, pedidos_mattel.py).
+        # Pagar. Respaldo de tarjeta: SOLO si Mattel dice claramente que la
+        # rechazo, se llena la siguiente y se vuelve a pagar. Si no queda claro
+        # (la pagina tarda, error raro), NO se reintenta: el pago pudo entrar y
+        # cobrarte dos veces es peor que perder la pieza.
         import pedidos_mattel
-        conf, url_estado = await pedidos_mattel.esperar_confirmacion(page)
+        rechazadas = []
+        for i, tarjeta in enumerate(tarjetas):
+            if i:
+                await llenar_tarjeta(page, tarjeta)
+            await dismiss_shop_modal(page, espera_ms=800)
+            antes = await _texto_pagina(page)
+            await pedidos_mattel.vigilar_rechazo(page)
+            await page.click("#checkout-pay-button")
+            estado_pago, conf, url_estado = await pedidos_mattel.esperar_pago(
+                page, antes, timeout_ms=int(SEGUNDOS_ESPERA_PAGO * 1000))
+            if estado_pago != "rechazada":
+                break
+            rechazadas.append(etiqueta_tarjeta(tarjeta))
+            print(f"  💳 {etiqueta_tarjeta(tarjeta)} rechazada")
+        reloj.marca("pagar")
+        if estado_pago == "rechazada":
+            resultado = (f"⚠️ Producto en carrito pero Mattel rechazó todas las tarjetas "
+                         f"({', '.join(rechazadas)}): {url}\n{reloj.texto()}")
+            await guardar_captura_error(page, url, "pago_rechazado")
+            if notificar:
+                notify(resultado)
+            return resultado
         extra = pedidos_mattel.texto_confirmacion(conf, url_estado)
-        resultado = f"🎉 Pedido realizado para: {url}" + (f" | {extra}" if extra else "") + f"\n{reloj.texto()}"
+        resultado = f"🎉 Pedido realizado para: {url}" + (f" | {extra}" if extra else "")
+        if estado_pago == "pagada" and rechazadas:
+            resultado += f" | 💳 Pagó con la {etiqueta_tarjeta(tarjeta)} ({', '.join(rechazadas)} rechazada)"
+        if estado_pago == "sin_confirmar":
+            resultado += (f" | ⚠️ Se intentó con la {etiqueta_tarjeta(tarjeta)}"
+                          + (f" ({', '.join(rechazadas)} rechazada)" if rechazadas else "")
+                          + " y no vi ni la página de confirmación ni un rechazo: revisa tu correo "
+                            "de Mattel ANTES de volver a intentar")
+        resultado += f"\n{reloj.texto()}"
         print("  " + reloj.texto())
         if notificar:
             notify(resultado)
@@ -599,6 +648,27 @@ async def vaciar_carrito(page, url):
     except Exception as e:
         print(f"  ⚠️ No se pudo revisar el carrito antes de comprar: {e}")
         return 0
+
+
+SEGUNDOS_ESPERA_PAGO = 45
+
+
+async def llenar_tarjeta(page, t):
+    """Llena los iframes de la tarjeta (checkout.pci.shopifyinc.com)."""
+    def find_frame(marker):
+        return next(f for f in page.frames if marker in f.url)
+
+    await find_frame("number-ltr").fill("input[name='number']", t["number"])
+    await find_frame("expiry-ltr").fill("input[name='expiry']", t["expiry"])
+    await find_frame("verification_value-ltr").fill("input[name='verification_value']", t["cvv"])
+    await find_frame("name-ltr").fill("input[name='name']", t.get("name") or CARD_NAME)
+
+
+async def _texto_pagina(page):
+    try:
+        return await page.inner_text("body")
+    except Exception:
+        return ""
 
 
 class Cronometro:

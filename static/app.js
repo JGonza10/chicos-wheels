@@ -164,7 +164,8 @@ async function cargarEstado() {
   db = normalizar(await GET('/estado'));
   CUR = db.ajustes.moneda || 'MXN';
   /* Bot Hot Wheels: solo en esta PC y para la cuenta dueña (collecthub/bot.py) */
-  try { ui.bot = (await GET('/bot/disponible')).disponible; } catch (e) { ui.bot = false; }
+  try { ui.botInfo = await GET('/bot/disponible'); } catch (e) { ui.botInfo = { disponible: false }; }
+  ui.bot = !!ui.botInfo.disponible;
   /* Cuánto deja el bot: calculado en SQL (estado.py reporte_bot) */
   try { db.botRep = await GET('/bot-reporte'); } catch (e) { db.botRep = null; }
   render();
@@ -397,14 +398,14 @@ function render() {
       <nav class="nav">${NAV.filter((n) => n[0] !== 'apartados' || db.apartados.length).map((n) => (n[0].startsWith('SEP')
         ? `<div class="navsep">${n[2]}</div>`
         : `<button data-a="nav" data-v="${n[0]}" class="${ui.vista === n[0] ? 'on' : ''}"><span class="ic">${n[1]}</span>${n[2]}<span class="cnt">${CNT[n[0]] ? (CNT[n[0]]() || '') : ''}</span></button>`)).join('')}
-        ${ui.bot ? '<div class="navsep">Bot</div><button data-a="bot" title="Monitor y compra en Mattel Creations"><span class="ic">🤖</span>Bot Hot Wheels</button>' : ''}
+        ${botVisible() ? `<div class="navsep">Bot</div><button data-a="bot" title="Monitor y compra en Mattel Creations"><span class="ic">🤖</span>Bot Hot Wheels${ui.bot ? '' : '<span class="cnt">en tu PC</span>'}</button>` : ''}
         <div class="salir"><button data-a="salir"><span class="ic">⏻</span>Cerrar sesión</button></div>
       </nav>
     </aside>
     <main class="main">${V()}</main>
   </div>
   <button class="fab" data-a="nuevo" title="Registrar pieza" aria-label="Registrar pieza">+</button>
-  <nav class="mob">${NAV.filter((n) => !n[0].startsWith('SEP') && (n[0] !== 'apartados' || db.apartados.length)).map((n) =>
+  <nav class="mob">${botVisible() ? '<button data-a="bot"><span class="ic">🤖</span>Bot</button>' : ''}${NAV.filter((n) => !n[0].startsWith('SEP') && (n[0] !== 'apartados' || db.apartados.length)).map((n) =>
     `<button data-a="nav" data-v="${n[0]}" class="${ui.vista === n[0] ? 'on' : ''}"><span class="ic">${n[1]}</span>${n[2].replace('Modo ', '')}</button>`).join('')}</nav>
   ${ui.modal ? `<div class="ov">${(MOD[ui.modal] || (() => ''))()}</div>` : ''}`;
   if (ui.modal === 'venta') pintarVenta();
@@ -1752,6 +1753,25 @@ MOD.pedido = function () {
   ${f('Presupuesto (opcional)', inp('pe_tope', '', 'number', '0.00'))}
   `, `<button class="btn gh" data-a="cerrar">Cancelar</button><button class="btn pri" data-a="saveped">Guardar</button>`, '500px');
 };
+/** El dueño siempre ve el enlace del bot; si aquí no corre, explica dónde sí. */
+const botVisible = () => !!(ui.bot || (ui.botInfo && ui.botInfo.dueno));
+MOD.botinfo = function () {
+  const b = ui.botInfo || {};
+  const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  const pasos = local
+    ? `<p>Estás en la app de tu PC, pero el bot no está encendido. Revisa:</p>
+       <ol style="margin:8px 0 0 18px;line-height:1.7">
+         <li>En el archivo <b>.env</b> de la carpeta de Chicos Wheels pon <code>HOTWHEELS_ACTIVO=1</code>.</li>
+         <li>Cierra la app y vuelve a abrirla con <code>python app.py</code> (o deja que la tarea <i>HotWheels_MonitorSiempre</i> la reinicie).</li>
+         <li>En la consola debe salir: <i>"Bot Hot Wheels: http://localhost:3000/bot/"</i>.</li>
+       </ol>`
+    : `<p>Esta es la app en <b>${b.en_railway ? 'Railway (la nube)' : esc(location.host)}</b>. El bot de compra <b>solo vive en tu PC</b>: abre un navegador visible para captchas y usa los datos de tu tarjeta, así que nunca corre en la nube.</p>
+       <p style="margin-top:10px">En tu PC abre <b><a href="http://localhost:3000/#bot">http://localhost:3000</a></b> y entra con esta misma cuenta: ahí está el menú <b>🤖 Bot Hot Wheels</b> (en el celular, en la barra de abajo).</p>
+       ${b.relevo ? '<p style="margin-top:10px">✅ Aquí en Railway sí corre el <b>monitor de relevo</b>: vigila Mattel y te avisa por Telegram si la PC deja de vigilar.</p>' : ''}`;
+  return shell('🤖 Bot Hot Wheels', b.montado ? '' : 'Dónde encontrarlo', `<div style="font-size:13.5px;line-height:1.6">${pasos}</div>`,
+    '<button class="btn pri" data-a="cerrar">Entendido</button>');
+};
+
 MOD.publicacion = function () {
   const a = ui.ctx || {};
   return shell('Publicación lista para copiar', a.nombre || '', `
@@ -1833,7 +1853,7 @@ document.addEventListener('click', async (e) => {
     case 'authtab': ui.authTab = el.dataset.v; ui.authErr = ''; render(); break;
     case 'auth': await autenticar(); break;
     case 'salir': if (confirm('¿Cerrar sesión en este dispositivo?')) salir(); break;
-    case 'bot': abrirBot(); break;
+    case 'bot': if (ui.bot) abrirBot(); else abrir('botinfo', null); break;
     case 'tema': aplicarTema(el.dataset.t); render(); break;
 
     /* --- navegación --- */

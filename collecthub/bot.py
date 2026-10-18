@@ -59,8 +59,15 @@ def _email_de_sesion() -> str:
 @bp.get("/disponible")
 @requiere_sesion
 def disponible():
+    """¿Se ve el bot? Al dueño también le dice POR QUÉ no (para que el menú
+    explique qué falta en vez de desaparecer). Otras cuentas solo reciben False."""
     montado = bool(current_app.config.get("BOT_MONTADO"))
-    return jsonify(disponible=montado and _email_de_sesion() in _duenos())
+    dueno = _email_de_sesion() in _duenos()
+    if not dueno:
+        return jsonify(disponible=False, dueno=False)
+    return jsonify(disponible=montado, dueno=True, montado=montado,
+                   en_railway=bool(os.environ.get("RAILWAY_ENVIRONMENT")),
+                   relevo=_NUBE is not None)
 
 
 @bp.post("/entrar")

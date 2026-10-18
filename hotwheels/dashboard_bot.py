@@ -983,6 +983,16 @@ def host_seguro(host, usuario, password):
     return host, None
 
 
+def nota_pago():
+    """Para la confirmacion de Telegram: que tarjetas puede usar esta compra."""
+    from bot_logic import tarjetas_configuradas
+    n = len(tarjetas_configuradas())
+    if n <= 1:
+        return ""
+    return (f"💳 Si Mattel rechaza la tarjeta 1, se intenta con la siguiente "
+            f"({n - 1} de respaldo). Solo si la rechaza: nunca se paga dos veces.")
+
+
 def precalentar(url):
     """Abre la pieza en el navegador caliente para que la compra arranque con
     la pagina lista. Nunca truena ni frena a quien la llama."""
@@ -1019,6 +1029,7 @@ def iniciar_servicios():
                 "ignorar": lambda hid: HALLAZGOS.cambiar_estado(hid, "ignorado"),
                 "importar_relevo": _importar_relevo,
                 "precalentar": precalentar,
+                "nota_pago": nota_pago,
             }).iniciar_hilo()
             print("  Botones de Telegram (Comprar/Ignorar): activos")
         except Exception as e:

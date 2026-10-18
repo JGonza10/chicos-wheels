@@ -39,6 +39,9 @@ for f in os.listdir(DIR):
         shutil.copy(os.path.join(DIR, f), TMP)
 with open(os.path.join(TMP, "config.json"), "w") as f:
     json.dump({"notifications": {"email": {"enabled": False}, "whatsapp": {"enabled": False}}}, f)
+os.environ.update({"HOTWHEELS_CARD2_NUMBER": "5555555555554444", "HOTWHEELS_CARD2_EXPIRY": "11/29",
+                   "HOTWHEELS_CARD2_CVV": "321", "HOTWHEELS_CARD3_NUMBER": "378282246310005",
+                   "HOTWHEELS_CARD3_EXPIRY": "10/29", "HOTWHEELS_CARD3_CVV": "4444"})
 os.environ.update({"HOTWHEELS_DRY_RUN": "1", "HOTWHEELS_USER_EMAIL": "prueba@x.mx",
                    "HOTWHEELS_CARD_NUMBER": "4111111111111111", "HOTWHEELS_CARD_EXPIRY": "12/30",
                    "HOTWHEELS_CARD_CVV": "123", "HOTWHEELS_CARD_NAME": "Prueba",
@@ -52,7 +55,8 @@ import navegador as N  # noqa: E402
 B.notify = lambda m: None
 
 # ---------------- tienda falsa ----------------
-TIENDA = {"carrito": 2, "con_sesion": False, "visitas_producto": 0, "limpiezas": 0}
+TIENDA = {"carrito": 2, "con_sesion": False, "visitas_producto": 0, "limpiezas": 0,
+          "rechazar": 0, "colgar": False, "pagos": 0}
 
 PRODUCTO = """<html><body>
 <a class="header__cart-count-wrapper">{n}</a>
@@ -67,7 +71,8 @@ CHECKOUT = """<html><body>
 <input type="checkbox" id="basic-creditCards">
 <script>setTimeout(() => {{ for (const m of ['number-ltr','expiry-ltr','verification_value-ltr','name-ltr']) {{
  const f = document.createElement('iframe'); f.src = 'https://checkout.pci.shopifyinc.com/' + m; document.body.appendChild(f); }} }}, 300);</script>
-<button id="checkout-pay-button" onclick="location.href='/checkouts/cn/abc/thank_you'">Pagar</button>
+<div id="err"></div>
+<button id="checkout-pay-button" onclick="fetch('/en-mx/pagar.js').then(r=>r.json()).then(d=>{{ if (d.r==='ok') location.href='/checkouts/cn/abc/thank_you'; else if (d.r==='no') document.getElementById('err').textContent='Your card was declined.'; }})">Pagar</button>
 </body></html>"""
 DIRECCION = """<input name="firstName"><input name="lastName"><input name="address1"><input name="address2">
 <input name="city"><input name="postalCode"><input name="phone">
@@ -89,6 +94,14 @@ async def responder(route):
         TIENDA["carrito"] = 0
         TIENDA["limpiezas"] += 1
         return await js({"item_count": 0})
+    if url.endswith("/pagar.js"):
+        TIENDA["pagos"] += 1
+        if TIENDA["colgar"]:
+            return await js({"r": "nada"})          # el banco no contesta: ni gracias ni rechazo
+        if TIENDA["rechazar"] > 0:
+            TIENDA["rechazar"] -= 1
+            return await js({"r": "no"})
+        return await js({"r": "ok"})
     if url.endswith("/cart/add.js"):
         TIENDA["carrito"] += 1
         return await js({"item_count": TIENDA["carrito"]})
@@ -196,6 +209,67 @@ check("el resultado trae el pedido y lo cobrado", "🎉" in r and "Pedido #MX777
 check("y la liga del estado del pedido", "Estado: https://creations.mattel.com/checkouts/cn/abc/thank_you" in r, r)
 import pedidos_mattel as PM  # noqa: E402
 check("el inventario lo puede volver a leer", PM.datos_del_resultado(r)["total"] == 1250.0)
+
+print("\n--- 6b. Respaldo de tarjeta ---")
+llenadas = []
+llenar_real = B.llenar_tarjeta
+
+
+async def llenar_espia(page, t):
+    llenadas.append(t["n"])
+    await llenar_real(page, t)
+B.llenar_tarjeta = llenar_espia
+check("lee la principal y las de respaldo en orden", [t["n"] for t in B.tarjetas_configuradas()] == [1, 2, 3])
+check("en mensajes solo los ultimos 4", B.etiqueta_tarjeta(B.tarjetas_configuradas()[1]) == "tarjeta 2 (•••• 4444)")
+
+TIENDA.update(carrito=0, rechazar=1, pagos=0)
+r = nav.comprar(URL, cantidad=1, dry_run=False, permitir_pausa=False, notificar=False).result(120)
+check("la 1 rechazada: paga con la 2", "🎉" in r and "Pagó con la tarjeta 2 (•••• 4444)" in r
+      and "tarjeta 1 (•••• 1111) rechazada" in r, r)
+check("se llenaron la 1 y la 2, y se pago 2 veces", llenadas == [1, 2] and TIENDA["pagos"] == 2, (llenadas, TIENDA))
+check("ningun mensaje trae el numero completo", "5555555555554444" not in r and "4111111111111111" not in r)
+
+llenadas.clear()
+TIENDA.update(carrito=0, rechazar=5, pagos=0)
+r = nav.comprar(URL, cantidad=1, dry_run=False, permitir_pausa=False, notificar=False).result(120)
+check("si rechaza todas, lo dice y se detiene", r.startswith("⚠️") and "rechazó todas las tarjetas" in r
+      and llenadas == [1, 2, 3] and TIENDA["pagos"] == 3, (r, llenadas, TIENDA))
+
+llenadas.clear()
+B.SEGUNDOS_ESPERA_PAGO = 3
+TIENDA.update(carrito=0, rechazar=0, colgar=True, pagos=0)
+r = nav.comprar(URL, cantidad=1, dry_run=False, permitir_pausa=False, notificar=False).result(120)
+check("si no queda claro, NUNCA reintenta (no cobrar doble)", TIENDA["pagos"] == 1 and llenadas == [1]
+      and "revisa tu correo" in r and "Pagó con" not in r, (r, TIENDA, llenadas))
+TIENDA.update(colgar=False)
+B.SEGUNDOS_ESPERA_PAGO = 45
+B.llenar_tarjeta = llenar_real
+
+# Mientras "procesa", el boton esta deshabilitado y la pagina re-pinta el aviso viejo:
+# eso NO es un rechazo (si lo fuera, la tarjeta 3 podria cobrar doble).
+PROCESANDO = """<html><body><div id="err">Your card was declined.</div>
+<button id="checkout-pay-button" disabled>Procesando…</button>
+<script>let i = 0; const t = setInterval(() => { document.getElementById('err').textContent = 'Your card was declined.';
+ if (++i > 6) { clearInterval(t); location.href = '/checkouts/cn/abc/thank_you'; } }, 400);</script></body></html>"""
+
+
+async def procesando_tarda():
+    page = await nav.contexto.new_page()
+    try:
+        await page.goto("https://creations.mattel.com/checkouts/cn/abc")
+        await page.set_content(PROCESANDO)
+        antes = await page.inner_text("body")
+        import pedidos_mattel as PMx
+        await PMx.vigilar_rechazo(page)
+        return await PMx.esperar_pago(page, antes, timeout_ms=15000)
+    finally:
+        await page.close()
+estado, conf, _ = nav.enviar(procesando_tarda()).result(60)
+check("aviso viejo re-pintado mientras procesa: NO es rechazo", estado == "pagada", (estado, conf))
+
+import pedidos_mattel as PM2  # noqa: E402
+check("un rechazo que ya estaba antes de pagar no cuenta", not PM2.es_rechazo("Your card was declined.", "Your card was declined."))
+check("en español tambien", PM2.es_rechazo("", "Tu tarjeta fue rechazada. Intenta con otra."))
 
 print("\n--- 7. Limpieza ---")
 nav.precalentar(URL).result(30)

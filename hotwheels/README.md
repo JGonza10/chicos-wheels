@@ -91,6 +91,11 @@ Cada prueba corre en una copia temporal: no toca `bot.db`, `estado.json` ni Tele
   - El navegador caliente usa ese perfil (`perfil_mattel/`, fuera de git). Solo se guardan las cookies, nunca la contraseña.
   - Con sesión, el checkout no llena correo ni dirección si ya vienen puestos.
   - Si una pieza RLC no tiene botón y no hay sesión, el error dice qué hacer.
+- **Tarjetas de respaldo** (`HOTWHEELS_CARD2_*` … `HOTWHEELS_CARD10_*`):
+  - Si Mattel **rechaza** la tarjeta con un mensaje claro, el bot llena la siguiente y vuelve a pagar.
+  - El rechazo se confirma antes de pasar a otra: 2 s después sigue el aviso, no hay página de gracias y el botón de pagar está habilitado otra vez. Un aviso viejo que se vuelve a pintar no cuenta (MutationObserver).
+  - Si el pago se queda sin respuesta, **no se reintenta nunca**: se avisa que revises tu correo de Mattel, porque el pago pudo entrar.
+  - En los mensajes solo salen los últimos 4 dígitos. La confirmación de Telegram dice cuántas de respaldo hay.
 - **Después de pagar** (`pedidos_mattel.py`):
   - El bot lee la página de gracias de Mattel: número de pedido, total cobrado y liga del estado del pedido.
   - El inventario guarda como precio de compra **lo cobrado ÷ piezas** (incluye envío e impuestos). En USD se convierte con el tipo de cambio del monitor; sin él queda el estimado y la nota lo dice.

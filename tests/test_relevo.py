@@ -125,6 +125,14 @@ class PruebasRelevo(unittest.TestCase):
         otro = {"Authorization": f"Bearer {self.token_otro}"}
         self.assertEqual(self.c.get(f"/api/bot/pieza-relevo/{pid}", headers=otro).status_code, 403)
 
+    def test_05_el_dueno_sabe_donde_esta_el_bot(self):
+        d = self.c.get("/api/bot/disponible", headers={"Authorization": f"Bearer {self.token}"}).get_json()
+        self.assertFalse(d["disponible"], "aquí no está montado (como en Railway)")
+        self.assertTrue(d["dueno"], "al dueño se le muestra el enlace con la explicación")
+        self.assertFalse(d["montado"])
+        otro = self.c.get("/api/bot/disponible", headers={"Authorization": f"Bearer {self.token_otro}"}).get_json()
+        self.assertEqual(otro, {"disponible": False, "dueno": False}, "otras cuentas no ven nada del bot")
+
     def _pedir_sin_sesion(self):
         return self.c.post("/api/bot/latido-pc")
 

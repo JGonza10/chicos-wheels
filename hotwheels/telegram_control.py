@@ -109,6 +109,9 @@ class Control:
             precio = pieza.get("precio_mxn")
             texto = "¿Comprar esta pieza?\n%s\nPrecio: %s × 1" % (
                 titulo, ("$%s MXN" % format(precio, ",.0f")) if precio else "sin precio")
+            nota = self.acciones.get("nota_pago")
+            if nota and nota():
+                texto += "\n" + nota()
             self._api("answerCallbackQuery", callback_query_id=cq["id"], text="Confirma abajo")
             self._api("sendMessage", chat_id=self.chat_id, text=texto,
                       reply_markup={"inline_keyboard": [[

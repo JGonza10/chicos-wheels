@@ -112,13 +112,103 @@ def leer_envio(texto, hoy=None):
             "entregado": bool(_RE_ENTREGADO.search(texto))}
 
 
+# Mensajes con los que Shopify/Mattel dice que la tarjeta NO paso. Solo con uno
+# de estos se prueba la siguiente tarjeta (ver bot_logic._comprar_en).
+_RE_RECHAZO = re.compile(
+    r"card (?:was|has been) declined|your card was declined|declined|"
+    r"payment (?:could not|couldn.t) be processed|issue processing your payment|"
+    r"insufficient funds|card number is (?:incorrect|invalid)|"
+    r"tarjeta (?:fue |ha sido )?rechazada|pago (?:no se pudo|no pudo ser) procesa|"
+    r"fondos insuficientes|n[uú]mero de tarjeta (?:es )?(?:incorrecto|inv[aá]lido)|rechaz[oó] (?:el|tu) pago",
+    re.I)
+
+
+def es_rechazo(antes, ahora):
+    """True si en la pagina aparecio un mensaje de rechazo que no estaba
+    antes de pagar (un texto fijo del checkout nunca cuenta)."""
+    nuevos = set(m.group(0).lower() for m in _RE_RECHAZO.finditer(ahora or ""))
+    viejos = set(m.group(0).lower() for m in _RE_RECHAZO.finditer(antes or ""))
+    return bool(nuevos - viejos)
+
+
+_JS_VIGILAR_RECHAZO = """(patron) => {
+  const re = new RegExp(patron, 'i');
+  window.__cwRechazo = false;
+  if (window.__cwObs) window.__cwObs.disconnect();
+  window.__cwObs = new MutationObserver((cambios) => {
+    for (const m of cambios) {
+      const t = (m.target.textContent || '') + ' ' +
+        Array.from(m.addedNodes).map((n) => n.textContent || '').join(' ');
+      if (re.test(t)) { window.__cwRechazo = true; return; }
+    }
+  });
+  window.__cwObs.observe(document.body, {subtree: true, childList: true, characterData: true});
+}"""
+
+
+async def vigilar_rechazo(page):
+    """Antes de dar "Pagar": marca cualquier mensaje de rechazo que se PINTE
+    despues, aunque diga lo mismo que el anterior (segundo rechazo)."""
+    try:
+        await page.evaluate(_JS_VIGILAR_RECHAZO, _RE_RECHAZO.pattern)
+    except Exception:
+        pass
+
+
+async def _hubo_rechazo(page):
+    try:
+        return bool(await page.evaluate("() => window.__cwRechazo === true"))
+    except Exception:
+        return False
+
+
+async def esperar_pago(page, texto_antes, timeout_ms=45000, intervalo_ms=500):
+    """Tras dar "Pagar": ("pagada" | "rechazada" | "sin_confirmar", conf, url_estado).
+    "sin_confirmar" = ni gracias ni rechazo claro a tiempo: NUNCA se reintenta."""
+    import asyncio
+    import time
+    limite = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < limite:
+        if _RE_URL_GRACIAS.search(page.url or ""):
+            conf, url = await esperar_confirmacion(page, timeout_ms=15000)
+            return "pagada", conf, url
+        try:
+            texto = await page.inner_text("body")
+        except Exception:
+            texto = ""
+        if await _hubo_rechazo(page) or es_rechazo(texto_antes, texto):
+            # Confirmar antes de soltar la siguiente tarjeta: si la pagina solo
+            # re-pinto un aviso viejo mientras sigue procesando, otra tarjeta
+            # podria cobrar doble. Rechazo = 2 s despues sigue el aviso, no hay
+            # pagina de gracias y el boton de pagar ya esta habilitado otra vez.
+            await asyncio.sleep(SEGUNDOS_CONFIRMAR_RECHAZO)
+            if _RE_URL_GRACIAS.search(page.url or ""):
+                continue
+            try:
+                listo = await page.locator("#checkout-pay-button").first.is_enabled()
+                sigue = _RE_RECHAZO.search(await page.inner_text("body") or "")
+            except Exception:
+                listo = sigue = False
+            if listo and sigue:
+                return "rechazada", {"pedido": None, "total": None, "moneda": None}, None
+            try:
+                await page.evaluate("() => { window.__cwRechazo = false; }")
+            except Exception:
+                pass
+        await asyncio.sleep(intervalo_ms / 1000)
+    return "sin_confirmar", {"pedido": None, "total": None, "moneda": None}, None
+
+
+_RE_URL_GRACIAS = re.compile(r"thank[_-]?you|/orders/|/order-status", re.I)
+SEGUNDOS_CONFIRMAR_RECHAZO = 2
+
+
 async def esperar_confirmacion(page, timeout_ms=45000):
     """Tras dar "Pagar": espera la pagina de gracias de Shopify y la lee.
     Devuelve (conf, url_estado). Si no llega a tiempo, conf viene vacia: el
     pedido pudo haberse hecho igual, por eso nunca se marca como fallo aqui."""
     try:
-        await page.wait_for_url(re.compile(r"thank[_-]?you|/orders/|/order-status", re.I),
-                                timeout=timeout_ms)
+        await page.wait_for_url(_RE_URL_GRACIAS, timeout=timeout_ms)
         await page.wait_for_load_state("domcontentloaded", timeout=15000)
         texto = await page.inner_text("body")
         return leer_confirmacion(texto), page.url
