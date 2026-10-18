@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import re
 import smtplib
 import sys
@@ -134,20 +135,36 @@ def notify(message):
     except Exception as e:
         print(f"⚠️ No se pudo enviar el Telegram de notificación: {e}")
 
-async def dismiss_shop_modal(page):
+async def dismiss_shop_modal(page, espera_ms=0):
     """
     Mattel/Shopify a veces dispara en automático (sin que el bot haga nada)
     el modal "Sign in with Shop" con un reto de verificación cuando el
     correo ya tiene cuenta Shop asociada. El bot compra como invitado y
     nunca necesita ese login, así que si aparece, solo se cierra.
+
+    `espera_ms`: cuánto esperar a que aparezca. Antes eran 3 s fijos en cada
+    llamada (3 por compra = 9 s perdidos cuando el modal no sale); ahora se
+    mira al instante y solo antes de pagar se le da un margen corto.
     """
+    await _cerrar_si_aparece(page, "button[data-testid='authorize-modal-close-button']", espera_ms)
+
+
+async def _cerrar_si_aparece(page, selector_css, espera_ms=0):
+    """Clic en `selector_css` si está visible (o aparece dentro de espera_ms).
+    Nunca truena ni espera de más: es para pop-ups que pueden no salir."""
     try:
-        close_btn = await page.wait_for_selector(
-            "button[data-testid='authorize-modal-close-button']", timeout=3000
-        )
-        await close_btn.click()
+        boton = page.locator(selector_css).first
+        if espera_ms:
+            try:
+                await boton.wait_for(state="visible", timeout=espera_ms)
+            except Exception:
+                return False
+        elif not (await boton.count() and await boton.is_visible()):
+            return False
+        await boton.click(timeout=2000)
+        return True
     except Exception:
-        pass
+        return False
 
 async def dismiss_overlays(page, selector):
     """
@@ -155,15 +172,15 @@ async def dismiss_overlays(page, selector):
     el botón de compra. Cada intento es best-effort: si el overlay no
     aparece, se ignora sin detener la corrida.
     """
+    # Antes: hasta 5 s de espera por cada selector aunque no hubiera nada
+    # (10 s por llamada). El banner de cookies sale casi siempre en una
+    # sesion nueva: se le da 1.5 s. El pop-up promocional puede no salir: se
+    # mira al instante; si sale tarde, el reintento del clic lo cierra.
+    esperas = {"cookie_consent": 1500, "popup_close": 0}
     for key in ("cookie_consent", "popup_close"):
         overlay_selector = selector.get(key)
-        if not overlay_selector:
-            continue
-        try:
-            button = await page.wait_for_selector(overlay_selector, timeout=5000)
-            await button.click()
-        except Exception:
-            pass
+        if overlay_selector:
+            await _cerrar_si_aparece(page, overlay_selector, esperas[key])
 
     # Fallback genérico: algunos pop-ups de suscripción (p.ej. Klaviyo en Mattel)
     # aparecen de forma intermitente sin un selector fijo detectado. Escape cierra
@@ -345,6 +362,38 @@ async def esperar_captcha(page, url, headless, avisar=True, espera_max=180, inte
     return f"🧩 Captcha sin resolver a tiempo ({espera_max}s): {url}"
 
 
+class Cronometro:
+    """Cuanto tarda cada paso de una compra, para saber donde se van los
+    segundos. Sale en el mensaje final: "⏱ 21.4 s (navegador 1.2 · ...)"."""
+
+    def __init__(self):
+        self._inicio = self._ultimo = time.monotonic()
+        self.pasos = []
+
+    def marca(self, nombre):
+        ahora = time.monotonic()
+        self.pasos.append((nombre, ahora - self._ultimo))
+        self._ultimo = ahora
+
+    def total(self):
+        return self._ultimo - self._inicio
+
+    def texto(self):
+        partes = " · ".join(f"{n.replace('_', ' ')} {s:.1f}" for n, s in self.pasos)
+        return f"⏱ {self.total():.1f} s ({partes})"
+
+
+async def esperar_frames(page, marcas, timeout_ms=10000, intervalo_ms=150):
+    """Espera a que existan los iframes cuya URL contiene cada marca."""
+    limite = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < limite:
+        urls = [f.url for f in page.frames]
+        if all(any(m in u for u in urls) for m in marcas):
+            return True
+        await page.wait_for_timeout(intervalo_ms)
+    return False
+
+
 async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
                            permitir_pausa=True, notificar=True, headless=False):
     """Compra (o intenta) UNA URL.
@@ -369,6 +418,7 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
     dry = dry_run if dry_run is not None else os.environ.get("HOTWHEELS_DRY_RUN") == "1"
     pausa = permitir_pausa and os.environ.get("HOTWHEELS_DRY_RUN_KEEP_OPEN") == "1"
     qty_objetivo = MAX_QUANTITY if cantidad is None else cantidad
+    reloj = Cronometro()
 
     page = None
     try:
@@ -377,9 +427,11 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
             try:
                 context = await browser.new_context(proxy=proxy)
                 page = await context.new_page()
+                reloj.marca("navegador")
 
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 await dismiss_overlays(page, selector)
+                reloj.marca("producto")
                 fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
                 if fallo_captcha:
                     await guardar_captura_error(page, url, "captcha")
@@ -413,6 +465,7 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
                         await dismiss_overlays(page, selector)
                         await add_to_cart_button.click(timeout=10000)
                     resultado = f"✅ Producto agregado al carrito (cantidad: {qty}): {url}"
+                    reloj.marca("agregar")
                     if not dry and notificar:
                         notify(resultado)
 
@@ -462,6 +515,7 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
                     )
                     await boton_checkout.click(timeout=10000)
                     await page.wait_for_load_state("domcontentloaded", timeout=20000)
+                    reloj.marca("carrito_y_checkout")
 
                     fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
                     if fallo_captcha:
@@ -486,22 +540,30 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
                     await page.fill(f"input[name='postalCode']{not_autofill}", SHIP_POSTAL_CODE)
                     await page.fill(f"input[name='phone']{not_autofill}", SHIP_PHONE)
 
-                    for candidate in (SHIP_STATE, "Ciudad de Mexico", "Ciudad de México"):
+                    # El estado de .env primero, con margen; los de respaldo ya
+                    # con la pagina lista, sin 5 s cada uno.
+                    for i, candidate in enumerate(c for c in (SHIP_STATE, "Ciudad de Mexico", "Ciudad de México") if c):
                         try:
-                            await page.select_option("select[name='zone']", label=candidate, timeout=5000)
+                            await page.select_option("select[name='zone']", label=candidate,
+                                                     timeout=5000 if i == 0 else 1000)
                             break
                         except Exception:
                             continue
 
-                    if RFC:
+                    # El campo RFC no siempre existe: si no esta, no se esperan 5 s.
+                    if RFC and await page.locator("input[name*='rfc' i]").count():
                         try:
-                            await page.fill("input[name*='rfc' i]", RFC, timeout=5000)
+                            await page.fill("input[name*='rfc' i]", RFC, timeout=3000)
                         except Exception:
                             pass
+                    reloj.marca("datos_envio")
 
                     await dismiss_shop_modal(page)
                     await page.check("#basic-creditCards")
-                    await page.wait_for_timeout(2000)
+                    # Antes: 2 s fijos. Ahora se sigue en cuanto los iframes de
+                    # la tarjeta (checkout.pci.shopifyinc.com) estan cargados.
+                    await esperar_frames(page, ("number-ltr", "expiry-ltr",
+                                                "verification_value-ltr", "name-ltr"))
 
                     def find_frame(marker):
                         return next(f for f in page.frames if marker in f.url)
@@ -510,18 +572,22 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
                     await find_frame("expiry-ltr").fill("input[name='expiry']", CARD_EXPIRY)
                     await find_frame("verification_value-ltr").fill("input[name='verification_value']", CARD_CVV)
                     await find_frame("name-ltr").fill("input[name='name']", CARD_NAME)
+                    reloj.marca("tarjeta")
 
                     if dry:
-                        resultado = f"🧪 DRY RUN: checkout llenado, sin pagar: {url}"
+                        resultado = f"🧪 DRY RUN: checkout llenado, sin pagar: {url}\n{reloj.texto()}"
+                        print("  " + reloj.texto())
                         if pausa:
                             print(resultado)
                             print("🧪 Ventana abierta para inspección — ciérrala manualmente para continuar.")
                             await page.wait_for_event("close", timeout=0)
                         return resultado
 
-                    await dismiss_shop_modal(page)
+                    await dismiss_shop_modal(page, espera_ms=800)
                     await page.click("#checkout-pay-button")
-                    resultado = f"🎉 Pedido realizado para: {url}"
+                    reloj.marca("pagar")
+                    resultado = f"🎉 Pedido realizado para: {url}\n{reloj.texto()}"
+                    print("  " + reloj.texto())
                     if notificar:
                         notify(resultado)
                 except Exception as e:

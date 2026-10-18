@@ -61,6 +61,7 @@ Solo las cuentas de `BOT_EMAILS` (por defecto `juangonza@live.com.mx`):
 python prueba_extras.py; python prueba_admin.py; python prueba_integraciones.py
 python prueba_hallazgos.py; python prueba_evento_reintentos.py; python prueba_habilidades.py
 python prueba_velocidad.py      # express, francotirador, modo drop, 429, Telegram, relevo
+python prueba_rapidez_compra.py # compra sin esperas fijas y cronómetro (Chromium real, páginas locales)
 cd ..; python -m unittest tests.test_bot -v      # montaje, acceso y alta en el inventario
 ```
 
@@ -78,6 +79,7 @@ Cada prueba corre en una copia temporal: no toca `bot.db`, `estado.json` ni Tele
 - **Sin `HOTWHEELS_DRY_RUN=1`, "Comprar" paga de verdad.**
 - Toda compra pasa por `solicitar_compra()`, con un solo navegador a la vez (`_LOCK_DISPARO`). `run_one(url)` sirve para una pieza; nunca `run_all()`.
 - `comprar_producto` corre con `headless=False` porque los captchas se resuelven a mano.
+- El resultado de cada compra (y de cada DRY RUN) trae el cronómetro por paso: `⏱ 21.4 s (navegador 1.2 · producto 4.0 · ...)`. Los pop-ups que pueden no salir se revisan sin esperas fijas.
 - Una pieza comprada nunca se reabre sola.
 - Los botones de Telegram van solo al chat personal (`TELEGRAM_CHAT_ID`).
 - Checkout de Mattel:

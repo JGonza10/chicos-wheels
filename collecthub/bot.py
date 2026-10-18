@@ -16,6 +16,7 @@ su token y recibe una cookie HttpOnly limitada a /bot; el panel la exige en
 cada petición.
 """
 import os
+import re
 import sys
 import threading
 from datetime import datetime, timedelta, timezone
@@ -32,6 +33,8 @@ CARPETA = Path(__file__).resolve().parent.parent / "hotwheels"
 COOKIE = "bot_sesion"
 HORAS_SESION = 12
 _NUBE = None              # módulo monitor cuando corre como relevo en Railway
+# Pieza de Mattel Creations, con o sin prefijo de idioma/país (/en-mx/products/...).
+URL_PIEZA_MATTEL = re.compile(r"^https://creations\.mattel\.com(?:/[a-z]{2}(?:-[a-z]{2})?)?/products/[a-z0-9][a-z0-9_-]{0,200}/?$")
 _AVISO_RELEVO = {"ts": None, "fallo": False, "listas_hash": None}   # PC: último latido
 HORAS_AVISO_RELEVO_CIEGO = 6
 MINUTOS_RELEVO_CIEGO = 30
@@ -204,7 +207,7 @@ def importar_pieza_relevo(pid):
         print(f"  [relevo] no se pudo traer la pieza {pid} de Railway: {e}")
         return None
     url = p.get("url") or ""
-    if not url.startswith("https://creations.mattel.com/products/"):
+    if not URL_PIEZA_MATTEL.match(url):
         return None     # el bot solo compra en Mattel, venga de donde venga la pieza
     return hallazgos.registrar(url, titulo=p.get("titulo"), url_carrito=p.get("url_carrito"),
                                imagen=p.get("imagen"), precio_mxn=p.get("precio_mxn"),
