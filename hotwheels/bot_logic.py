@@ -399,6 +399,45 @@ async def esperar_captcha(page, url, headless, avisar=True, espera_max=180, inte
     return f"🧩 Captcha sin resolver a tiempo ({espera_max}s): {url}"
 
 
+_RE_LIMITE_TAG = re.compile(r"^limit_(\d+)$", re.I)
+_RE_LIMITE_TEXTO = re.compile(r"limit\s+(\d+)\s+per\s+(customer|order|household)", re.I)
+
+
+def limite_desde_datos(tags, texto=""):
+    """Limite de piezas por cliente: etiqueta 'limit_N' del producto o el
+    texto 'Limit N Per Customer' de la pagina. None si la pagina no dice."""
+    for t in tags or []:
+        m = _RE_LIMITE_TAG.match(str(t).strip())
+        if m and int(m.group(1)) > 0:
+            return int(m.group(1))
+    m = _RE_LIMITE_TEXTO.search(texto or "")
+    return int(m.group(1)) if m and int(m.group(1)) > 0 else None
+
+
+def cantidad_a_pedir(pedida, limite):
+    """None = el maximo: el limite de la pagina o, si no lo dice,
+    HOTWHEELS_MAX_QUANTITY (set_quantity igual se frena en el tope de stock).
+    Una cantidad pedida a mano nunca pasa del limite."""
+    if pedida is None:
+        return limite or MAX_QUANTITY
+    return min(pedida, limite) if limite else pedida
+
+
+async def limite_de_pagina(page):
+    tags = []
+    try:
+        datos = await page.evaluate(
+            "fetch(location.pathname.replace(/\\/$/, '') + '.js').then(r => r.json())")
+        tags = datos.get("tags") or []
+    except Exception:
+        pass
+    try:
+        texto = await page.inner_text("body", timeout=3000)
+    except Exception:
+        texto = ""
+    return limite_desde_datos(tags, texto)
+
+
 async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
                      headless, pausa, ya_cargada=False, limpiar_carrito=False):
     """El recorrido de compra sobre una pagina ya abierta: la nueva de
@@ -436,6 +475,10 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
             await dismiss_overlays(page, selector)
             await add_to_cart_button.wait_for_element_state("visible", timeout=10000)
 
+        # La cantidad sale de la pagina (2026-10-20): se compra el maximo que
+        # permita Mattel ("Limit 2 Per Customer"), nunca mas que eso.
+        limite = await limite_de_pagina(page) if selector["store"] == "mattel" else None
+        qty_objetivo = cantidad_a_pedir(qty_objetivo, limite)
         qty = await set_quantity(page, selector, qty_objetivo)
 
         try:
@@ -751,7 +794,7 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
 
     dry = dry_run if dry_run is not None else os.environ.get("HOTWHEELS_DRY_RUN") == "1"
     pausa = permitir_pausa and os.environ.get("HOTWHEELS_DRY_RUN_KEEP_OPEN") == "1"
-    qty_objetivo = MAX_QUANTITY if cantidad is None else cantidad
+    qty_objetivo = cantidad  # None = el maximo que permita la pagina
     reloj = Cronometro()
 
     page = None

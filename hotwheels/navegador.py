@@ -201,7 +201,7 @@ class NavegadorCaliente:
             page, cargada = await self._tomar_pagina(url)
             reloj.marca("navegador (caliente)" if cargada else "navegador")
             return await B._comprar_en(page, url, selector, reloj, dry,
-                                       B.MAX_QUANTITY if cantidad is None else cantidad,
+                                       cantidad,
                                        kw.get("notificar", True), self.headless, pausa,
                                        ya_cargada=cargada, limpiar_carrito=True)
         except Exception as e:
