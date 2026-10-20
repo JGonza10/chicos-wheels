@@ -35,5 +35,34 @@ revisa("a mano 5 con limite 2", B.cantidad_a_pedir(5, 2), 2)
 revisa("a mano 1 con limite 2", B.cantidad_a_pedir(1, 2), 1)
 revisa("a mano 3 sin limite", B.cantidad_a_pedir(3, None), 3)
 
+# Fila de espera del checkout: se espera hasta que deje pasar
+import asyncio  # noqa: E402
+
+
+class PaginaFila:
+    """Pagina falsa: muestra la fila 'turnos' veces y luego el checkout."""
+    def __init__(self, turnos, url="https://creations.mattel.com/checkouts/cn/x"):
+        self.turnos, self.url = turnos, url
+
+    async def inner_text(self, sel, timeout=0):
+        if self.turnos > 0:
+            self.turnos -= 1
+            return "You're in line to check out\nEstimated wait time: Less than a minute"
+        return "Contact\nDelivery\nPayment"
+
+    async def wait_for_timeout(self, ms):
+        pass
+
+    async def wait_for_load_state(self, *a, **kw):
+        pass
+
+
+revisa("sin fila no espera", asyncio.run(B.esperar_fila_checkout(PaginaFila(0), "u")), None)
+revisa("fila que avanza", asyncio.run(B.esperar_fila_checkout(PaginaFila(5), "u", espera_max=60)), None)
+revisa("fila que no avanza da aviso",
+       asyncio.run(B.esperar_fila_checkout(PaginaFila(10**6), "u", espera_max=60)).startswith("⏳"), True)
+revisa("url throttle cuenta como fila",
+       asyncio.run(B.en_fila_checkout(PaginaFila(0, "https://x/throttle/queue"))), True)
+
 print("\nTodo bien." if not fallos else f"\n{fallos} prueba(s) fallaron.")
 sys.exit(1 if fallos else 0)

@@ -377,6 +377,42 @@ async def esperar_captcha(page, url, headless, avisar=True, espera_max=180, inte
     return f"🧩 Captcha sin resolver a tiempo ({espera_max}s): {url}"
 
 
+FILA_TEXTOS = ("in line to check out", "en la fila", "estás en la fila")
+
+
+async def en_fila_checkout(page):
+    """True si Shopify tiene la compra en su fila de espera (throttle queue)."""
+    if "throttle" in (page.url or "").lower() or "/queue" in (page.url or "").lower():
+        return True
+    try:
+        texto = (await page.inner_text("body", timeout=2000)).lower()
+    except Exception:
+        return False
+    return any(t in texto for t in FILA_TEXTOS)
+
+
+async def esperar_fila_checkout(page, url, espera_max=600, intervalo=1):
+    """Fila de espera del checkout (ensayo 2026-10-20): en drops Mattel pone
+    "You're in line to check out" antes del checkout y el bot se rendia a los
+    30 s buscando el pago. Se espera aqui (sin recargar: la pagina se
+    actualiza sola) hasta que deje pasar. None si paso; texto si no."""
+    if not await en_fila_checkout(page):
+        return None
+    print("  ⏳ En la fila del checkout de Mattel, esperando turno…")
+    esperado = 0
+    while esperado < espera_max:
+        await page.wait_for_timeout(intervalo * 1000)
+        esperado += intervalo
+        if not await en_fila_checkout(page):
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=20000)
+            except Exception:
+                pass
+            print(f"  ✅ Salió de la fila en {esperado}s")
+            return None
+    return f"⏳ La fila del checkout no avanzó en {espera_max // 60} min: {url}"
+
+
 _RE_LIMITE_TAG = re.compile(r"^limit_(\d+)$", re.I)
 _RE_LIMITE_TEXTO = re.compile(r"limit\s+(\d+)\s+per\s+(customer|order|household)", re.I)
 
@@ -522,6 +558,12 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         await boton_checkout.click(timeout=10000)
         await page.wait_for_load_state("domcontentloaded", timeout=20000)
         reloj.marca("carrito_y_checkout")
+
+        fallo_fila = await esperar_fila_checkout(page, url)
+        if fallo_fila:
+            await guardar_captura_error(page, url, "fila")
+            return f"⚠️ Producto en carrito pero {fallo_fila}"
+        reloj.marca("fila")
 
         fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
         if fallo_captcha:
