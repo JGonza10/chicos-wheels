@@ -1,12 +1,5 @@
 {
   "notifications": {
-    "email": {
-      "enabled": false,
-      "smtp_server": "smtp.office365.com",
-      "smtp_port": 587,
-      "sender": "tu_correo@ejemplo.com",
-      "recipient": "tu_correo@ejemplo.com"
-    },
     "whatsapp": {
       "enabled": false,
       "from_number": "whatsapp:+14155238886",

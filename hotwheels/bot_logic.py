@@ -3,10 +3,8 @@ import json
 import os
 import time
 import re
-import smtplib
 import sys
 from datetime import datetime
-from email.mime.text import MIMEText
 from dotenv import load_dotenv
 import requests
 from twilio.rest import Client
@@ -26,7 +24,6 @@ load_dotenv(os.path.join(_DIR, ".env"))
 # config.json no va a git (trae correo y telefono). Sin el, el bot arranca con
 # los avisos apagados en vez de tronar; la plantilla es config.json.example.
 _CONFIG_VACIA = {"notifications": {
-    "email": {"enabled": False, "smtp_server": "", "smtp_port": 587, "sender": "", "recipient": ""},
     "whatsapp": {"enabled": False, "from_number": "", "to_number": ""},
     "telegram": {"enabled": False}}}
 try:
@@ -78,24 +75,6 @@ SHIP_PHONE = os.environ.get("HOTWHEELS_SHIP_PHONE", "")
 RFC = os.environ.get("HOTWHEELS_RFC", "")
 MAX_QUANTITY = int(os.environ.get("HOTWHEELS_MAX_QUANTITY", "1"))
 NOTIFICATIONS = config["notifications"]
-
-def send_email(message):
-    if NOTIFICATIONS["email"]["enabled"]:
-        smtp_server = NOTIFICATIONS["email"]["smtp_server"]
-        smtp_port = NOTIFICATIONS["email"]["smtp_port"]
-        sender = NOTIFICATIONS["email"]["sender"]
-        password = os.environ.get("HOTWHEELS_SMTP_PASSWORD", "")
-        recipient = NOTIFICATIONS["email"]["recipient"]
-
-        msg = MIMEText(message)
-        msg["Subject"] = "Bot Mattel - Notificación"
-        msg["From"] = sender
-        msg["To"] = recipient
-
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(sender, password)
-            server.sendmail(sender, recipient, msg.as_string())
 
 def send_whatsapp(message):
     if NOTIFICATIONS["whatsapp"]["enabled"]:
@@ -159,10 +138,9 @@ def send_telegram(message):
         resp.raise_for_status()
 
 def notify(message):
-    try:
-        send_email(message)
-    except Exception as e:
-        print(f"⚠️ No se pudo enviar el email de notificación: {e}")
+    # Avisos solo por Telegram (WhatsApp apagado en config.json). El correo de
+    # Outlook se quitó el 2026-10-20 por pedido de Gonza (Outlook rechazaba el
+    # SMTP con contraseña, error 535).
     try:
         send_whatsapp(message)
     except Exception as e:
