@@ -253,10 +253,9 @@ D._LOCK_DISPARO.release()
 check("el estado del panel trae la ultima prueba", c.get("/api/estado").get_json()["checkout"]["estado"] == "sin_producto")
 
 print("\n--- 8. Acceso desde el celular (con candado) ---")
-check("por defecto solo en esta PC", D.host_seguro(None, "", "") == ("127.0.0.1", None))
-h, aviso = D.host_seguro("0.0.0.0", "", "")
-check("abrirlo a la red SIN contraseña se rechaza", h == "127.0.0.1" and "DASHBOARD_PASSWORD" in aviso, (h, aviso))
-check("abrirlo con usuario y contraseña se permite", D.host_seguro("0.0.0.0", "gonza", "secreta") == ("0.0.0.0", None))
+check("por defecto solo en esta PC", D.host_seguro(None) == ("127.0.0.1", None))
+h, aviso = D.host_seguro("0.0.0.0")
+check("el panel suelto nunca se abre a la red", h == "127.0.0.1" and "Chicos Wheels" in aviso, (h, aviso))
 
 print("\n--- 9. Panel: controles nuevos ---")
 html = c.get("/").get_data(as_text=True)

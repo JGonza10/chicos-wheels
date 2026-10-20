@@ -39,8 +39,6 @@ def _anio_kestrel():
 # sigue abierto igual que siempre (no rompe instalaciones existentes). En
 # cuanto el bridge del monitor (mejora #4) obliga a exponer este dashboard
 # mas alla de localhost, conviene configurarlas.
-DASHBOARD_USER = os.environ.get("DASHBOARD_USER", "")
-DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 
 # --- Inicializar BD ---
 def init_db():
@@ -973,17 +971,15 @@ def run_bot():
     return redirect(url_for("index"))
 
 # --- Punto de entrada ---
-def host_seguro(host, usuario, password):
-    """El panel ahora puede COMPRAR: solo se deja escuchar fuera de esta PC
-    (PANEL_HOST distinto de 127.0.0.1) si hay usuario y contraseña puestos.
+def host_seguro(host):
+    """El panel puede COMPRAR y este modo suelto no pide contraseña: siempre escucha solo en esta PC.
+    Para usarlo desde otro equipo se entra por Chicos Wheels (/bot/, con la sesión de su login).
     Devuelve (host, aviso)."""
     host = (host or "127.0.0.1").strip()
     if host in ("127.0.0.1", "localhost", "::1"):
         return "127.0.0.1", None
-    if not usuario or not password:
-        return "127.0.0.1", ("PANEL_HOST=%s ignorado: para abrir el panel a tu red hay que poner "
-                             "DASHBOARD_USER y DASHBOARD_PASSWORD en .env. Sigue solo en esta PC." % host)
-    return host, None
+    return "127.0.0.1", ("PANEL_HOST=%s ignorado: el panel suelto solo abre en esta PC. "
+                         "Desde otro equipo entra por Chicos Wheels (/bot/)." % host)
 
 
 def nota_pago():
@@ -1051,7 +1047,7 @@ def telegram_token_y_chat():
 if __name__ == "__main__":
     # Lo normal es correr "python app.py" del 02: monta este panel en /bot y
     # arranca el monitor. Esto queda solo para revisar el panel suelto.
-    host, aviso = host_seguro(os.environ.get("PANEL_HOST"), DASHBOARD_USER, DASHBOARD_PASSWORD)
+    host, aviso = host_seguro(os.environ.get("PANEL_HOST"))
     if aviso:
         print("⚠️ " + aviso)
     iniciar_servicios()
