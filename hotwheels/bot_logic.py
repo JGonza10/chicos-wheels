@@ -734,6 +734,13 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
     navegador: un NavegadorCaliente (navegador.py). Si viene, la compra corre
     ahi, sobre la pagina precalentada si existe, en vez de abrir Chromium.
     """
+    # Piezas RLC (2026-10-20): los eventos programados y run_all no pasaban
+    # navegador y abrian un Chromium limpio, sin la sesion de Mattel, asi que
+    # el drop del RWB 930 fallo por "sin sesion". Con el perfil activo, toda
+    # pieza RLC se compra en el navegador que tiene la sesion guardada.
+    if navegador is None and es_pieza_rlc(url) and os.environ.get("HOTWHEELS_PERFIL_MATTEL") == "1":
+        import navegador as _nav
+        navegador = _nav.obtener()
     if navegador is not None:
         return await asyncio.wrap_future(navegador.comprar(
             url, cantidad=cantidad, dry_run=dry_run, permitir_pausa=permitir_pausa,
