@@ -95,6 +95,23 @@ class Cuenta:
             "activa": valor("HOTWHEELS_CUENTA_ACTIVA") != "0",
         }
 
+    def lista_para_comprar(self):
+        """(True, "") si la cuenta puede entrar a un disparo; si no, (False,
+        motivo). Una cuenta a medio configurar no debe estorbar en el drop.
+        El CVV no cuenta: se pone minutos antes. La principal siempre entra
+        (como antes del multicuenta); lo que le falte lo dice el semaforo."""
+        if self.es_principal:
+            return True, ""
+        d = self.datos()
+        t = d["tarjeta1"]
+        if not d["activa"]:
+            return False, "está pausada (HOTWHEELS_CUENTA_ACTIVA=0)"
+        if not (t["number"] and t["expiry"]):
+            return False, "falta su tarjeta"
+        if not self.es_principal and not os.path.exists(self.cookies):
+            return False, "no ha iniciado sesión (iniciar_sesion_mattel.py --cuenta %s)" % self.nombre
+        return True, ""
+
     # --- CVV dinamico -------------------------------------------------------
     def borrar_cvv(self):
         """Vacia los HOTWHEELS_CARD*_CVV del .env despues de pagar: el CVV
@@ -189,6 +206,15 @@ def listar(solo_activas=True):
     if solo_activas:
         salida = [c for c in salida if c.datos()["activa"]]
     return salida
+
+
+def para_disparo():
+    """(listas, [(cuenta, motivo)] de las que no entran)."""
+    listas, fuera = [], []
+    for c in listar():
+        ok, motivo = c.lista_para_comprar()
+        (listas if ok else fuera).append(c if ok else (c, motivo))
+    return listas, fuera
 
 
 def crear(nombre):

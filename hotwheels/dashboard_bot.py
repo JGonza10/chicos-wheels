@@ -684,7 +684,9 @@ async def _intentar_evento(urls=None, cantidad=None):
     urls = urls or get_active_product_urls()
     if not urls:
         return False
-    lista = CUENTAS.listar() or [CUENTAS.principal()]
+    lista, fuera = CUENTAS.para_disparo()
+    for cuenta, motivo in fuera:
+        notify(f"⚪ [{cuenta.nombre}] no entra a este disparo: {motivo}.")
     varias = len(lista) > 1
     resultados = await asyncio.gather(
         *[_intentar_evento_cuenta(urls, c, cantidad, varias) for c in lista],
@@ -744,17 +746,37 @@ async def _intentar_evento_cuenta(urls, cuenta, cantidad=None, varias=False):
 
 
 # --- Despues de comprar: inventario y borrador para Facebook/Instagram ------
-def _datos_pieza(url):
-    """(titulo, precio_mxn, limite, imagen) desde el .js de Shopify. Nunca lanza."""
+def _datos_pieza(url, html=None):
+    """(titulo, precio_mxn, limite, imagen) desde el .js de Shopify, con un
+    reintento; si Mattel responde con su pagina de proteccion en vez del
+    JSON, se leen de la pagina (meta og y "Limit N Per Customer"). Nunca lanza."""
+    import re as _re
+    from bot_logic import limite_desde_datos
+    base = url.split("?")[0].split("#")[0].rstrip("/")
+    for intento in range(2):
+        try:
+            r = requests.get(base + ".js", timeout=15, headers={"User-Agent": CUENTAS.UA})
+            d = r.json()
+            img = d.get("featured_image") or ""
+            if img.startswith("//"):
+                img = "https:" + img
+            return (d.get("title"), (d.get("price") or 0) / 100 or None,
+                    limite_desde_datos(d.get("tags")), img)
+        except Exception:
+            if intento == 0:
+                time.sleep(1.5)
     try:
-        base = url.split("?")[0].rstrip("/")
-        r = requests.get(base + ".js", timeout=15, headers={"User-Agent": CUENTAS.UA})
-        d = r.json()
-        from bot_logic import limite_desde_datos
-        img = d.get("featured_image") or ""
-        if img.startswith("//"):
-            img = "https:" + img
-        return d.get("title"), (d.get("price") or 0) / 100 or None, limite_desde_datos(d.get("tags")), img
+        if html is None:
+            html = CUENTAS.principal()._sesion_http().get(base, timeout=20).text
+        def meta(prop):
+            m = _re.search(r'<meta property="%s" content="([^"]+)"' % _re.escape(prop), html or "")
+            return m.group(1) if m else None
+        precio = meta("og:price:amount") or meta("product:price:amount")
+        try:
+            precio = float(precio.replace(",", "")) if precio else None
+        except ValueError:
+            precio = None
+        return meta("og:title"), precio, limite_desde_datos([], _re.sub(r"<[^>]+>", " ", html or "")), meta("og:image")
     except Exception:
         return None, None, None, None
 
@@ -831,7 +853,7 @@ _EVENTO_PRECALENTADO = {"id": None}
 def _precalentar(urls, motivo):
     """Abre la pieza en el navegador caliente de cada cuenta activa."""
     abiertas = 0
-    for cuenta in CUENTAS.listar() or [CUENTAS.principal()]:
+    for cuenta in CUENTAS.para_disparo()[0] or [CUENTAS.principal()]:
         nav = NAVEGADOR.obtener(cuenta)
         if nav is None:
             continue
@@ -896,7 +918,7 @@ def _agenda_drops(ahora_utc=None):
                 if paso == "chequeo":
                     notify(chequeo_cuentas(f"Faltan 30 min para {nombre} ({DROPS.hora_local(d['cuando'])})"))
                 elif paso == "cvv":
-                    for cuenta in CUENTAS.listar() or [CUENTAS.principal()]:
+                    for cuenta in CUENTAS.para_disparo()[0] or [CUENTAS.principal()]:
                         if not cuenta.datos()["tarjeta1"]["cvv"]:
                             notify(f"💳 [{cuenta.nombre}] Faltan 5 min para {nombre}: pon tu CVV en "
                                    f"hotwheels/{os.path.relpath(cuenta.env, CUENTAS.DIR).replace(os.sep, '/')} "
@@ -988,6 +1010,132 @@ def revisar_calendario(obtener_html=None):
                        [[{"text": "📅 Programar disparo", "callback_data": f"pd:{drop_id}"},
                          {"text": "No", "callback_data": f"pn:{drop_id}"}]])
     return nuevos
+
+
+# --- Mensajes de Telegram: comandos y links de Mattel (2026-11-10) -----------
+AYUDA_TELEGRAM = (
+    "🤖 Bot Hot Wheels — lo que entiendo:\n"
+    "• Pega un link de creations.mattel.com: te digo precio, límite, si está a la venta "
+    "o cuándo sale, con el botón para comprar o programar el disparo.\n"
+    "• /estado — semáforo de tus cuentas (sesión, tarjeta, CVV, RFC, carrito) y del monitor.\n"
+    "• /drops — próximos lanzamientos detectados y programados.\n"
+    "• /ayuda — esto.")
+
+_RE_LINK_MATTEL = None
+
+
+def _link_mattel(texto):
+    import re as _re
+    global _RE_LINK_MATTEL
+    if _RE_LINK_MATTEL is None:
+        _RE_LINK_MATTEL = _re.compile(r"https?://creations\.mattel\.com/(?:[a-z]{2}-[a-z]{2}/)?products/([a-z0-9-]+)", _re.I)
+    m = _RE_LINK_MATTEL.search(texto or "")
+    return ("https://creations.mattel.com/en-mx/products/" + m.group(1).lower()) if m else None
+
+
+def analizar_pieza(url, obtener_html=None):
+    """Lo que Gonza necesita saber de una pieza para decidir. Devuelve
+    (texto, filas_de_botones)."""
+    import re as _re
+    titulo, precio, limite, imagen = _datos_pieza(url)
+    try:
+        if obtener_html:
+            html = obtener_html(url)
+        else:
+            html = CUENTAS.principal()._sesion_http().get(url, timeout=20).text
+    except Exception:
+        html = ""
+    if not titulo:
+        m = _re.search(r'<meta property="og:title" content="([^"]+)"', html or "")
+        titulo = m.group(1) if m else None
+    if not titulo and not html:
+        return "No pude abrir esa pieza en Mattel. Revisa el link o prueba en un momento.", None
+    cuando = DROPS.leer_lanzamiento(html)
+    lineas = [f"🔎 {titulo or url}"]
+    if precio:
+        lineas.append(f"💲 ${precio:,.0f} MXN")
+    if limite:
+        lineas.append(f"📦 Límite {limite} por cliente")
+    if "rlc" in url:
+        lineas.append("🔐 Red Line Club: pide membresía y sesión")
+    ahora = datetime.now(timezone.utc)
+
+    if cuando and cuando > ahora + timedelta(minutes=2):
+        drop_id, _ = DROPS.proponer(DB, url, titulo or url, cuando)
+        d = DROPS.obtener(DB, drop_id)
+        lineas.append(f"🕐 Sale el {DROPS.hora_local(cuando)} (hora local)")
+        if d and d["estado"] == "programado":
+            lineas.append("✅ El disparo ya está programado.")
+            return "\n".join(lineas), None
+        return "\n".join(lineas), [[{"text": "📅 Programar disparo", "callback_data": f"pd:{drop_id}"},
+                                     {"text": "No", "callback_data": f"pn:{drop_id}"}]]
+
+    disponible = _disponible_ahora(url)
+    if disponible:
+        hid = HALLAZGOS.registrar(url, titulo=titulo, imagen=imagen, precio_mxn=precio, tipo="manual",
+                                  deseado=True)
+        lineas.append("🟢 A la venta ahora")
+        if hid:
+            return "\n".join(lineas), [[{"text": "🛒 Comprar con el bot", "callback_data": f"c:{hid}"},
+                                        {"text": "🙈 Ignorar", "callback_data": f"i:{hid}"}]]
+        return "\n".join(lineas), None
+    nuevo = _vigilar_restock(url)
+    lineas.append("🔴 Agotada" + (": la dejo vigilada y te aviso si hay restock (con el botón Comprar)."
+                                  if nuevo else ": ya estaba vigilada para el restock."))
+    return "\n".join(lineas), None
+
+
+def _disponible_ahora(url):
+    """True si Shopify la tiene a la venta (variante disponible) y la página
+    no dice "Coming Soon" con fecha futura."""
+    try:
+        base = url.split("?")[0].rstrip("/")
+        d = requests.get(base + ".js", timeout=15, headers={"User-Agent": CUENTAS.UA}).json()
+        return bool(d.get("available"))
+    except Exception:
+        return False
+
+
+def texto_estado():
+    partes = [chequeo_cuentas("Estado ahora")]
+    try:
+        latido = os.path.join(os.environ.get("HOTWHEELS_DATOS") or os.path.dirname(os.path.abspath(__file__)),
+                              "latido.txt")
+        minutos = (time.time() - os.path.getmtime(latido)) / 60
+        partes.append(("🟢" if minutos < 10 else "🔴") + f" Monitor: último barrido hace {minutos:.0f} min")
+    except OSError:
+        partes.append("🟡 Monitor: sin latido todavía")
+    prog = DROPS.programados(DB)
+    partes.append(f"📅 Disparos programados: {len(prog)}" + "".join(
+        f"\n  • {DROPS.hora_local(d['cuando'])} {d['titulo'] or d['url']}" for d in prog[:5]))
+    return "\n".join(partes)
+
+
+def texto_drops():
+    lista = DROPS.proximos(DB)
+    if not lista:
+        return "📅 No hay lanzamientos próximos detectados. Pégame el link de una pieza para revisarla."
+    marca = {"programado": "✅", "propuesto": "❔", "hecho": "✔️"}
+    return "📅 Próximos lanzamientos:\n" + "\n".join(
+        f"{marca.get(d['estado'], '•')} {DROPS.hora_local(d['cuando'])} · {d['titulo'] or d['url']}" for d in lista)
+
+
+def atender_mensaje(texto):
+    """Mensaje de Gonza en Telegram -> (respuesta, botones)."""
+    t = (texto or "").strip()
+    url = _link_mattel(t)
+    if url:
+        return analizar_pieza(url)
+    comando = t.split()[0].lower().split("@")[0] if t else ""
+    if comando in ("/estado", "/status", "estado"):
+        return texto_estado(), None
+    if comando in ("/drops", "/calendario", "drops"):
+        return texto_drops(), None
+    if comando in ("/ayuda", "/start", "/help", "ayuda"):
+        return AYUDA_TELEGRAM, None
+    if t.startswith("/"):
+        return "No conozco ese comando.\n\n" + AYUDA_TELEGRAM, None
+    return None, None
 
 
 def _job_calendario():
@@ -1350,6 +1498,7 @@ def iniciar_servicios():
                 "precalentar": precalentar,
                 "nota_pago": nota_pago,
                 "drop": accion_drop,
+                "mensaje": atender_mensaje,
             }).iniciar_hilo()
             print("  Botones de Telegram (Comprar/Ignorar): activos")
         except Exception as e:

@@ -81,12 +81,19 @@ check("crear no pisa un .env que ya existe", C.crear("hijo").env == hijo.env)
 check("nombre de cuenta inválido se rechaza", not C.nombre_valido("../malo") and not C.nombre_valido("Con Espacio"))
 with open(hijo.env, "a", encoding="utf-8") as f:
     f.write("HOTWHEELS_CARD_NUMBER=5555555555554444\nHOTWHEELS_CARD_EXPIRY=11/29\nHOTWHEELS_CARD_CVV=321\n")
+check("sin sesión la cuenta extra no entra al disparo",
+      [c.nombre for c in C.para_disparo()[0]] == ["principal"]
+      and C.para_disparo()[1][0][1].startswith("no ha iniciado sesión"), C.para_disparo())
+os.makedirs(hijo.perfil, exist_ok=True)
+with open(hijo.cookies, "w", encoding="utf-8") as f:
+    json.dump([{"name": "x", "value": "y", "domain": ".mattel.com", "path": "/"}], f)
+check("con tarjeta y sesión sí entra", [c.nombre for c in C.para_disparo()[0]] == ["principal", "hijo"])
 check("listar trae principal e hijo", [c.nombre for c in C.listar()] == ["principal", "hijo"])
 check("la cuenta extra NO hereda variables del proceso", (os.environ.__setitem__("HOTWHEELS_RFC", "X") or True)
       and C.obtener("hijo").datos()["rfc"] == "")
 del os.environ["HOTWHEELS_RFC"]
-ok, det = hijo.revisar_sesion()
-check("sin cookies la sesión se marca como no iniciada", ok is False and "--cuenta hijo" in det, det)
+ok, det = C.obtener("sinsesion").revisar_sesion()   # sin cookies: ni sale a la red
+check("sin cookies la sesión se marca como no iniciada", ok is False and "--cuenta sinsesion" in det, det)
 semaforo = dict((t, ok) for ok, t in C.chequeo(p, revisar_red=False))
 check("semáforo: tarjeta verde, CVV amarillo, RFC y teléfono verdes",
       semaforo.get("tarjeta •••• 1111 con vencimiento") is True
@@ -211,6 +218,34 @@ tg.procesar(toque("cm:1"))
 check("'Comprar el máximo' pide cantidad 0 (= límite de la página)", compras[-1] == 0, compras)
 tg.procesar(toque("cc:1:n"))
 check("'Sí, comprar 1' sigue pidiendo 1", compras[-1] == 1, compras)
+
+# ---------------- 6. Mensajes y links por Telegram ----------------
+print("\n--- 6. Mensajes y links por Telegram ---")
+check("reconoce un link de Mattel en cualquier idioma",
+      D._link_mattel("mira https://creations.mattel.com/products/HOT-WHEELS-x?y=1")
+      == "https://creations.mattel.com/en-mx/products/hot-wheels-x")
+D._datos_pieza = lambda url, html=None: ("RLC Prueba", 610.0, 2, "")
+futuro_txt = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("Launches %B %d, %Y ") + "9:00 am PT"
+t, filas = D.analizar_pieza("https://creations.mattel.com/en-mx/products/rlc-futura",
+                            obtener_html=lambda u: "<p>Coming Soon</p><p>%s</p>" % futuro_txt)
+check("pieza por salir: hora y botón Programar disparo", "Sale el" in t and filas[0][0]["callback_data"].startswith("pd:"), (t, filas))
+D._disponible_ahora = lambda url: True
+t, filas = D.analizar_pieza("https://creations.mattel.com/en-mx/products/rlc-venta", obtener_html=lambda u: "<p>Add to Bag</p>")
+check("pieza a la venta: precio, límite y botón Comprar", "$610" in t and "Límite 2" in t
+      and filas[0][0]["callback_data"].startswith("c:"), (t, filas))
+D._disponible_ahora = lambda url: False
+t, filas = D.analizar_pieza("https://creations.mattel.com/en-mx/products/rlc-agotada", obtener_html=lambda u: "<p>Sold Out</p>")
+check("pieza agotada: queda vigilada para el restock", "Agotada" in t and "rlc-agotada" in
+      [e["handle"] for e in EX.listar_vigilados(os.path.join(TMP, "vigilar.json"))], t)
+check("/drops lista lo detectado", "Próximos lanzamientos" in D.atender_mensaje("/drops")[0])
+check("/ayuda explica los comandos", "/estado" in D.atender_mensaje("/ayuda")[0])
+check("texto normal no responde", D.atender_mensaje("hola") == (None, None))
+llamadas.clear()
+tg.acciones["mensaje"] = lambda texto: ("respuesta a " + texto, None)
+msg = lambda chat, usuario: {"message": {"chat": {"id": chat}, "from": {"id": usuario}, "text": "/estado"}}  # noqa: E731
+check("Telegram contesta mensajes del chat de Gonza", tg.procesar(msg(42, 42)) == "mensaje"
+      and llamadas[-1][1]["text"] == "respuesta a /estado")
+check("e ignora mensajes de otros chats", tg.procesar(msg(99, 99)) is None and tg.procesar(msg(42, 7)) is None)
 
 os.chdir(ORIGEN)
 shutil.rmtree(TMP, ignore_errors=True)

@@ -59,9 +59,29 @@ class Control:
         usuario = (cq.get("from") or {}).get("id")
         return chat == self.chat_id and usuario == self.chat_id
 
+    def _mensaje(self, msg):
+        """Mensajes de texto (2026-11-10): comandos (/estado, /drops, /ayuda) o
+        un link de Mattel para analizar. Solo del chat personal y de Gonza."""
+        chat = (msg.get("chat") or {}).get("id")
+        usuario = (msg.get("from") or {}).get("id")
+        texto = (msg.get("text") or "").strip()
+        atender = self.acciones.get("mensaje")
+        if chat != self.chat_id or usuario != self.chat_id or not texto or not atender:
+            return None
+        respuesta, filas = atender(texto)
+        if not respuesta:
+            return None
+        params = {"chat_id": self.chat_id, "text": respuesta[:4000]}
+        if filas:
+            params["reply_markup"] = {"inline_keyboard": filas}
+        self._api("sendMessage", **params)
+        return "mensaje"
+
     def procesar(self, update, ahora=None):
         """Atiende UN update de Telegram. Devuelve un texto corto de lo que hizo
         (para las pruebas) o None si lo ignoro."""
+        if update.get("message"):
+            return self._mensaje(update["message"])
         cq = update.get("callback_query")
         if not cq or not self._es_mio(cq):
             return None
@@ -164,7 +184,7 @@ class Control:
         espera_error = 5
         while not self._parar.is_set():
             r = self._api("getUpdates", offset=self.offset, timeout=25,
-                          allowed_updates=["callback_query"])
+                          allowed_updates=["callback_query", "message"])
             if not r.get("ok"):
                 # 409 = otro programa consulta el mismo bot; red caida, etc.
                 self._parar.wait(espera_error)
