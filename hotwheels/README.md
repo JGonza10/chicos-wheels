@@ -47,6 +47,14 @@ Monitor + bot de compra de Mattel Creations. Antes era el proyecto `15 Bot Hot W
   - −2 min: navegador listo con la pieza.
   - A la hora: disparo con el límite de la página, reintentando 5 min.
 
+**Telegram entiende mensajes** (solo del chat de Gonza):
+- Pegar un link de `creations.mattel.com` responde con precio, límite y RLC, y luego:
+  - si está a la venta, el botón **Comprar**;
+  - si sale después, **Programar disparo**;
+  - si está agotada, la deja vigilada para el restock.
+- Comandos: `/estado` (semáforo de cuentas, monitor y disparos), `/drops` y `/ayuda`.
+- Al disparo entran solo las cuentas extra con tarjeta y sesión. La principal entra siempre.
+
 **Otras habilidades:**
 - **Sesión:** a las 9:05 y 20:05 se revisa la sesión de Mattel de cada cuenta, sin abrir el navegador. Si venció, avisa.
 - **Captcha:** el aviso trae la foto de la pantalla.
