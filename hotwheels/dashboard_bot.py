@@ -21,6 +21,7 @@ import telegram_control
 import navegador as NAVEGADOR
 import cuentas as CUENTAS
 import drops as DROPS
+import habilidades as HAB
 
 app = Flask(__name__)
 # Panel solo local (http): cookie de Flask cerrada, pero sin Secure para que funcione en 127.0.0.1.
@@ -77,6 +78,7 @@ def init_db():
                 )""")
     conn.commit()
     DROPS.crear_tabla(DB)
+    HAB.crear_tablas(DB)
 
     # products puede venir de una version anterior sin estas columnas.
     c.execute("PRAGMA table_info(products)")
@@ -347,7 +349,7 @@ def _comprar_pedido_por_usuario(url, titulo, precio_mxn, cantidad, hallazgo_id=N
                     notify(f"⚠️ Se compró, pero no se pudo anotar en Chicos Wheels: {msg_ch}")
                 try:
                     texto, _ = borrador_publicacion(titulo or url, precio_mxn, _reventa_conocida(url), cantidad)
-                    notify("📝 Borrador para Facebook/Instagram (cópialo y ajusta el precio):\n\n" + texto)
+                    ofrecer_publicacion(texto, url, None, url)
                 except Exception as e:
                     print(f"⚠️ No se pudo armar el borrador: {e}")
         except Exception as e:  # nunca tumbar el hilo en silencio
@@ -676,7 +678,7 @@ EVENTO_VENTANA_SEGUNDOS = 300  # 5 min: el drop RLC del 10/11 se agotó después
 EVENTO_INTERVALO_SEGUNDOS = 15
 
 
-async def _intentar_evento(urls=None, cantidad=None):
+async def _intentar_evento(urls=None, cantidad=None, solo=None, nombre=None):
     """Disparo programado: compra `urls` (por defecto las activas) con TODAS
     las cuentas activas a la vez (multicuenta, 2026-11-10): un navegador por
     cuenta, cada una con su sesion, tarjeta y direccion. Devuelve True si
@@ -685,16 +687,53 @@ async def _intentar_evento(urls=None, cantidad=None):
     if not urls:
         return False
     lista, fuera = CUENTAS.para_disparo()
+    # Drop programado para algunas cuentas ("Solo hijo"): solo esas.
+    elegidas = [n for n in (solo or "").split(",") if n]
+    if elegidas:
+        lista = [c for c in lista if c.nombre in elegidas]
+        fuera = [(c, m) for c, m in fuera if c.nombre in elegidas]
     for cuenta, motivo in fuera:
         notify(f"⚪ [{cuenta.nombre}] no entra a este disparo: {motivo}.")
+    if not lista:
+        return False
+    HAB.mantener_despierta(EVENTO_VENTANA_SEGUNDOS / 60 + 10)
     varias = len(lista) > 1
+    stats = {c.nombre: {"intentos": 0, "captchas": 0, "resultado": ""} for c in lista}
     resultados = await asyncio.gather(
-        *[_intentar_evento_cuenta(urls, c, cantidad, varias) for c in lista],
+        *[_intentar_evento_cuenta(urls, c, cantidad, varias, stats[c.nombre]) for c in lista],
         return_exceptions=True)
+    # Reporte del drop: se guarda siempre y se manda si compraron varias cuentas.
+    try:
+        texto, exito = HAB.resumen_drop(nombre or urls[0], stats)
+        HAB.guardar_reporte("drop", texto, urls[0], exito)
+        if varias:
+            notify(texto)
+    except Exception as e:
+        print(f"⚠️ No se pudo armar el reporte del drop: {e}")
     return any(r is True for r in resultados)
 
 
-async def _intentar_evento_cuenta(urls, cuenta, cantidad=None, varias=False):
+async def _esperar_reintento(urls, maximo):
+    """Entre reintentos: en vez de esperar fijo, revisa cada 3 s si Shopify ya
+    la tiene a la venta (sin abrir navegador) y reintenta en cuanto aparece,
+    con un minimo de 5 s para no saturar a Mattel."""
+    if maximo < 5:          # intervalos cortos (pruebas): espera simple, sin consultar
+        await asyncio.sleep(maximo)
+        return False
+    inicio = time.monotonic()
+    while time.monotonic() - inicio < maximo:
+        await asyncio.sleep(3)
+        if time.monotonic() - inicio >= 5:
+            try:
+                disponibles = await asyncio.gather(*[asyncio.to_thread(_disponible_ahora, u) for u in urls])
+                if any(disponibles):
+                    return True
+            except Exception:
+                pass
+    return False
+
+
+async def _intentar_evento_cuenta(urls, cuenta, cantidad=None, varias=False, stats=None):
     proxies = get_proxies()
     limite = datetime.now() + timedelta(seconds=EVENTO_VENTANA_SEGUNDOS)
     intentos = 0
@@ -719,6 +758,10 @@ async def _intentar_evento_cuenta(urls, cuenta, cantidad=None, varias=False):
                 # El tiempo esperando a que Gonza resuelva un captcha no se
                 # descuenta de la ventana de reintentos (drop 2026-11-10).
                 limite += datetime.now() - inicio_intento
+            if stats is not None:
+                stats["intentos"] += 1
+                stats["captchas"] += 1 if "🧩" in resultado else 0
+                stats["resultado"] = resultado
             ultimo_por_url[url] = resultado
             add_result(quien + resultado)
             if "🎉" in resultado:
@@ -728,7 +771,8 @@ async def _intentar_evento_cuenta(urls, cuenta, cantidad=None, varias=False):
             break
         if datetime.now() >= limite:
             break
-        await asyncio.sleep(EVENTO_INTERVALO_SEGUNDOS)
+        pendientes = [u for u in urls if "🎉" not in ultimo_por_url.get(u, "")]
+        await _esperar_reintento(pendientes, EVENTO_INTERVALO_SEGUNDOS)
 
     exitos = [r for r in ultimo_por_url.values() if "✅" in r or "🎉" in r]
     if exitos:
@@ -818,16 +862,72 @@ def _despues_de_comprar(url, resultado, cuenta=None, origen="disparo"):
     titulo, precio, limite, imagen = _datos_pieza(url)
     piezas = limite or 1
     try:
+        # Cada cuenta es una compra distinta: la de la cuenta extra se anota
+        # aparte (antes el inventario guardaba una sola por link).
+        clave = url if (cuenta is None or cuenta.es_principal) else f"{url}#cuenta={cuenta.nombre}"
         ok_ch, msg_ch = COLLECTHUB.registrar_compra(
             url=url, titulo=titulo, precio_mxn=precio, imagen=imagen, origen=origen,
-            cantidad=piezas, pedido=(f"[{cuenta.nombre}] " if cuenta else "") + str(resultado)[:280])
+            cantidad=piezas, pedido=(f"[{cuenta.nombre}] " if cuenta else "") + str(resultado)[:280],
+            clave=clave)
         if not ok_ch:
             notify(f"⚠️ Se compró, pero no se pudo anotar en Chicos Wheels: {msg_ch}")
     except Exception as e:
         notify(f"⚠️ Se compró, pero no se pudo anotar en Chicos Wheels: {e}")
     texto, _ = borrador_publicacion(titulo or url, precio, _reventa_conocida(url), piezas)
-    notify("📝 Borrador para Facebook/Instagram (cópialo y ajusta el precio):\n\n" + texto
-           + (f"\n\nFoto: {imagen}" if imagen else ""))
+    ofrecer_publicacion(texto, url, imagen, clave)
+
+
+def _articulo_remoto(clave):
+    try:
+        conn = sqlite3.connect(DB)
+        r = conn.execute("SELECT articulo_id_remoto FROM registros_collecthub WHERE url = ?", (clave,)).fetchone()
+        conn.close()
+        return r[0] if r and r[0] else None
+    except Exception:
+        return None
+
+
+def ofrecer_publicacion(texto, url, imagen=None, clave=None):
+    """Borrador para Facebook/Instagram con el boton "Publicar en Facebook"
+    (si la pieza ya esta en el inventario). Publicar lo aprueba Gonza."""
+    aid = _articulo_remoto(clave or url)
+    pid = HAB.guardar_publicacion(texto, aid, url, imagen)
+    cuerpo = "📝 Borrador para Facebook/Instagram (cópialo y ajusta el precio):\n\n" + texto
+    if imagen:
+        cuerpo += f"\n\nFoto: {imagen}"
+    if aid and notify_botones(cuerpo, [[{"text": "📣 Publicar en Facebook", "callback_data": f"fb:{pid}"},
+                                         {"text": "No por ahora", "callback_data": f"fn:{pid}"}]]):
+        return pid
+    notify(cuerpo)
+    return pid
+
+
+def accion_publicar(pub_id, publicar):
+    """Boton de Telegram: publica el borrador en la pagina de Facebook (a
+    traves de la app en Railway, donde vive la conexion con la pagina)."""
+    pub = HAB.obtener_publicacion(pub_id)
+    if not pub:
+        return "Ese borrador ya no existe."
+    if pub["estado"] == "publicada":
+        return "Ya estaba publicada: " + (pub.get("resultado") or "")
+    if not publicar:
+        HAB.marcar_publicacion(pub_id, "descartada")
+        return "Ok, no la publico. El texto sigue arriba para que lo copies."
+    if not pub.get("articulo_id"):
+        return "Esa pieza todavía no está en el inventario; publícala desde la app."
+    try:
+        r = COLLECTHUB.pedir("POST", f"/api/articulos/{pub['articulo_id']}/publicar-facebook",
+                             {"texto": pub["texto"]}, timeout=40)
+        datos = r.json() if r.content else {}
+        if r.status_code >= 400 or not datos.get("ok"):
+            msg = datos.get("error") or datos.get("mensaje") or f"error {r.status_code}"
+            HAB.marcar_publicacion(pub_id, "fallo", msg)
+            return f"⚠️ Facebook no la publicó: {msg}"
+        HAB.marcar_publicacion(pub_id, "publicada", datos.get("link"))
+        return f"📣 Publicada en tu página: {datos.get('link') or 'listo'}"
+    except Exception as e:
+        HAB.marcar_publicacion(pub_id, "fallo", str(e))
+        return f"⚠️ No se pudo publicar: {e}"
 
 
 def _vigilar_restock(url):
@@ -888,6 +988,7 @@ def _precalentar_evento(evento, ahora):
     if not urls:
         return
     _EVENTO_PRECALENTADO["id"] = evento["id"]
+    HAB.mantener_despierta(15)
     _precalentar(urls, f"Disparo de las {evento['hora']:02d}:{evento['minuto']:02d}")
 
 
@@ -898,6 +999,11 @@ def chequeo_cuentas(titulo="Chequeo"):
     partes = [f"🩺 {titulo}"]
     partes.append("💳 Modo: " + ("🧪 ENSAYO (no paga)" if os.environ.get("HOTWHEELS_DRY_RUN") == "1"
                                   else "pago real"))
+    icono = {True: "🟢", False: "🔴", None: "🟡"}
+    try:
+        partes += ["  %s %s" % (icono[ok], t) for ok, t in HAB.chequeo_sistema()]
+    except Exception as e:
+        partes.append(f"  🟡 no se pudo revisar internet y reloj ({e})")
     for cuenta in CUENTAS.listar() or [CUENTAS.principal()]:
         try:
             partes.append(CUENTAS.texto_chequeo(cuenta, CUENTAS.chequeo(cuenta)))
@@ -916,6 +1022,7 @@ def _agenda_drops(ahora_utc=None):
                 continue
             try:
                 if paso == "chequeo":
+                    HAB.mantener_despierta(45)   # que la PC no se duerma antes del drop
                     notify(chequeo_cuentas(f"Faltan 30 min para {nombre} ({DROPS.hora_local(d['cuando'])})"))
                 elif paso == "cvv":
                     for cuenta in CUENTAS.para_disparo()[0] or [CUENTAS.principal()]:
@@ -929,7 +1036,29 @@ def _agenda_drops(ahora_utc=None):
                 print(f"⚠️ Paso {paso} del drop {d['id']}: {e}")
         if disparar:
             DROPS.cambiar_estado(DB, d["id"], "hecho")
-            asyncio.run(_intentar_evento([d["url"]], cantidad=d["cantidad"]))
+            asyncio.run(_intentar_evento([d["url"]], cantidad=d["cantidad"], solo=d.get("cuentas"),
+                                         nombre=nombre))
+
+
+def botones_drop(drop_id):
+    """Programar con todas las cuentas o solo con una."""
+    filas = [[{"text": "📅 Programar disparo", "callback_data": f"pd:{drop_id}"},
+              {"text": "No", "callback_data": f"pn:{drop_id}"}]]
+    listas = CUENTAS.para_disparo()[0]
+    if len(listas) > 1:
+        filas.append([{"text": f"Solo {c.nombre}", "callback_data": f"pc:{drop_id}:{c.nombre}"} for c in listas][:4])
+    return filas
+
+
+def accion_drop_cuenta(drop_id, nombre):
+    """"Solo <cuenta>": programa el drop solo para esa cuenta."""
+    if not CUENTAS.nombre_valido(nombre or ""):
+        return "Cuenta no válida."
+    r = accion_drop(drop_id, True)
+    if r.startswith("✅"):
+        DROPS.cambiar_cuentas(DB, drop_id, nombre)
+        r = r.split("\n👤")[0] + f"\n👤 Solo: {nombre}\n" + r.split("\n", 3)[-1]
+    return r
 
 
 def accion_drop(drop_id, programar):
@@ -1006,9 +1135,7 @@ def revisar_calendario(obtener_html=None):
             continue
         nuevos.append(drop_id)
         notify_botones(f"📅 Lanzamiento detectado\n{titulo}\n🕐 {DROPS.hora_local(cuando)} (hora local)\n{url}\n\n"
-                       "¿Programo el disparo con todas tus cuentas?",
-                       [[{"text": "📅 Programar disparo", "callback_data": f"pd:{drop_id}"},
-                         {"text": "No", "callback_data": f"pn:{drop_id}"}]])
+                       "¿Programo el disparo con todas tus cuentas?", botones_drop(drop_id))
     return nuevos
 
 
@@ -1019,6 +1146,7 @@ AYUDA_TELEGRAM = (
     "o cuándo sale, con el botón para comprar o programar el disparo.\n"
     "• /estado — semáforo de tus cuentas (sesión, tarjeta, CVV, RFC, carrito) y del monitor.\n"
     "• /drops — próximos lanzamientos detectados y programados.\n"
+    "• /reporte — el reporte del último drop o ensayo.\n"
     "• /ayuda — esto.")
 
 _RE_LINK_MATTEL = None
@@ -1067,8 +1195,7 @@ def analizar_pieza(url, obtener_html=None):
         if d and d["estado"] == "programado":
             lineas.append("✅ El disparo ya está programado.")
             return "\n".join(lineas), None
-        return "\n".join(lineas), [[{"text": "📅 Programar disparo", "callback_data": f"pd:{drop_id}"},
-                                     {"text": "No", "callback_data": f"pn:{drop_id}"}]]
+        return "\n".join(lineas), botones_drop(drop_id)
 
     disponible = _disponible_ahora(url)
     if disponible:
@@ -1131,6 +1258,9 @@ def atender_mensaje(texto):
         return texto_estado(), None
     if comando in ("/drops", "/calendario", "drops"):
         return texto_drops(), None
+    if comando in ("/reporte", "reporte"):
+        r = HAB.ultimo_reporte()
+        return (r[0] + f"\n🕐 {r[1][:16].replace('T', ' ')} UTC") if r else "Todavía no hay reportes de drops.", None
     if comando in ("/ayuda", "/start", "/help", "ayuda"):
         return AYUDA_TELEGRAM, None
     if t.startswith("/"):
@@ -1145,10 +1275,99 @@ def _job_calendario():
         print(f"⚠️ Error en el calendario de drops: {e}")
 
 
+def _job_vispera():
+    """20:30: lo que sale mañana, con botones para programar lo pendiente."""
+    ahora = datetime.now(timezone.utc)
+    manana = [d for d in DROPS.proximos(DB) if (d["cuando"] - ahora).total_seconds() <= 26 * 3600
+              and d["estado"] in ("propuesto", "programado")]
+    if not manana:
+        return
+    notify("🌙 Mañana salen:\n" + "\n".join(
+        f"{'✅' if d['estado'] == 'programado' else '❔'} {DROPS.hora_local(d['cuando'])} · {d['titulo'] or d['url']}"
+        for d in manana) + "\nDeja la PC prendida y tu CVV a la mano.")
+    for d in manana:
+        if d["estado"] == "propuesto":
+            notify_botones(f"¿Programo {d['titulo'] or d['url']} ({DROPS.hora_local(d['cuando'])})?",
+                           botones_drop(d["id"]))
+
+
+def _job_ensayo_cuentas():
+    """Lunes 21:00: ensayo sin pagar de cada cuenta lista, antes de los
+    drops del martes. Avisa el semaforo de cada una."""
+    if not _LOCK_DISPARO.acquire(blocking=False):
+        return
+    try:
+        url = monitor_admin.producto_disponible_para_prueba()
+        if not url:
+            notify("🧪 Ensayo semanal: no hubo una pieza disponible para probar; se repite el próximo lunes.")
+            return
+        lineas = ["🧪 Ensayo semanal (sin pagar) con " + url]
+        exito = True
+        for cuenta in CUENTAS.para_disparo()[0]:
+            try:
+                r = asyncio.run(comprar_producto(url, dry_run=True, cantidad=1, permitir_pausa=False,
+                                                 notificar=False, cuenta=cuenta,
+                                                 navegador=NAVEGADOR.obtener(cuenta)))
+            except Exception as e:
+                r = f"❌ Error inesperado: {e}"
+            ok = "🧪" in r
+            exito = exito and ok
+            reloj = next((l for l in r.splitlines() if l.startswith("⏱")), "")
+            lineas.append(("🟢 " if ok else "🔴 ") + f"{cuenta.nombre}: " + ("llegó hasta antes de pagar " + reloj
+                                                                           if ok else r.splitlines()[0][:200]))
+        texto = "\n".join(lineas)
+        HAB.guardar_reporte("ensayo", texto, url, exito)
+        if exito:
+            HAB.tocar_senal("ensayo_ok.txt", url)
+        notify(texto)
+    finally:
+        _LOCK_DISPARO.release()
+
+
+def _job_reventa_inventario():
+    """Miércoles 20:15: piezas de tu inventario cuyo precio de reventa subió
+    15% o más sobre su valor estimado (buen momento para venderlas)."""
+    try:
+        import monitor as MON
+        r = COLLECTHUB.pedir("GET", "/api/articulos", timeout=20)
+        articulos = r.json() if r.status_code == 200 else []
+    except Exception as e:
+        print(f"⚠️ Reventa del inventario: {e}")
+        return
+    if isinstance(articulos, dict):
+        articulos = articulos.get("articulos") or articulos.get("items") or []
+    suben = []
+    for a in [a for a in articulos if (a.get("estatus") == "Disponible" and "hot wheels" in
+                                       (a.get("tipo") or "").lower())][:25]:
+        try:
+            usd, n = MON.precio_reventa_estimado(a.get("nombre") or "")
+            if not usd or not MON.TIPO_CAMBIO:
+                continue
+            mxn = usd * MON.TIPO_CAMBIO
+            antes = float(a.get("valor_estimado") or a.get("precio_compra") or 0)
+            if antes and mxn >= antes * 1.15:
+                suben.append((mxn / antes - 1, a.get("nombre"), antes, mxn))
+        except Exception:
+            continue
+        time.sleep(1)
+    if suben:
+        suben.sort(reverse=True)
+        notify("📈 Reventa al alza en tu inventario:\n" + "\n".join(
+            f"• {n}: ${a:,.0f} → ${m:,.0f} (+{p * 100:.0f}%)" for p, n, a, m in suben[:10]))
+
+
+def _job_respaldo_cuentas():
+    try:
+        HAB.respaldar_cuentas()
+    except Exception as e:
+        print(f"⚠️ Respaldo de cuentas: {e}")
+
+
 def _job_revisar_sesiones():
     """2 veces al dia: si la sesion de Mattel de una cuenta vencio, avisa
     con tiempo (y no el dia del drop)."""
-    for cuenta in CUENTAS.listar():
+    todas_bien = True
+    for cuenta in CUENTAS.para_disparo()[0]:
         if cuenta.es_principal and os.environ.get("HOTWHEELS_PERFIL_MATTEL") != "1":
             continue
         try:
@@ -1158,6 +1377,9 @@ def _job_revisar_sesiones():
         if ok is False:
             cmd = "python iniciar_sesion_mattel.py" + ("" if cuenta.es_principal else f" --cuenta {cuenta.nombre}")
             notify(f"🔐 [{cuenta.nombre}] {detalle}. Con la app cerrada corre: {cmd}")
+            todas_bien = False
+    if todas_bien:
+        HAB.tocar_senal("sesiones_ok.txt")
 
 
 def scheduled_run():
@@ -1195,6 +1417,12 @@ scheduler.add_job(scheduled_run, "cron", minute="*")
 scheduler.add_job(_job_calendario, "cron", minute="7,37")
 # Sesion de Mattel de cada cuenta: 2 veces al dia, para enterarse antes del drop.
 scheduler.add_job(_job_revisar_sesiones, "cron", hour="9,20", minute=5)
+# La víspera de un drop (20:30), el ensayo de las cuentas (lunes 21:00), la
+# reventa del inventario (miércoles 20:15) y el respaldo de cuentas (3:40).
+scheduler.add_job(_job_vispera, "cron", hour=20, minute=30)
+scheduler.add_job(_job_ensayo_cuentas, "cron", day_of_week="mon", hour=21, minute=0)
+scheduler.add_job(_job_reventa_inventario, "cron", day_of_week="wed", hour=20, minute=15)
+scheduler.add_job(_job_respaldo_cuentas, "cron", hour=3, minute=40)
 # Test de humo a las 8:30 — antes de cualquier drop matutino tipico, para
 # avisar con horas de anticipacion si un selector se rompio.
 scheduler.add_job(_job_smoke_diario, "cron", hour=8, minute=30)
@@ -1269,6 +1497,38 @@ def api_estado():
         # Como respondio el monitor de relevo de Railway al ultimo latido.
         "relevo": dict(getattr(sys.modules.get("monitor"), "ESTADO_RELEVO", None) or {}) or None,
     })
+
+
+@app.route("/api/bot_resumen")
+def api_bot_resumen():
+    """Cuentas, drops y ultimo reporte para la pestaña Drops (y Nexus)."""
+    return jsonify(HAB.resumen_json(CUENTAS, DROPS, DB))
+
+
+@app.route("/api/chequeo")
+def api_chequeo():
+    return jsonify({"ok": True, "texto": chequeo_cuentas("Estado ahora")})
+
+
+@app.route("/api/drops/<int:drop_id>/programar", methods=["POST"])
+def api_drop_programar(drop_id):
+    cuenta = ((request.get_json(silent=True) or {}).get("cuenta") or "").strip()
+    texto = accion_drop_cuenta(drop_id, cuenta) if cuenta else accion_drop(drop_id, True)
+    return jsonify({"ok": texto.startswith("✅"), "texto": texto})
+
+
+@app.route("/api/drops/<int:drop_id>/descartar", methods=["POST"])
+def api_drop_descartar(drop_id):
+    return jsonify({"ok": True, "texto": accion_drop(drop_id, False)})
+
+
+@app.route("/api/analizar", methods=["POST"])
+def api_analizar():
+    url = _link_mattel((request.get_json(silent=True) or {}).get("url") or "")
+    if not url:
+        return jsonify({"ok": False, "error": "pega un link de creations.mattel.com"}), 400
+    texto, filas = analizar_pieza(url)
+    return jsonify({"ok": True, "texto": texto, "botones": filas or []})
 
 
 @app.route("/api/limites", methods=["GET", "POST"])
@@ -1498,6 +1758,8 @@ def iniciar_servicios():
                 "precalentar": precalentar,
                 "nota_pago": nota_pago,
                 "drop": accion_drop,
+                "drop_cuenta": accion_drop_cuenta,
+                "publicar": accion_publicar,
                 "mensaje": atender_mensaje,
             }).iniciar_hilo()
             print("  Botones de Telegram (Comprar/Ignorar): activos")

@@ -199,13 +199,17 @@ def _datos_mattel(url):
 
 
 def registrar_compra(url, titulo=None, precio_mxn=None, imagen=None, origen="manual",
-                     cantidad=1, pedido=None):
+                     cantidad=1, pedido=None, clave=None):
     """Da de alta la pieza comprada en Chicos Wheels. Devuelve (ok, mensaje);
-    nunca lanza excepcion."""
+    nunca lanza excepcion. `clave` distingue compras de la misma pieza con
+    otra cuenta (multicuenta): por defecto es la url."""
     url = (url or "").strip()
     if not url:
         return False, "falta la url del producto"
-    if _ya_registrado(url):
+    if "#cuenta=" in url and not clave:      # reintento de una compra de otra cuenta
+        clave, url = url, url.split("#cuenta=")[0]
+    clave = (clave or url).strip()
+    if _ya_registrado(clave):
         return True, "ya estaba registrado en Chicos Wheels"
 
     try:
@@ -227,7 +231,7 @@ def registrar_compra(url, titulo=None, precio_mxn=None, imagen=None, origen="man
     reventa = extra.get("reventa") or 0
     if not configurado():
         mensaje = "falta configurar COLLECTHUB_EMAIL/COLLECTHUB_PASSWORD en .env"
-        _guardar(url, titulo, precio, origen, None, mensaje, cantidad, pedido)
+        _guardar(clave, titulo, precio, origen, None, mensaje, cantidad, pedido)
         return False, mensaje
 
     # "Mis links" no guarda nombre ni precio: se completan desde Mattel.
@@ -273,13 +277,13 @@ def registrar_compra(url, titulo=None, precio_mxn=None, imagen=None, origen="man
             resp = pedir("POST", "/api/articulos", body)
         resp.raise_for_status()
         articulo = resp.json()
-        _guardar(url, titulo, precio, origen, articulo.get("id"), "ok", cantidad, pedido)
+        _guardar(clave, titulo, precio, origen, articulo.get("id"), "ok", cantidad, pedido)
         if conf.get("url_estado"):
-            _marcar_envio(url, url_estado=conf["url_estado"])
+            _marcar_envio(clave, url_estado=conf["url_estado"])
         return True, f"registrado en Chicos Wheels (id {articulo.get('id')})"
     except Exception as e:
         mensaje = f"no se pudo registrar en Chicos Wheels: {e}"
-        _guardar(url, titulo, precio, origen, None, mensaje, cantidad, pedido)
+        _guardar(clave, titulo, precio, origen, None, mensaje, cantidad, pedido)
         return False, mensaje
 
 

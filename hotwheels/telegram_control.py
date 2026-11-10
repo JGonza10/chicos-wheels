@@ -93,6 +93,21 @@ class Control:
         except (IndexError, ValueError):
             self._api("answerCallbackQuery", callback_query_id=cq["id"])
             return None
+        if accion == "pc":
+            # "Solo <cuenta>": drop programado para una sola cuenta.
+            f = self.acciones.get("drop_cuenta")
+            nombre = partes[2] if len(partes) > 2 else ""
+            texto = f(hid, nombre) if f else "El calendario de drops no está activo."
+            self._api("answerCallbackQuery", callback_query_id=cq["id"], text=texto[:180])
+            self._api("sendMessage", chat_id=self.chat_id, text=texto)
+            return "drop_cuenta"
+        if accion in ("fb", "fn"):
+            # Borrador de publicacion: "Publicar en Facebook" / "No por ahora".
+            f = self.acciones.get("publicar")
+            texto = f(hid, accion == "fb") if f else "Publicar no está activo."
+            self._api("answerCallbackQuery", callback_query_id=cq["id"], text=texto[:180])
+            self._api("sendMessage", chat_id=self.chat_id, text=texto)
+            return "publicada" if accion == "fb" else "publicacion_descartada"
         if accion in ("pd", "pn"):
             # Calendario de drops (2026-11-10): "Programar disparo" / "No".
             # El id es del drop, no de un hallazgo.

@@ -54,6 +54,12 @@ def avisar_si_esperan(usuario_id: str, a: dict) -> None:
         l = esperan(usuario_id, a)
         if l:
             quienes = ", ".join(sorted({f["cliente"] or "un cliente" for f in l}))
-            avisar_dueno(f"🔔 Llegó algo que esperan {len(l)} cliente(s)\n{a.get('nombre')}\nAvisa a: {quienes}")
+            # Mensaje listo para copiar en Messenger o Instagram (nunca se manda solo).
+            nombre = a.get("nombre") or "la pieza"
+            llegada = " (llega aprox. el %s)" % a["fecha_llegada"] if (a.get("ubicacion") or "").lower() == "por recibir" and a.get("fecha_llegada") else ""
+            borrador = (f"Hola 👋 ¡Ya conseguí {nombre}{llegada}, la que buscabas! "
+                        "¿Te la aparto? Se entrega el sábado en Balderas.")
+            avisar_dueno(f"🔔 Llegó algo que esperan {len(l)} cliente(s)\n{nombre}\nAvisa a: {quienes}"
+                         f"\n\n✉️ Mensaje listo para Messenger/Instagram:\n{borrador}")
     except Exception:
         pass

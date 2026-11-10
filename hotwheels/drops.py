@@ -94,6 +94,10 @@ def crear_tabla(db):
         hechos TEXT NOT NULL DEFAULT '',
         creado TEXT NOT NULL,
         UNIQUE(url, cuando_utc))""")
+    # Cuentas elegidas para el drop ("" = todas). Columna agregada despues.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(drops)")}
+    if "cuentas" not in cols:
+        conn.execute("ALTER TABLE drops ADD COLUMN cuentas TEXT NOT NULL DEFAULT ''")
     conn.commit()
     conn.close()
 
@@ -101,7 +105,8 @@ def crear_tabla(db):
 def _fila(r):
     return {"id": r[0], "url": r[1], "titulo": r[2],
             "cuando": datetime.fromisoformat(r[3]), "estado": r[4], "cantidad": r[5],
-            "hechos": set(filter(None, (r[6] or "").split(","))), "creado": r[7]}
+            "hechos": set(filter(None, (r[6] or "").split(","))), "creado": r[7],
+            "cuentas": (r[8] if len(r) > 8 else "") or ""}
 
 
 # Columnas que lee _fila(), en ese orden (escritas en cada consulta: nada de
@@ -128,7 +133,7 @@ def proponer(db, url, titulo, cuando_utc):
 
 def obtener(db, drop_id):
     conn = sqlite3.connect(db)
-    r = conn.execute("SELECT id, url, titulo, cuando_utc, estado, cantidad, hechos, creado FROM drops WHERE id = ?", (drop_id,)).fetchone()
+    r = conn.execute("SELECT id, url, titulo, cuando_utc, estado, cantidad, hechos, creado, cuentas FROM drops WHERE id = ?", (drop_id,)).fetchone()
     conn.close()
     return _fila(r) if r else None
 
@@ -139,6 +144,14 @@ def cambiar_estado(db, drop_id, estado, cantidad=None):
         conn.execute("UPDATE drops SET estado = ?, cantidad = ? WHERE id = ?", (estado, cantidad, drop_id))
     else:
         conn.execute("UPDATE drops SET estado = ? WHERE id = ?", (estado, drop_id))
+    conn.commit()
+    conn.close()
+
+
+def cambiar_cuentas(db, drop_id, cuentas):
+    """Cuentas que entran a este drop, separadas por coma ("" = todas)."""
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE drops SET cuentas = ? WHERE id = ?", (cuentas or "", drop_id))
     conn.commit()
     conn.close()
 
@@ -158,7 +171,7 @@ def marcar_hecho(db, drop_id, paso):
 
 def programados(db):
     conn = sqlite3.connect(db)
-    filas = conn.execute("SELECT id, url, titulo, cuando_utc, estado, cantidad, hechos, creado FROM drops WHERE estado = 'programado' "
+    filas = conn.execute("SELECT id, url, titulo, cuando_utc, estado, cantidad, hechos, creado, cuentas FROM drops WHERE estado = 'programado' "
                          "ORDER BY cuando_utc").fetchall()
     conn.close()
     return [_fila(r) for r in filas]
@@ -167,7 +180,7 @@ def programados(db):
 def proximos(db, limite=20):
     conn = sqlite3.connect(db)
     ahora = datetime.now(timezone.utc).isoformat()
-    filas = conn.execute("SELECT id, url, titulo, cuando_utc, estado, cantidad, hechos, creado FROM drops WHERE cuando_utc >= ? AND "
+    filas = conn.execute("SELECT id, url, titulo, cuando_utc, estado, cantidad, hechos, creado, cuentas FROM drops WHERE cuando_utc >= ? AND "
                          "estado != 'descartado' ORDER BY cuando_utc LIMIT ?", (ahora, limite)).fetchall()
     conn.close()
     return [_fila(r) for r in filas]

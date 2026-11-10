@@ -454,6 +454,11 @@ async def esperar_captcha(page, url, headless, avisar=True, espera_max=180, inte
     if avisar:
         texto = (f"🧩 Captcha detectado comprando {url}. Resuélvelo en la ventana del navegador "
                  f"(tienes {espera_max // 60} min); el bot sigue solo cuando desaparezca.")
+        # Fuera de casa: resolverlo desde el celular con Escritorio remoto de
+        # Chrome (gratis), que se instala una vez en la PC.
+        remoto = os.environ.get("HOTWHEELS_LINK_REMOTO", "https://remotedesktop.google.com/access").strip()
+        if remoto:
+            texto += f"\n📱 Desde el celular: {remoto}"
         try:
             # Con la foto de la pantalla, para saber de un vistazo qué pide.
             notify_foto(texto, await page.screenshot(timeout=5000))
@@ -493,6 +498,11 @@ async def esperar_fila_checkout(page, url, espera_max=600, intervalo=1):
     if not await en_fila_checkout(page):
         return None
     print("  ⏳ En la fila del checkout de Mattel, esperando turno…")
+    try:  # que Gonza sepa que no es una falla y no cierre la ventana
+        notify(f"⏳ Mattel te puso en la fila del checkout; el bot espera su turno solo "
+               f"(hasta {espera_max // 60} min). No cierres la ventana. {url}")
+    except Exception:
+        pass
     esperado = 0
     while esperado < espera_max:
         await page.wait_for_timeout(intervalo * 1000)
@@ -546,6 +556,45 @@ async def limite_de_pagina(page):
     return limite_desde_datos(tags, texto)
 
 
+def solo_visibles(selector_css):
+    """'a, b' -> 'a:visible, b:visible'. Con 'a, b:visible' el :visible solo
+    aplica a b y el bot tomaba el "Check Out" oculto del carrito lateral
+    (ensayo del 2026-11-10)."""
+    return ", ".join(p.strip() + ":visible" for p in selector_css.split(",") if p.strip())
+
+
+async def agregar_directo(page, url, pedida):
+    """Agrega la pieza con /cart/add.js de Shopify (solo piezas que no son
+    RLC). Devuelve la cantidad agregada, "agotado", o None si hay que usar el
+    boton de siempre (cualquier duda cae al camino normal)."""
+    try:
+        datos = await page.evaluate(
+            "async () => { const r = await fetch(location.pathname.replace(/\\/$/, '') + '.js');"
+            " const p = await r.json(); const v = (p.variants || []).find(x => x.available);"
+            " return v ? {id: v.id, tags: p.tags || []} : {agotado: true}; }")
+        if not isinstance(datos, dict):
+            return None
+        if datos.get("agotado"):
+            return "agotado"
+        qty = cantidad_a_pedir(pedida, limite_desde_datos(datos.get("tags")))
+        prefijo = url.split("/products/")[0].split("creations.mattel.com")[-1]
+        r = await page.evaluate(
+            "async ([pref, id, qty]) => { const r = await fetch(pref + '/cart/add.js', {method: 'POST',"
+            " credentials: 'same-origin', headers: {'Content-Type': 'application/json'},"
+            " body: JSON.stringify({items: [{id: id, quantity: qty}]})});"
+            " let t = ''; try { t = await r.text(); } catch (e) {}"
+            " const c = await (await fetch(pref + '/cart.js', {credentials: 'same-origin'})).json();"
+            " return {status: r.status, texto: t.slice(0, 300), piezas: c.item_count}; }",
+            [prefijo, datos["id"], qty])
+        if r.get("status") == 200 and int(r.get("piezas") or 0) >= 1:
+            return int(r["piezas"])
+        if "sold out" in (r.get("texto") or "").lower():
+            return "agotado"
+    except Exception:
+        pass
+    return None
+
+
 async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
                      headless, pausa, ya_cargada=False, limpiar_carrito=False,
                      cuenta=None):
@@ -571,56 +620,72 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         if sold_out:
             return f"❌ Producto agotado: {url}"
 
-        # Locator (no ElementHandle) y solo el boton VISIBLE (2026-11-10):
-        # Mattel redibuja los botones con JS al cargar (membresia RLC, barra
-        # fija) y tiene dos "Add to Bag" (uno oculto). El handle tomado al
-        # principio quedaba muerto ("not attached to the DOM", drop del RWB
-        # 930) o era el oculto. El locator se vuelve a resolver en cada uso.
-        add_to_cart_button = page.locator(f"{selector['buy_button']}:visible").first
-        try:
-            await add_to_cart_button.wait_for(state="visible", timeout=12000)
-        except Exception:
-            # Un pop-up con retraso puede tapar el botón: se cierra y se
-            # reintenta una vez.
-            await dismiss_overlays(page, selector)
-            await add_to_cart_button.wait_for(state="visible", timeout=10000)
-        if await add_to_cart_button.is_disabled():
-            return f"❌ Producto agotado (botón deshabilitado): {url}"
-
-        # La cantidad sale de la pagina (2026-10-20): se compra el maximo que
-        # permita Mattel ("Limit 2 Per Customer"), nunca mas que eso.
-        limite = await limite_de_pagina(page) if selector["store"] == "mattel" else None
-        qty_objetivo = cantidad_a_pedir(qty_objetivo, limite)
-        qty = await set_quantity(page, selector, qty_objetivo)
-
-        try:
-            await add_to_cart_button.click(timeout=5000)
-        except Exception:
-            # Un pop-up (p.ej. el de suscripción de Klaviyo en Mattel) puede
-            # aparecer con retraso y tapar el botón — reintenta tras cerrarlo.
-            await dismiss_overlays(page, selector)
-            await add_to_cart_button.click(timeout=10000)
-        resultado = f"✅ Producto agregado al carrito (cantidad: {qty}): {url}"
-        reloj.marca("agregar")
-        if not dry and notificar:
-            notify(resultado)
-
-        # El clic en "Add to Bag" dispara una llamada AJAX de Shopify;
-        # si se navega de inmediato al carrito esa llamada puede no
-        # haber terminado y el carrito llega vacío (detectado
-        # 2026-09-28). Se confirma esperando a que el contador del
-        # carrito en el header deje de marcar 0 antes de seguir.
-        contador_carrito = selector.get("cart_count")
-        if contador_carrito:
+        # Piezas que no son RLC (2026-11-10): se agregan al carrito por la API
+        # de Shopify, sin esperar ni hacer clic en el boton (5-10 s menos).
+        # Las RLC siguen el camino del boton, que respeta la membresia.
+        directo = None
+        if (selector["store"] == "mattel" and not es_pieza_rlc(url)
+                and os.environ.get("HOTWHEELS_AGREGAR_DIRECTO", "1") != "0"):
+            directo = await agregar_directo(page, url, qty_objetivo)
+        if directo == "agotado":
+            return f"❌ Producto agotado: {url}"
+        if directo:
+            qty = directo
+            resultado = f"✅ Producto agregado al carrito (cantidad: {qty}): {url}"
+            reloj.marca("agregar")
+            if not dry and notificar:
+                notify(resultado)
+        else:
+            # Locator (no ElementHandle) y solo el boton VISIBLE (2026-11-10):
+            # Mattel redibuja los botones con JS al cargar (membresia RLC, barra
+            # fija) y tiene dos "Add to Bag" (uno oculto). El handle tomado al
+            # principio quedaba muerto ("not attached to the DOM", drop del RWB
+            # 930) o era el oculto. El locator se vuelve a resolver en cada uso.
+            add_to_cart_button = page.locator(solo_visibles(selector["buy_button"])).first
             try:
-                await page.wait_for_function(
-                    "(sel) => { const el = document.querySelector(sel); "
-                    "const t = el && el.textContent.trim(); return t && t !== '0'; }",
-                    arg=contador_carrito,
-                    timeout=8000,
-                )
+                await add_to_cart_button.wait_for(state="visible", timeout=12000)
             except Exception:
-                pass  # best-effort: si no se puede confirmar, se sigue igual
+                # Un pop-up con retraso puede tapar el botón: se cierra y se
+                # reintenta una vez.
+                await dismiss_overlays(page, selector)
+                await add_to_cart_button.wait_for(state="visible", timeout=10000)
+            if await add_to_cart_button.is_disabled():
+                return f"❌ Producto agotado (botón deshabilitado): {url}"
+
+            # La cantidad sale de la pagina (2026-10-20): se compra el maximo que
+            # permita Mattel ("Limit 2 Per Customer"), nunca mas que eso.
+            limite = await limite_de_pagina(page) if selector["store"] == "mattel" else None
+            qty_objetivo = cantidad_a_pedir(qty_objetivo, limite)
+            qty = await set_quantity(page, selector, qty_objetivo)
+
+            try:
+                await add_to_cart_button.click(timeout=5000)
+            except Exception:
+                # Un pop-up (p.ej. el de suscripción de Klaviyo en Mattel) puede
+                # aparecer con retraso y tapar el botón — reintenta tras cerrarlo.
+                await dismiss_overlays(page, selector)
+                await add_to_cart_button.click(timeout=10000)
+            resultado = f"✅ Producto agregado al carrito (cantidad: {qty}): {url}"
+            reloj.marca("agregar")
+            if not dry and notificar:
+                notify(resultado)
+
+            # El clic en "Add to Bag" dispara una llamada AJAX de Shopify;
+            # si se navega de inmediato al carrito esa llamada puede no
+            # haber terminado y el carrito llega vacío (detectado
+            # 2026-09-28). Se confirma esperando a que el contador del
+            # carrito en el header deje de marcar 0 antes de seguir.
+            contador_carrito = selector.get("cart_count")
+            if contador_carrito:
+                try:
+                    await page.wait_for_function(
+                        "(sel) => { const el = document.querySelector(sel); "
+                        "const t = el && el.textContent.trim(); return t && t !== '0'; }",
+                        arg=contador_carrito,
+                        timeout=8000,
+                    )
+                except Exception:
+                    pass  # best-effort: si no se puede confirmar, se sigue igual
     except Exception as e:
         await guardar_captura_error(page, url, "boton")
         resultado = f"❌ No se encontró el botón en: {url} | Error: {e}"
@@ -655,7 +720,7 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         if "/cart" in (page.url or ""):
             # Locator visible: el carrito trae varios botones "checkout" y el
             # primero puede estar oculto (2026-11-10).
-            boton_checkout = page.locator(f"{selector['cart_checkout']}:visible").first
+            boton_checkout = page.locator(solo_visibles(selector["cart_checkout"])).first
             await boton_checkout.wait_for(state="visible", timeout=15000)
             await boton_checkout.click(timeout=10000)
             await page.wait_for_load_state("domcontentloaded", timeout=20000)

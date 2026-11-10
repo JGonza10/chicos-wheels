@@ -55,6 +55,34 @@ Monitor + bot de compra de Mattel Creations. Antes era el proyecto `15 Bot Hot W
 - Comandos: `/estado` (semáforo de cuentas, monitor y disparos), `/drops` y `/ayuda`.
 - Al disparo entran solo las cuentas extra con tarjeta y sesión. La principal entra siempre.
 
+**Las 20 mejoras del 10/11** (`habilidades.py`, `ml_auth.py`; prueba: `python prueba_20_mejoras.py`):
+
+*Para no perder un drop:*
+- **PC despierta** desde −30 min hasta que termina el disparo.
+- **Chequeo de −30 min:** incluye **internet** (cuánto tarda Mattel en responder) y **reloj** de la PC contra el de Mattel.
+- **Captcha:** el aviso trae el link de Escritorio remoto de Chrome (`HOTWHEELS_LINK_REMOTO`) para resolverlo desde el celular.
+- **Fila de Shopify:** el bot avisa cuando entra a la fila.
+- **Víspera (20:30):** aviso de lo que sale mañana, con botones para programar.
+- **Ensayo de cuentas (lunes 21:00):** prueba sin pago de cada cuenta. Deja `ensayo_ok.txt` para Nexus.
+- **Entre reintentos** revisa cada 3 s si ya hay stock (mínimo 5 s).
+
+*Más rápido:*
+- **Agregar directo** (`/cart/add.js`) en piezas que no son RLC. `HOTWHEELS_AGREGAR_DIRECTO=0` lo apaga.
+- **Cuentas por drop:** botones "Solo <cuenta>".
+
+*Para el negocio:*
+- **"📣 Publicar en Facebook"** en el borrador. Publica a través de la app en Railway (`/api/articulos/<id>/publicar-facebook`) y solo cuando Gonza toca el botón.
+- **Compras de otra cuenta** se anotan aparte en el inventario (clave `url#cuenta=<nombre>`).
+- **Reventa al alza** (miércoles 20:15): avisa qué piezas de tu inventario subieron 15% o más.
+- **Reporte de cada drop** (`/reporte` en Telegram, pestaña Drops del panel).
+- Ya existían: preventa "Por llegar" en `/tienda`, aviso de clientes en espera (ahora con mensaje listo para Messenger/Instagram, en Railway) y "ya se entregó, márcala".
+
+*Mantenimiento:*
+- **Mercado Libre:** token que se renueva solo (`python ml_auth.py`).
+- **Respaldo diario de cuentas** (3:40, `datos/respaldos/bot/`).
+- **Nexus:** señales `sesiones_ok.txt` y `ensayo_ok.txt`.
+- **Pestaña 📅 Drops** en el panel `/bot`: revisar un link, calendario, cuentas y último reporte.
+
 **Otras habilidades:**
 - **Sesión:** a las 9:05 y 20:05 se revisa la sesión de Mattel de cada cuenta, sin abrir el navegador. Si venció, avisa.
 - **Captcha:** el aviso trae la foto de la pantalla.
@@ -106,6 +134,7 @@ python prueba_velocidad.py      # express, francotirador, modo drop, 429, Telegr
 python prueba_rapidez_compra.py # compra sin esperas fijas y cronómetro (Chromium real, páginas locales)
 python prueba_navegador_caliente.py # navegador caliente + sesión RLC contra una tienda Mattel falsa (DRY RUN)
 python prueba_postcompra.py     # pedido y total cobrado, seguimiento del envío y resumen semanal
+python prueba_20_mejoras.py     # las 20 mejoras del 10/11 (PC despierta, reloj, Facebook, ML, respaldo, panel)
 python prueba_multicuenta.py    # cuentas en paralelo, CVV, calendario de drops, restock, borrador y botones
 cd ..; python -m unittest tests.test_bot -v      # montaje, acceso y alta en el inventario
 ```

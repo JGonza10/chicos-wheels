@@ -174,7 +174,9 @@ D.comprar_producto = agotado
 asyncio.run(D._intentar_evento(["https://creations.mattel.com/en-mx/products/se-agoto-x"]))
 vig = [e["handle"] for e in EX.listar_vigilados(os.path.join(TMP, "vigilar.json"))]
 check("si se agota queda vigilada para el restock", "se-agoto-x" in vig, vig)
-check("y lo dice en el aviso final, uno por cuenta", len(AVISOS) == 2 and any("restock" in a for a in AVISOS), AVISOS)
+finales = [a for a in AVISOS if "Evento puntual" in a]
+check("y lo dice en el aviso final, uno por cuenta", len(finales) == 2 and any("restock" in a for a in finales), AVISOS)
+check("con varias cuentas llega el reporte del drop", any(a.startswith("📊 Reporte del drop") for a in AVISOS), AVISOS)
 AVISOS.clear()
 
 

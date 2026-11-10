@@ -156,6 +156,16 @@ SEGUNDOS_REFRESCO_LISTAS = 60    # deseados/bloqueados/colecciones/vigilar: solo
 # Necesita MERCADOLIBRE_ACCESS_TOKEN en config.env: desde 2026 su API no
 # responde sin autenticacion. Sin token, este ciclo ni se intenta.
 ML_TOKEN = (CONFIG.get("MERCADOLIBRE_ACCESS_TOKEN") or "").strip() if CONFIG else ""
+
+
+def ml_token():
+    """Token vigente de Mercado Libre: el que se renueva solo (ml_auth.py) o
+    el fijo de config.env (2026-11-10: el fijo dura solo 6 horas)."""
+    try:
+        import ml_auth
+        return ml_auth.token() or ML_TOKEN
+    except Exception:
+        return ML_TOKEN
 MINUTOS_MERCADOLIBRE = int(EX.config_num(CONFIG, "MINUTOS_MERCADOLIBRE", 10)) if EX else 10
 MAX_IDS_ML_RECORDADOS = 400      # por termino, para que estado.json no crezca sin fin
 FALLOS_ALERTA_COLECCION = int(EX.config_num(CONFIG, "FALLOS_ALERTA_COLECCION", 3)) if EX else 3
@@ -873,7 +883,8 @@ def revisar_mercadolibre(estado):
 
     Devuelve cuantos avisos mando.
     """
-    if not EX or not ML_TOKEN:
+    token_ml = ml_token()
+    if not EX or not token_ml:
         return 0
     busquedas = [b for b in EX.listar_busquedas_ml(ARCHIVO_BUSQUEDAS_ML) if b["activa"]]
     if not busquedas:
@@ -882,7 +893,7 @@ def revisar_mercadolibre(estado):
     avisos = 0
     for b in busquedas:
         termino = b["termino"]
-        listados, motivo = EX.buscar_listados_ml(termino, token=ML_TOKEN)
+        listados, motivo = EX.buscar_listados_ml(termino, token=token_ml)
         estado.setdefault("ml_estado", {})[termino] = {
             "cuando": datetime.now(timezone.utc).isoformat(),
             "resultados": len(listados),
@@ -1160,7 +1171,7 @@ def precio_reventa_estimado(titulo):
     tag = f"exacto:{titulo}"
     precio_ebay, ventas_ebay = buscar_ebay(busqueda, tag_cache=tag)
     precio_ml_mxn, resultados_ml = (
-        EX.buscar_mercadolibre(busqueda, tag_cache=tag, token=ML_TOKEN)
+        EX.buscar_mercadolibre(busqueda, tag_cache=tag, token=ml_token())
         if EX else (None, 0))
     precio_ml_usd = (precio_ml_mxn / TIPO_CAMBIO) if (precio_ml_mxn and TIPO_CAMBIO) else None
 

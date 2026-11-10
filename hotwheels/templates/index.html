@@ -38,6 +38,7 @@
 
     <div class="seg tabs" id="selectorVista">
         <button data-vista="piezas" class="on">🏎 Piezas <span class="cuenta" id="cuentaPiezas"></span></button>
+        <button data-vista="drops">📅 Drops</button>
         <button data-vista="links">🔗 Mis links</button>
         <button data-vista="historial">📊 Historial</button>
         <button data-vista="ajustes">⚙ Ajustes</button>
@@ -64,6 +65,33 @@
                 <b>Ya la compré</b> si la pagaste por tu cuenta.
             </div>
             <div class="piezas" id="listaPiezas"></div>
+        </div>
+    </div>
+
+    <!-- ============================ DROPS (2026-11-10) ============================ -->
+    <div id="vista-drops" class="vista" style="display:none">
+        <div class="pnl">
+            <div class="pnl-hdr"><h2>Revisar una pieza</h2></div>
+            <div class="note">Pega el link de Mattel: te digo precio, límite y si está a la venta o cuándo sale.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <input id="linkAnalizar" class="inp" style="flex:1;min-width:220px" placeholder="https://creations.mattel.com/en-mx/products/...">
+                <button class="btn" id="btnAnalizar">Revisar</button>
+            </div>
+            <pre id="resAnalizar" class="note" style="white-space:pre-wrap;display:none"></pre>
+            <div id="botAnalizar"></div>
+        </div>
+        <div class="pnl">
+            <div class="pnl-hdr"><h2>Próximos lanzamientos</h2></div>
+            <div id="listaDrops" class="note">Cargando…</div>
+        </div>
+        <div class="pnl">
+            <div class="pnl-hdr"><h2>Cuentas</h2><button class="btn" id="btnChequeo">Revisar todo ahora</button></div>
+            <div id="listaCuentas" class="note">Cargando…</div>
+            <pre id="resChequeo" class="note" style="white-space:pre-wrap;display:none"></pre>
+        </div>
+        <div class="pnl">
+            <div class="pnl-hdr"><h2>Último reporte</h2></div>
+            <pre id="ultimoReporte" class="note" style="white-space:pre-wrap">Todavía no hay reportes.</pre>
         </div>
     </div>
 
@@ -355,6 +383,55 @@
         return "hace " + Math.round(min / 1440) + " d";
     }
 
+    // ---------- drops, cuentas y revisar links (2026-11-10) ----------
+    async function cargarDrops() {
+        const d = await api("/api/bot_resumen");
+        if (!d || !d.cuentas) { $("listaDrops").textContent = "No se pudo cargar."; return; }
+        $("listaDrops").innerHTML = d.drops.length ? d.drops.map(x => {
+            const cuando = new Date(x.cuando).toLocaleString("es-MX", {weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"});
+            const marca = x.estado === "programado" ? "✅" : (x.estado === "hecho" ? "✔️" : "❔");
+            const botones = x.estado === "propuesto"
+                ? ` <button class="btn mini" data-prog="${x.id}">Programar</button>`
+                  + d.cuentas.filter(c => c.lista).map(c => ` <button class="btn mini" data-prog="${x.id}" data-cuenta="${esc(c.nombre)}">Solo ${esc(c.nombre)}</button>`).join("")
+                  + ` <button class="btn mini" data-desc="${x.id}">No</button>` : "";
+            return `<div>${marca} <b>${esc(cuando)}</b> · ${esc(x.titulo || x.url)}${x.cuentas ? " · solo " + esc(x.cuentas) : ""}${botones}</div>`;
+        }).join("") : "No hay lanzamientos próximos detectados. Revisa una pieza arriba.";
+        $("listaCuentas").innerHTML = d.cuentas.map(c =>
+            `<div>${c.lista ? "🟢" : "🔴"} <b>${esc(c.nombre)}</b> ${c.lista ? "lista para comprar" : "· " + esc(c.motivo)}`
+            + ` · CVV ${c.cvv ? "puesto" : "pendiente"} · sesión ${c.sesion_guardada ? "guardada" : "sin iniciar"}</div>`).join("")
+            + (d.pc_despierta ? "<div>☕ La PC se mantiene despierta por un drop.</div>" : "");
+        if (d.ultimo_reporte) $("ultimoReporte").textContent = d.ultimo_reporte.resumen;
+    }
+    document.addEventListener("click", async (e) => {
+        const b = e.target.closest("[data-prog],[data-desc],[data-tg]");
+        if (!b) return;
+        let r;
+        if (b.dataset.prog) r = await api(`/api/drops/${b.dataset.prog}/programar`, {cuenta: b.dataset.cuenta || ""});
+        else if (b.dataset.desc) r = await api(`/api/drops/${b.dataset.desc}/descartar`, {});
+        else if (b.dataset.tg) {
+            const [acc, id, cuenta] = b.dataset.tg.split(":");
+            if (acc === "pd" || acc === "pc") r = await api(`/api/drops/${id}/programar`, {cuenta: cuenta || ""});
+            else if (acc === "pn") r = await api(`/api/drops/${id}/descartar`, {});
+            else if (acc === "c") r = await api(`/api/hallazgos/${id}/comprar`, {cantidad: 0});
+            else if (acc === "i") r = await api(`/api/hallazgos/${id}/ignorar`, {});
+        }
+        if (r) toast(r.texto || (r.ok ? "Listo" : (r.error || "No se pudo")), !r.ok);
+        cargarDrops();
+    });
+    $("btnAnalizar").addEventListener("click", async () => {
+        $("resAnalizar").style.display = ""; $("resAnalizar").textContent = "Revisando…"; $("botAnalizar").innerHTML = "";
+        const r = await api("/api/analizar", {url: $("linkAnalizar").value});
+        $("resAnalizar").textContent = r.ok ? r.texto : (r.error || "No se pudo revisar");
+        $("botAnalizar").innerHTML = (r.botones || []).flat().map(x =>
+            `<button class="btn mini" data-tg="${esc(x.callback_data)}">${esc(x.text)}</button>`).join(" ");
+        cargarDrops();
+    });
+    $("btnChequeo").addEventListener("click", async () => {
+        $("resChequeo").style.display = ""; $("resChequeo").textContent = "Revisando (tarda unos segundos)…";
+        const r = await api("/api/chequeo");
+        $("resChequeo").textContent = r.texto || r.error || "No se pudo revisar";
+    });
+
     // ---------- zoom de imagen ----------
     function abrirZoom(src) { $("imgZoomGrande").src = src; $("imgZoomOverlay").classList.add("on"); }
     function cerrarZoom() { $("imgZoomOverlay").classList.remove("on"); }
@@ -362,11 +439,12 @@
 
     // ---------- pestañas ----------
     function aplicarVista(v) {
-        if (!["piezas", "links", "historial", "ajustes"].includes(v)) v = "piezas";
+        if (!["piezas", "drops", "links", "historial", "ajustes"].includes(v)) v = "piezas";
         document.querySelectorAll(".vista").forEach(el => el.style.display = el.id === "vista-" + v ? "" : "none");
         document.querySelectorAll("#selectorVista button").forEach(b => b.classList.toggle("on", b.dataset.vista === v));
         try { localStorage.setItem("hw_vista2", v); } catch (e) {}
         if (v === "ajustes") cargarAjustes();
+        if (v === "drops") cargarDrops();
         if (v === "historial") cargarColeccion();
     }
     document.querySelectorAll("#selectorVista button").forEach(b => b.addEventListener("click", () => aplicarVista(b.dataset.vista)));
