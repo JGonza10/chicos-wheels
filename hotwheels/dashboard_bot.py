@@ -679,7 +679,10 @@ async def _intentar_evento():
             proxy = proxies[i % len(proxies)] if proxies else None
             inicio_intento = datetime.now()
             try:
-                resultado = await comprar_producto(url, proxy, notificar=False)
+                # Con el navegador caliente (precalentado antes del drop y
+                # con la sesion de Mattel) cuando no hay proxy de por medio.
+                nav = None if proxy else NAVEGADOR.obtener()
+                resultado = await comprar_producto(url, proxy, notificar=False, navegador=nav)
             except Exception as e:
                 resultado = f"❌ Error inesperado: {e}"
             if "🧩" in resultado:
@@ -708,6 +711,39 @@ async def _intentar_evento():
 # --- Scheduler ---
 scheduler = BackgroundScheduler()
 
+MINUTOS_PRECALENTAR_EVENTO = 2
+_EVENTO_PRECALENTADO = {"id": None}
+
+
+def _precalentar_evento(evento, ahora):
+    """2 min antes del disparo abre el navegador caliente con la pagina de
+    cada pieza (2026-11-10): el disparo ya no pierde ~15 s cargando, y si
+    Cloudflare pide verificar, sale ANTES del drop y Gonza lo resuelve con
+    calma. Una sola vez por evento."""
+    if _EVENTO_PRECALENTADO["id"] == evento["id"]:
+        return
+    try:
+        cuando = datetime.strptime(evento["fecha"], "%Y-%m-%d").replace(
+            hour=evento["hora"], minute=evento["minuto"])
+    except Exception:
+        return
+    faltan = (cuando - ahora).total_seconds()
+    if not (0 < faltan <= MINUTOS_PRECALENTAR_EVENTO * 60 + 30):
+        return
+    nav = NAVEGADOR.obtener()
+    urls = get_active_product_urls()
+    if nav is None or not urls:
+        return
+    _EVENTO_PRECALENTADO["id"] = evento["id"]
+    for url in urls:
+        try:
+            nav.precalentar(url)
+        except Exception as e:
+            print(f"  ⚠️ No se pudo precalentar {url}: {e}")
+    notify(f"🔥 Disparo de las {evento['hora']:02d}:{evento['minuto']:02d}: navegador listo con "
+           f"{len(urls)} pieza(s). Si ves una verificación de Cloudflare en la ventana, resuélvela ya.")
+
+
 def scheduled_run():
     ahora = datetime.now()
 
@@ -715,6 +751,7 @@ def scheduled_run():
     # para drops que anuncian una hora especifica (ej. 10:03), no solo "en punto".
     evento = get_event()
     if evento and not evento["hecho"]:
+        _precalentar_evento(evento, ahora)
         if (
             ahora.strftime("%Y-%m-%d") == evento["fecha"]
             and ahora.hour == evento["hora"]

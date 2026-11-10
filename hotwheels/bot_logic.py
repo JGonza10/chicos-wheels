@@ -665,13 +665,6 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
                     break
                 except Exception:
                     continue
-
-            # El campo RFC no siempre existe: si no esta, no se esperan 5 s.
-            if RFC and await page.locator("input[name*='rfc' i]").count():
-                try:
-                    await page.fill("input[name*='rfc' i]", RFC, timeout=3000)
-                except Exception:
-                    pass
         reloj.marca("datos_envio")
 
         await dismiss_shop_modal(page)
@@ -679,6 +672,10 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         # puede no traer telefono ("Please provide your phone", 2026-11-10):
         # se elige la guardada que tenga el telefono de .env.
         await elegir_direccion_con_telefono(page, SHIP_PHONE)
+        # RFC con y sin sesion (2026-11-10): antes solo se llenaba en el
+        # checkout de invitado y con sesion quedaba vacio ("Please enter a
+        # valid RFC code" bloquea "Pay now").
+        await llenar_rfc(page, RFC)
         # Pago con tarjeta: checkout de invitado (#basic-creditCards) o con
         # sesion (recuadro #payment-tiles-creditCards, ya marcado casi siempre).
         if await page.locator("#basic-creditCards").count():
@@ -853,6 +850,32 @@ async def elegir_direccion_con_telefono(page, telefono):
     except Exception as e:
         print(f"  ⚠️ No se pudo elegir la dirección con teléfono: {e}")
         return False
+
+
+async def llenar_rfc(page, rfc, intentos=3):
+    """Llena el campo RFC (extension de Shopify, name="RFC") si existe y
+    confirma que el valor se quedo. Es un campo que se vuelve a dibujar: un
+    fill() directo a veces se pierde (prueba diaria del 2026-10-23), por eso
+    se escribe tecla por tecla y se verifica. Devuelve True si quedo puesto."""
+    rfc = (rfc or "").strip().upper()
+    campo = page.locator("input[name*='rfc' i]:visible").first
+    if not rfc or not await campo.count():
+        return False
+    for _ in range(intentos):
+        try:
+            if (await campo.input_value()).strip().upper() == rfc:
+                return True
+            await campo.click(timeout=3000)
+            await campo.fill("")
+            await campo.press_sequentially(rfc, delay=20)
+            await campo.press("Tab")
+            await page.wait_for_timeout(400)
+            if (await campo.input_value()).strip().upper() == rfc:
+                return True
+        except Exception:
+            await page.wait_for_timeout(500)
+    print("  ⚠️ No se pudo dejar puesto el RFC en el checkout")
+    return False
 
 
 SEGUNDOS_ESPERA_PAGO = 45

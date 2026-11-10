@@ -61,8 +61,8 @@ LLAMADAS = []
 
 
 async def _compra_falsa(url, proxy=None, cantidad=None, dry_run=None,
-                        permitir_pausa=True, notificar=True):
-    LLAMADAS.append({"url": url, "notificar": notificar})
+                        permitir_pausa=True, notificar=True, navegador=None):
+    LLAMADAS.append({"url": url, "notificar": notificar, "navegador": navegador})
     if RESPUESTAS:
         return RESPUESTAS.pop(0)
     return f"❌ Producto agotado: {url}"
