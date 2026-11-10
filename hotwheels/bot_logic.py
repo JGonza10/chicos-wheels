@@ -329,10 +329,29 @@ SELECTOR_CAPTCHA = (
 )
 
 
+TEXTOS_VERIFICACION = ("verificar tu conexión", "verifique que es un ser humano",
+                       "verify you are human", "checking your browser",
+                       "needs to review the security of your connection")
+
+
 async def hay_captcha(page):
     """True si la pagina muestra un captcha VISIBLE. El distintivo invisible de
     reCAPTCHA v3 (.grecaptcha-badge) o un iframe oculto NO cuentan: en Shopify
     estan en casi todas las paginas y no piden nada al usuario."""
+    # Pagina completa de verificacion de Cloudflare (2026-11-10): el iframe
+    # de Turnstile vive en un shadow DOM cerrado y no lo ve el selector; se
+    # reconoce por su contenedor o por el texto de la pagina.
+    try:
+        if await page.locator(".cf-turnstile, [id^='cf-chl-widget'], #challenge-stage").count():
+            return True
+        titulo = (await page.title() or "").lower()
+        if "just a moment" in titulo or "un momento" in titulo:
+            return True
+        texto = (await page.inner_text("body", timeout=2000))[:600].lower()
+        if any(t in texto for t in TEXTOS_VERIFICACION):
+            return True
+    except Exception:
+        pass
     try:
         for el in await page.query_selector_all(SELECTOR_CAPTCHA):
             try:
@@ -476,18 +495,21 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         if sold_out:
             return f"❌ Producto agotado: {url}"
 
-        add_to_cart_button = await page.wait_for_selector(
-            selector["buy_button"], state="attached", timeout=10000
-        )
+        # Locator (no ElementHandle) y solo el boton VISIBLE (2026-11-10):
+        # Mattel redibuja los botones con JS al cargar (membresia RLC, barra
+        # fija) y tiene dos "Add to Bag" (uno oculto). El handle tomado al
+        # principio quedaba muerto ("not attached to the DOM", drop del RWB
+        # 930) o era el oculto. El locator se vuelve a resolver en cada uso.
+        add_to_cart_button = page.locator(f"{selector['buy_button']}:visible").first
+        try:
+            await add_to_cart_button.wait_for(state="visible", timeout=12000)
+        except Exception:
+            # Un pop-up con retraso puede tapar el botón: se cierra y se
+            # reintenta una vez.
+            await dismiss_overlays(page, selector)
+            await add_to_cart_button.wait_for(state="visible", timeout=10000)
         if await add_to_cart_button.is_disabled():
             return f"❌ Producto agotado (botón deshabilitado): {url}"
-        try:
-            await add_to_cart_button.wait_for_element_state("visible", timeout=10000)
-        except Exception:
-            # Igual que con el click: un pop-up con retraso puede tapar
-            # el botón justo aquí. Se cierra y se reintenta una vez.
-            await dismiss_overlays(page, selector)
-            await add_to_cart_button.wait_for_element_state("visible", timeout=10000)
 
         # La cantidad sale de la pagina (2026-10-20): se compra el maximo que
         # permita Mattel ("Limit 2 Per Customer"), nunca mas que eso.
@@ -614,7 +636,19 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         reloj.marca("datos_envio")
 
         await dismiss_shop_modal(page)
-        await page.check("#basic-creditCards")
+        # Con sesion (RLC) salen las direcciones guardadas y la "Default"
+        # puede no traer telefono ("Please provide your phone", 2026-11-10):
+        # se elige la guardada que tenga el telefono de .env.
+        await elegir_direccion_con_telefono(page, SHIP_PHONE)
+        # Pago con tarjeta: checkout de invitado (#basic-creditCards) o con
+        # sesion (recuadro #payment-tiles-creditCards, ya marcado casi siempre).
+        if await page.locator("#basic-creditCards").count():
+            await page.check("#basic-creditCards")
+        elif await page.locator("#payment-tiles-creditCards").count():
+            if not await page.locator("#payment-tiles-creditCards").is_checked():
+                await page.locator("#payment-tiles-creditCards").check(force=True)
+        else:
+            await page.check("#basic-creditCards", timeout=10000)  # error claro si cambio
         # Antes: 2 s fijos. Ahora se sigue en cuanto los iframes de
         # la tarjeta (checkout.pci.shopifyinc.com) estan cargados.
         await esperar_frames(page, ("number-ltr", "expiry-ltr",
@@ -722,6 +756,45 @@ async def vaciar_carrito(page, url):
     except Exception as e:
         print(f"  ⚠️ No se pudo revisar el carrito antes de comprar: {e}")
         return 0
+
+
+async def elegir_direccion_con_telefono(page, telefono):
+    """En el checkout con sesion, marca la direccion guardada cuyo texto trae
+    el telefono (ultimos 10 digitos). Devuelve True si cambio la seleccion."""
+    import re
+    digitos = re.sub(r"\D", "", telefono or "")[-10:]
+    if not digitos or not await page.locator("input[name='shippingAddress']").count():
+        return False
+    try:
+        cambio = await page.evaluate(
+            """(tel) => {
+                const radios = [...document.querySelectorAll("input[name='shippingAddress']")];
+                for (const r of radios) {
+                    let el = r, txt = "";
+                    for (let i = 0; i < 6 && el; i++) {
+                        el = el.parentElement;
+                        // Solo el bloque de ESTA direccion, no la lista entera.
+                        if (!el || el.querySelectorAll("input[name='shippingAddress']").length > 1) { txt = ""; break; }
+                        txt = el.innerText || "";
+                        if (txt.replace(/\\D/g, "").includes(tel)) break;
+                        txt = "";
+                    }
+                    if (txt) {
+                        if (r.checked) return false;
+                        r.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""", digitos)
+        if cambio:
+            print("  📍 Dirección guardada con teléfono elegida")
+            # Shopify recalcula el envio al cambiar la direccion.
+            await page.wait_for_timeout(1500)
+        return bool(cambio)
+    except Exception as e:
+        print(f"  ⚠️ No se pudo elegir la dirección con teléfono: {e}")
+        return False
 
 
 SEGUNDOS_ESPERA_PAGO = 45

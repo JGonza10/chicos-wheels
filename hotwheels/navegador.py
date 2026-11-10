@@ -35,6 +35,43 @@ MINUTOS_NAVEGADOR = 20
 SEGUNDOS_RECARGA = 60      # una pagina precalentada mas vieja que esto se recarga al comprar
 
 
+# Mattel guarda la sesion en cookies "de sesion" (sin fecha de expiracion):
+# Chromium las borra al cerrar el perfil, asi que la sesion de
+# iniciar_sesion_mattel.py se perdia al cerrar la ventana (fallo del RWB 930
+# y del perfil el 2026-11-10). Se copian a este archivo (dentro del perfil,
+# fuera de git) y se vuelven a poner cada vez que se abre el navegador.
+COOKIES_SESION = os.path.join(PERFIL, "cookies_sesion.json")
+
+
+async def guardar_cookies_sesion(contexto, ruta=None):
+    """Guarda las cookies de Mattel del contexto. Devuelve cuantas guardo."""
+    import json
+    ruta = ruta or COOKIES_SESION
+    cookies = [c for c in await contexto.cookies() if "mattel" in (c.get("domain") or "")]
+    if not cookies:
+        return 0
+    tmp = ruta + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cookies, f)
+    os.replace(tmp, ruta)
+    return len(cookies)
+
+
+async def restaurar_cookies_sesion(contexto, ruta=None):
+    """Vuelve a poner las cookies guardadas. Devuelve cuantas puso."""
+    import json
+    ruta = ruta or COOKIES_SESION
+    if not os.path.exists(ruta):
+        return 0
+    with open(ruta, encoding="utf-8") as f:
+        cookies = json.load(f)
+    ahora = time.time()
+    vigentes = [c for c in cookies if c.get("expires", -1) in (-1, None) or c["expires"] > ahora]
+    if vigentes:
+        await contexto.add_cookies(vigentes)
+    return len(vigentes)
+
+
 def precalentar_activo():
     return os.environ.get("HOTWHEELS_PRECALENTAR", "1") != "0"
 
@@ -94,6 +131,12 @@ class NavegadorCaliente:
             os.makedirs(self.perfil, exist_ok=True)
             self.contexto = await self._pw.chromium.launch_persistent_context(
                 self.perfil, headless=self.headless)
+            try:
+                n = await restaurar_cookies_sesion(self.contexto, os.path.join(self.perfil, "cookies_sesion.json"))
+                if n:
+                    self.log(f"  🍪 Sesión de Mattel restaurada ({n} cookies)")
+            except Exception as e:
+                self.log(f"  ⚠️ No se pudo restaurar la sesión de Mattel: {e}")
         else:
             self._browser = await self._pw.chromium.launch(headless=self.headless)
             self.contexto = await self._browser.new_context()
@@ -107,6 +150,11 @@ class NavegadorCaliente:
             except Exception:
                 pass
         self.paginas.clear()
+        if self.perfil and self.contexto is not None:
+            try:  # Mattel renueva tokens: guardar la sesion mas reciente
+                await guardar_cookies_sesion(self.contexto, os.path.join(self.perfil, "cookies_sesion.json"))
+            except Exception:
+                pass
         for cosa in (self.contexto, self._browser):
             try:
                 if cosa is not None:

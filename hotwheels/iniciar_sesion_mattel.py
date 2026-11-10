@@ -46,7 +46,12 @@ async def main():
         activa = False
         while ctx.pages:
             try:
-                activa = await sesion_mattel_activa(ctx.pages[0]) or activa
+                if await sesion_mattel_activa(ctx.pages[0]):
+                    activa = True
+                if activa:
+                    # Las cookies de sesion de Mattel se borran al cerrar la
+                    # ventana: se copian mientras sigue abierta.
+                    await navegador.guardar_cookies_sesion(ctx)
             except Exception:
                 pass
             await asyncio.sleep(2)
