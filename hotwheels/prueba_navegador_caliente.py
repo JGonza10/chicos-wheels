@@ -106,7 +106,10 @@ async def responder(route):
         TIENDA["carrito"] += 1
         return await js({"item_count": TIENDA["carrito"]})
     if "/products/" in url:
-        TIENDA["visitas_producto"] += 1
+        # El .js del producto (limite de piezas, desde 2026-10-20) no es una
+        # visita a la pagina.
+        if not url.split("?")[0].endswith(".js"):
+            TIENDA["visitas_producto"] += 1
         return await html(PRODUCTO.format(n=TIENDA["carrito"], cid=123 if TIENDA["con_sesion"] else "null"))
     if url.endswith("/cart"):
         return await html(CARRITO)

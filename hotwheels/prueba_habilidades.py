@@ -274,6 +274,11 @@ try:
         "iframe oculto": ("<iframe src='about:blank#recaptcha' style='display:none;width:304px;height:78px'></iframe>", False),
         "reCAPTCHA v2 visible": ("<iframe src='about:blank#recaptcha' style='width:304px;height:78px'></iframe>", True),
         "hCaptcha visible": ("<div class='h-captcha' style='width:302px;height:76px'>x</div>", True),
+        # Los dos que frenaron el drop del Challenger (2026-11-10):
+        "Cloudflare Turnstile": ("<p>Se debe verificar tu conexión antes de poder continuar</p>"
+                                 "<div class='cf-turnstile'></div>", True),
+        "Mattel 'Solve captcha to continue'": ("<h1>SOLVE CAPTCHA TO CONTINUE</h1><button>Submit</button>", True),
+        "pagina normal que dice captcha en el pie": ("<h1>Hot Wheels RLC</h1><button>Add to Bag</button>", False),
     }
 
     async def probar_captcha():
@@ -286,7 +291,14 @@ try:
                 salida[nombre] = await B.hay_captcha(pg)
             B.notify = lambda m: avisos.append(m)
             await pg.set_content(CASOS["reCAPTCHA v2 visible"][0])
+            # Se quita solo a los 2.5 s (como el "Verificando..." de Cloudflare): sin aviso.
+            avisos_antes = len(avisos)
             await pg.evaluate("setTimeout(() => document.querySelector('iframe').remove(), 2500)")
+            salida["_solo"] = await B.esperar_captcha(pg, "u", headless=False, espera_max=10, intervalo=1)
+            salida["_avisos_solo"] = len(avisos) - avisos_antes
+            # Sigue ahi despues de los segundos de gracia: avisa y espera a que lo resuelvas.
+            await pg.set_content(CASOS["reCAPTCHA v2 visible"][0])
+            await pg.evaluate("setTimeout(() => document.querySelector('iframe').remove(), %d)" % ((B.SEGUNDOS_CAPTCHA_SOLO + 2) * 1000))
             salida["_resuelto"] = await B.esperar_captcha(pg, "u", headless=False, espera_max=10, intervalo=1)
             await pg.set_content(CASOS["reCAPTCHA v2 visible"][0])
             salida["_sin_resolver"] = await B.esperar_captcha(pg, "u", headless=False, avisar=False, espera_max=2, intervalo=1)
@@ -297,6 +309,8 @@ try:
     res = asyncio.run(probar_captcha())
     for nombre, (_, esperado) in CASOS.items():
         check("captcha: %s -> %s" % (nombre, esperado), res[nombre] is esperado, res[nombre])
+    check("si el captcha se quita solo, sigue sin avisar", res["_solo"] is None and res["_avisos_solo"] == 0,
+          (res["_solo"], res["_avisos_solo"]))
     check("si lo resuelves a tiempo el bot continua", res["_resuelto"] is None)
     check("si no lo resuelves devuelve un fallo claro", "sin resolver" in (res["_sin_resolver"] or ""))
     check("sin ventana visible no espera", "no se puede resolver" in (res["_headless"] or ""))

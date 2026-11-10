@@ -81,6 +81,12 @@ Cada prueba corre en una copia temporal: no toca `bot.db`, `estado.json` ni Tele
 - **Sin `HOTWHEELS_DRY_RUN=1`, "Comprar" paga de verdad.**
 - Toda compra pasa por `solicitar_compra()`, con un solo navegador a la vez (`_LOCK_DISPARO`). `run_one(url)` sirve para una pieza; nunca `run_all()`.
 - `comprar_producto` corre con `headless=False` porque los captchas se resuelven a mano.
+- **Captchas** (aprendido en el drop RLC del 2026-11-10):
+  - Cuentan la verificación de Cloudflare (Turnstile, "Se debe verificar tu conexión") y el captcha de Mattel en `/checkpoint` ("Solve captcha to continue").
+  - El bot pone su ventana al frente y espera 6 s por si se quita solo. Si sigue, **siempre** avisa por Telegram (también en el disparo programado) y espera 3 min.
+  - Ese tiempo no se descuenta de la ventana del disparo programado, que ahora dura 5 min.
+- **CVV dinámico:** la tarjeta se relee del `.env` al pagar. Sin CVV, avisa y espera 2 min; si sigue vacío, no paga.
+- Con sesión RLC se elige la dirección guardada que trae `HOTWHEELS_SHIP_PHONE`. La sesión se conserva en `perfil_mattel/cookies_sesion.json`.
 - **Navegador caliente** (`navegador.py`, `HOTWHEELS_PRECALENTAR`, encendido por defecto): un Chromium en su propio hilo.
   - Se precalienta con el aviso urgente del monitor y al tocar "Comprar" en Telegram. La compra del panel, de Telegram o de la cola usa esa página ya cargada.
   - Antes de agregar, vacía el carrito (`/cart/clear.js`), porque el carrito vive entre compras.

@@ -344,7 +344,8 @@ SELECTOR_CAPTCHA = (
 
 TEXTOS_VERIFICACION = ("verificar tu conexión", "verifique que es un ser humano",
                        "verify you are human", "checking your browser",
-                       "needs to review the security of your connection")
+                       "needs to review the security of your connection",
+                       "solve captcha to continue", "resuelve el captcha")
 
 
 async def hay_captcha(page):
@@ -354,6 +355,10 @@ async def hay_captcha(page):
     # Pagina completa de verificacion de Cloudflare (2026-11-10): el iframe
     # de Turnstile vive en un shadow DOM cerrado y no lo ve el selector; se
     # reconoce por su contenedor o por el texto de la pagina.
+    # Captcha propio de Mattel/Shopify antes del checkout (hCaptcha en
+    # /checkpoint, drop del Challenger 2026-11-10).
+    if "/checkpoint" in (page.url or "").lower():
+        return True
     try:
         if await page.locator(".cf-turnstile, [id^='cf-chl-widget'], #challenge-stage").count():
             return True
@@ -382,6 +387,9 @@ async def hay_captcha(page):
         return False
 
 
+SEGUNDOS_CAPTCHA_SOLO = 6
+
+
 async def esperar_captcha(page, url, headless, avisar=True, espera_max=180, intervalo=2):
     """Si aparece un captcha: avisa por notify() y, con ventana visible, espera
     a que TU lo resuelvas (hasta espera_max segundos). Devuelve None si no hay
@@ -394,6 +402,16 @@ async def esperar_captcha(page, url, headless, avisar=True, espera_max=180, inte
         return None
     if headless:
         return f"🧩 Captcha detectado (sin ventana visible no se puede resolver): {url}"
+    try:
+        await page.bring_to_front()  # que la ventana quede a la vista
+    except Exception:
+        pass
+    # El "Verificando..." de Cloudflare suele pasar solo en unos segundos:
+    # solo se avisa si sigue ahi despues de SEGUNDOS_CAPTCHA_SOLO.
+    for _ in range(SEGUNDOS_CAPTCHA_SOLO):
+        await page.wait_for_timeout(1000)
+        if not await hay_captcha(page):
+            return None
     if avisar:
         try:
             notify(f"🧩 Captcha detectado comprando {url}. Resuélvelo en la ventana del navegador "
@@ -498,7 +516,7 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         # del carrito no engañe a la espera de "Add to Bag".
         await page.reload(wait_until="domcontentloaded", timeout=30000)
     reloj.marca("producto")
-    fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
+    fallo_captcha = await esperar_captcha(page, url, headless, avisar=(not dry))
     if fallo_captcha:
         await guardar_captura_error(page, url, "captcha")
         return fallo_captcha
@@ -580,18 +598,26 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         # sí arrastra el token de sesión al checkout de invitado.
         prefijo_idioma = url.split("/products/")[0].split("creations.mattel.com")[-1]
         await page.goto(f"https://creations.mattel.com{prefijo_idioma}/cart")
-        fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
+        fallo_captcha = await esperar_captcha(page, url, headless, avisar=(not dry))
         if fallo_captcha:
             await guardar_captura_error(page, url, "captcha")
             return f"⚠️ Producto en carrito pero el checkout pidio captcha: {fallo_captcha}"
 
         # Las cookies ya se aceptaron en la pagina del producto: aqui solo pop-ups.
         await dismiss_overlays(page, selector, espera_cookies_ms=0)
-        boton_checkout = await page.wait_for_selector(
-            selector["cart_checkout"], state="visible", timeout=10000
-        )
-        await boton_checkout.click(timeout=10000)
-        await page.wait_for_load_state("domcontentloaded", timeout=20000)
+        # Tras resolver el captcha de /checkpoint, Shopify ya manda directo
+        # al checkout: entonces no hay boton del carrito que buscar.
+        if "/cart" in (page.url or ""):
+            # Locator visible: el carrito trae varios botones "checkout" y el
+            # primero puede estar oculto (2026-11-10).
+            boton_checkout = page.locator(f"{selector['cart_checkout']}:visible").first
+            await boton_checkout.wait_for(state="visible", timeout=15000)
+            await boton_checkout.click(timeout=10000)
+            await page.wait_for_load_state("domcontentloaded", timeout=20000)
+            fallo_captcha = await esperar_captcha(page, url, headless, avisar=(not dry))
+            if fallo_captcha:
+                await guardar_captura_error(page, url, "captcha")
+                return f"⚠️ Producto en carrito pero el checkout pidio captcha: {fallo_captcha}"
         reloj.marca("carrito_y_checkout")
 
         fallo_fila = await esperar_fila_checkout(page, url)
@@ -600,7 +626,7 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
             return f"⚠️ Producto en carrito pero {fallo_fila}"
         reloj.marca("fila")
 
-        fallo_captcha = await esperar_captcha(page, url, headless, avisar=(notificar and not dry))
+        fallo_captcha = await esperar_captcha(page, url, headless, avisar=(not dry))
         if fallo_captcha:
             await guardar_captura_error(page, url, "captcha")
             return f"⚠️ Producto en carrito pero el checkout pidio captcha: {fallo_captcha}"

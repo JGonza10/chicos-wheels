@@ -661,7 +661,7 @@ async def run_all():
 # final con el desenlace real. Deliberadamente NO llama a
 # _revisar_fallos_seguidos(): "agotado" repetido cada 15s durante un drop es
 # esperado, no la señal de un selector roto que esa funcion busca detectar.
-EVENTO_VENTANA_SEGUNDOS = 180
+EVENTO_VENTANA_SEGUNDOS = 300  # 5 min: el drop RLC del 10/11 se agotó después de los 3 min
 EVENTO_INTERVALO_SEGUNDOS = 15
 
 
@@ -677,10 +677,15 @@ async def _intentar_evento():
         intentos += 1
         for i, url in enumerate(urls):
             proxy = proxies[i % len(proxies)] if proxies else None
+            inicio_intento = datetime.now()
             try:
                 resultado = await comprar_producto(url, proxy, notificar=False)
             except Exception as e:
                 resultado = f"❌ Error inesperado: {e}"
+            if "🧩" in resultado:
+                # El tiempo esperando a que Gonza resuelva un captcha no se
+                # descuenta de la ventana de reintentos (drop 2026-11-10).
+                limite += datetime.now() - inicio_intento
             ultimo_por_url[url] = resultado
             add_result(resultado)
             if "🎉" in resultado:
