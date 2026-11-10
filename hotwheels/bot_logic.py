@@ -150,6 +150,45 @@ def send_telegram(message):
         )
         resp.raise_for_status()
 
+def _token_y_chat():
+    token = os.environ.get("HOTWHEELS_TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("HOTWHEELS_TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        token, chat_id = _telegram_del_monitor()
+    return token, chat_id
+
+
+def notify_foto(message, png):
+    """Aviso con foto (p. ej. la pantalla del captcha). Si no se puede mandar
+    la foto, manda el texto con notify()."""
+    try:
+        token, chat_id = _token_y_chat()
+        if not (token and chat_id and png and NOTIFICATIONS.get("telegram", {}).get("enabled")):
+            raise RuntimeError("sin telegram o sin foto")
+        resp = requests.post(f"https://api.telegram.org/bot{token}/sendPhoto",
+                             data={"chat_id": chat_id, "caption": message[:1000]},
+                             files={"photo": ("pantalla.png", png, "image/png")}, timeout=20)
+        resp.raise_for_status()
+    except Exception:
+        notify(message)
+
+
+def notify_botones(message, filas):
+    """Aviso con botones (inline_keyboard) al chat personal. True si salio."""
+    try:
+        token, chat_id = _token_y_chat()
+        if not (token and chat_id and NOTIFICATIONS.get("telegram", {}).get("enabled")):
+            return False
+        resp = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                             json={"chat_id": chat_id, "text": message,
+                                   "reply_markup": {"inline_keyboard": filas}}, timeout=10)
+        resp.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"⚠️ No se pudo enviar el aviso con botones: {e}")
+        return False
+
+
 def notify(message):
     # Avisos solo por Telegram (WhatsApp apagado en config.json). El correo de
     # Outlook se quitó el 2026-10-20 por pedido de Gonza (Outlook rechazaba el
@@ -413,11 +452,16 @@ async def esperar_captcha(page, url, headless, avisar=True, espera_max=180, inte
         if not await hay_captcha(page):
             return None
     if avisar:
+        texto = (f"🧩 Captcha detectado comprando {url}. Resuélvelo en la ventana del navegador "
+                 f"(tienes {espera_max // 60} min); el bot sigue solo cuando desaparezca.")
         try:
-            notify(f"🧩 Captcha detectado comprando {url}. Resuélvelo en la ventana del navegador "
-                   f"(tienes {espera_max // 60} min); el bot sigue solo cuando desaparezca.")
+            # Con la foto de la pantalla, para saber de un vistazo qué pide.
+            notify_foto(texto, await page.screenshot(timeout=5000))
         except Exception:
-            pass
+            try:
+                notify(texto)
+            except Exception:
+                pass
     esperado = 0
     while esperado < espera_max:
         await page.wait_for_timeout(intervalo * 1000)
@@ -503,7 +547,8 @@ async def limite_de_pagina(page):
 
 
 async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
-                     headless, pausa, ya_cargada=False, limpiar_carrito=False):
+                     headless, pausa, ya_cargada=False, limpiar_carrito=False,
+                     cuenta=None):
     """El recorrido de compra sobre una pagina ya abierta: la nueva de
     comprar_producto o la precalentada del navegador caliente (navegador.py),
     que llega con el producto ya cargado (ya_cargada) y un carrito que puede
@@ -631,10 +676,15 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
             await guardar_captura_error(page, url, "captcha")
             return f"⚠️ Producto en carrito pero el checkout pidio captcha: {fallo_captcha}"
 
+        # Datos de la cuenta que compra (multicuenta, 2026-11-10): se leen
+        # de su .env en este momento.
+        import cuentas as CUENTAS
+        cta = cuenta or CUENTAS.principal()
+        d = cta.datos()
         # Con sesion de Mattel (perfil RLC) el correo ya viene puesto y puede
         # no haber campo: se llena solo si esta.
         if await page.locator("#email").count():
-            await page.fill("#email", USER_EMAIL)
+            await page.fill("#email", d["email"])
         await dismiss_shop_modal(page)
 
         try:
@@ -647,18 +697,18 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         not_autofill = ":not([id*='autofill'])"
         campo_direccion = page.locator(f"input[name='address1']{not_autofill}").first
         if await campo_direccion.count() and await campo_direccion.is_visible():
-            await page.fill(f"input[name='firstName']{not_autofill}", SHIP_FIRST_NAME)
-            await page.fill(f"input[name='lastName']{not_autofill}", SHIP_LAST_NAME)
-            await page.fill(f"input[name='address1']{not_autofill}", SHIP_ADDRESS1)
-            if SHIP_ADDRESS2:
-                await page.fill(f"input[name='address2']{not_autofill}", SHIP_ADDRESS2)
-            await page.fill(f"input[name='city']{not_autofill}", SHIP_CITY)
-            await page.fill(f"input[name='postalCode']{not_autofill}", SHIP_POSTAL_CODE)
-            await page.fill(f"input[name='phone']{not_autofill}", SHIP_PHONE)
+            await page.fill(f"input[name='firstName']{not_autofill}", d["first_name"])
+            await page.fill(f"input[name='lastName']{not_autofill}", d["last_name"])
+            await page.fill(f"input[name='address1']{not_autofill}", d["address1"])
+            if d["address2"]:
+                await page.fill(f"input[name='address2']{not_autofill}", d["address2"])
+            await page.fill(f"input[name='city']{not_autofill}", d["city"])
+            await page.fill(f"input[name='postalCode']{not_autofill}", d["postal_code"])
+            await page.fill(f"input[name='phone']{not_autofill}", d["phone"])
 
             # El estado de .env primero, con margen; los de respaldo ya
             # con la pagina lista, sin 5 s cada uno.
-            for i, candidate in enumerate(c for c in (SHIP_STATE, "Ciudad de Mexico", "Ciudad de México") if c):
+            for i, candidate in enumerate(c for c in (d["state"], "Ciudad de Mexico", "Ciudad de México") if c):
                 try:
                     await page.select_option("select[name='zone']", label=candidate,
                                              timeout=5000 if i == 0 else 1000)
@@ -671,11 +721,11 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         # Con sesion (RLC) salen las direcciones guardadas y la "Default"
         # puede no traer telefono ("Please provide your phone", 2026-11-10):
         # se elige la guardada que tenga el telefono de .env.
-        await elegir_direccion_con_telefono(page, SHIP_PHONE)
+        await elegir_direccion_con_telefono(page, d["phone"])
         # RFC con y sin sesion (2026-11-10): antes solo se llenaba en el
         # checkout de invitado y con sesion quedaba vacio ("Please enter a
         # valid RFC code" bloquea "Pay now").
-        await llenar_rfc(page, RFC)
+        await llenar_rfc(page, d["rfc"])
         # Pago con tarjeta: checkout de invitado (#basic-creditCards) o con
         # sesion (recuadro #payment-tiles-creditCards, ya marcado casi siempre).
         if await page.locator("#basic-creditCards").count():
@@ -690,27 +740,27 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         await esperar_frames(page, ("number-ltr", "expiry-ltr",
                                     "verification_value-ltr", "name-ltr"))
 
-        tarjetas = tarjetas_configuradas()
+        tarjetas = cta.datos()["tarjetas"]
+        env_cuenta = os.path.relpath(cta.env, os.path.dirname(_DIR))
         if not tarjetas and not dry:
             # CVV dinamico: si aun no esta en el .env, se avisa y se espera
             # a que lo pongas (se relee cada 2 s). Nunca se paga sin CVV.
             if notificar:
-                notify(f"💳 Falta el CVV en hotwheels/.env (HOTWHEELS_CARD_CVV). Tienes "
+                notify(f"💳 [{cta.nombre}] Falta el CVV en {env_cuenta} (HOTWHEELS_CARD_CVV). Tienes "
                        f"{ESPERA_CVV_SEGUNDOS} s: guárdalo y el bot paga solo. {url}")
             print(f"  💳 Esperando el CVV en .env (hasta {ESPERA_CVV_SEGUNDOS} s)...")
             for _ in range(ESPERA_CVV_SEGUNDOS // 2):
                 await page.wait_for_timeout(2000)
-                tarjetas = tarjetas_configuradas()
+                tarjetas = cta.datos()["tarjetas"]
                 if tarjetas:
                     break
             if not tarjetas:
                 resultado = (f"⚠️ Producto en carrito pero NO se pagó: falta el CVV en "
-                             f"hotwheels/.env. Paga a mano en la ventana: {url}")
+                             f"{env_cuenta}. Paga a mano en la ventana: {url}")
                 if notificar:
                     notify(resultado)
                 return resultado
-        tarjetas = tarjetas or [
-            {"number": CARD_NUMBER, "expiry": CARD_EXPIRY, "cvv": CARD_CVV, "name": CARD_NAME, "n": 1}]
+        tarjetas = tarjetas or [dict(d["tarjeta1"], n=1)]
         await llenar_tarjeta(page, tarjetas[0])
         reloj.marca("tarjeta")
 
@@ -761,6 +811,12 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
                             "de Mattel ANTES de volver a intentar")
         resultado += f"\n{reloj.texto()}"
         print("  " + reloj.texto())
+        # CVV dinamico: ya se uso; no se queda guardado en el .env.
+        try:
+            if cta.borrar_cvv():
+                resultado += f"\n🔒 CVV borrado de {env_cuenta}"
+        except Exception as e:
+            print(f"  ⚠️ No se pudo borrar el CVV: {e}")
         if notificar:
             notify(resultado)
     except Exception as e:
@@ -933,7 +989,7 @@ async def esperar_frames(page, marcas, timeout_ms=10000, intervalo_ms=150):
 
 async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
                            permitir_pausa=True, notificar=True, headless=False,
-                           navegador=None):
+                           navegador=None, cuenta=None):
     """Compra (o intenta) UNA URL.
 
     cantidad/dry_run/permitir_pausa permiten compras puntuales (boton
@@ -955,13 +1011,17 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
     # navegador y abrian un Chromium limpio, sin la sesion de Mattel, asi que
     # el drop del RWB 930 fallo por "sin sesion". Con el perfil activo, toda
     # pieza RLC se compra en el navegador que tiene la sesion guardada.
-    if navegador is None and es_pieza_rlc(url) and os.environ.get("HOTWHEELS_PERFIL_MATTEL") == "1":
+    # Una cuenta que no es la principal compra SIEMPRE en su navegador, con
+    # su sesion (multicuenta, 2026-11-10).
+    extra = cuenta is not None and not cuenta.es_principal
+    if navegador is None and (extra or (es_pieza_rlc(url) and os.environ.get("HOTWHEELS_PERFIL_MATTEL") == "1")):
         import navegador as _nav
-        navegador = _nav.obtener()
+        navegador = _nav.obtener(cuenta)
     if navegador is not None:
-        return await asyncio.wrap_future(navegador.comprar(
+        resultado = await asyncio.wrap_future(navegador.comprar(
             url, cantidad=cantidad, dry_run=dry_run, permitir_pausa=permitir_pausa,
-            notificar=notificar))
+            notificar=notificar, cuenta=cuenta))
+        return (f"👤 {cuenta.nombre}: " + resultado) if extra else resultado
     selector = get_selector(url)
     if selector is None:
         return f"❌ Tienda no soportada: {url}"
@@ -981,7 +1041,7 @@ async def comprar_producto(url, proxy=None, cantidad=None, dry_run=None,
                 reloj.marca("navegador")
 
                 return await _comprar_en(page, url, selector, reloj, dry, qty_objetivo,
-                                         notificar, headless, pausa)
+                                         notificar, headless, pausa, cuenta=cuenta)
             finally:
                 await browser.close()
     except Exception as e:

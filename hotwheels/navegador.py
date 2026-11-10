@@ -251,7 +251,8 @@ class NavegadorCaliente:
             return await B._comprar_en(page, url, selector, reloj, dry,
                                        cantidad,
                                        kw.get("notificar", True), self.headless, pausa,
-                                       ya_cargada=cargada, limpiar_carrito=True)
+                                       ya_cargada=cargada, limpiar_carrito=True,
+                                       cuenta=kw.get("cuenta"))
         except Exception as e:
             await B.guardar_captura_error(page, url, "general")
             resultado = f"❌ Error inesperado con {url} | Error: {e}"
@@ -277,12 +278,22 @@ class NavegadorCaliente:
 
 
 _NAVEGADOR = None
+_NAVEGADORES = {}        # cuentas que no son la principal: nombre -> NavegadorCaliente
 _LOCK = threading.Lock()
 
 
-def obtener():
-    """El navegador caliente del proceso (None si esta apagado)."""
+def obtener(cuenta=None):
+    """El navegador caliente de una cuenta (None si esta apagado).
+
+    La principal usa el de siempre (perfil_mattel/ si HOTWHEELS_PERFIL_MATTEL=1).
+    Cada cuenta extra tiene el suyo, con su perfil y su propio hilo, para
+    comprar en paralelo (multicuenta, 2026-11-10); esas usan siempre su perfil."""
     global _NAVEGADOR
+    if cuenta is not None and not cuenta.es_principal:
+        with _LOCK:
+            if cuenta.nombre not in _NAVEGADORES:
+                _NAVEGADORES[cuenta.nombre] = NavegadorCaliente(perfil=cuenta.perfil)
+            return _NAVEGADORES[cuenta.nombre]
     if not precalentar_activo() and not perfil_activo():
         return None
     with _LOCK:

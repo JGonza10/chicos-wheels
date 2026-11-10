@@ -73,6 +73,14 @@ class Control:
         except (IndexError, ValueError):
             self._api("answerCallbackQuery", callback_query_id=cq["id"])
             return None
+        if accion in ("pd", "pn"):
+            # Calendario de drops (2026-11-10): "Programar disparo" / "No".
+            # El id es del drop, no de un hallazgo.
+            f = self.acciones.get("drop")
+            texto = f(hid, accion == "pd") if f else "El calendario de drops no está activo."
+            self._api("answerCallbackQuery", callback_query_id=cq["id"], text=texto[:180])
+            self._api("sendMessage", chat_id=self.chat_id, text=texto)
+            return "drop_programado" if accion == "pd" else "drop_descartado"
         if accion == "rc":
             # Pieza que encontro el monitor de relevo (Railway): se trae al
             # panel local y sigue el camino de siempre (confirmar y comprar).
@@ -117,12 +125,13 @@ class Control:
                 texto += "\n" + nota()
             self._api("answerCallbackQuery", callback_query_id=cq["id"], text="Confirma abajo")
             self._api("sendMessage", chat_id=self.chat_id, text=texto,
-                      reply_markup={"inline_keyboard": [[
-                          {"text": "✅ Sí, comprar", "callback_data": "cc:%d:n" % hid},
-                          {"text": "Cancelar", "callback_data": "x:%d" % hid}]]})
+                      reply_markup={"inline_keyboard": [
+                          [{"text": "✅ Sí, comprar 1", "callback_data": "cc:%d:n" % hid},
+                           {"text": "🛒 Comprar el máximo", "callback_data": "cm:%d" % hid}],
+                          [{"text": "Cancelar", "callback_data": "x:%d" % hid}]]})
             return "confirmacion_pedida"
 
-        if accion == "cc":                                  # Confirmacion recibida
+        if accion in ("cc", "cm"):                          # Confirmacion recibida
             fecha = (cq.get("message") or {}).get("date")
             ahora = ahora if ahora is not None else time.time()
             if fecha and ahora - fecha > CADUCA_CONFIRMACION_SEG:
@@ -130,7 +139,8 @@ class Control:
                           text="Esa confirmación caducó. Pulsa Comprar otra vez.", show_alert=True)
                 return "caducada"
             forzar = len(partes) > 2 and partes[2] == "f"
-            r = self.acciones["comprar"](hid, 1, forzar)
+            # "cm": el maximo que permita la pagina ("Limit 2 Per Customer").
+            r = self.acciones["comprar"](hid, 0 if accion == "cm" else 1, forzar)
             if r.get("ok"):
                 texto = ("Quedó en la cola (sigue otra compra en curso)." if r.get("en_cola")
                          else "🛒 Comprando… te aviso el resultado por aquí.")

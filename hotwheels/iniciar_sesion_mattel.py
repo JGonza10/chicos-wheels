@@ -3,7 +3,11 @@
 Inicia sesion en Mattel Creations UNA vez para que el bot pueda comprar piezas
 RLC (Red Line Club), que piden membresia y sesion iniciada.
 
-    python iniciar_sesion_mattel.py
+    python iniciar_sesion_mattel.py                  # tu cuenta (principal)
+    python iniciar_sesion_mattel.py --cuenta hijo    # otra cuenta (multicuenta)
+
+Con --cuenta se crea hotwheels/cuentas/<nombre>/ con un .env de plantilla:
+llena ahi la tarjeta, direccion, telefono y RFC de esa persona.
 
 1. Se abre Chromium con el perfil del bot (carpeta perfil_mattel/, fuera de git).
 2. Entra con tu cuenta Red Line Club (correo + codigo, como siempre).
@@ -28,12 +32,23 @@ URL_LOGIN = "https://creations.mattel.com/en-mx/account"
 
 async def main():
     from playwright.async_api import async_playwright
+    import cuentas as CUENTAS
     import navegador
     from bot_logic import sesion_mattel_activa
 
+    nombre = None
+    if "--cuenta" in sys.argv:
+        i = sys.argv.index("--cuenta")
+        nombre = sys.argv[i + 1] if i + 1 < len(sys.argv) else None
+        if not CUENTAS.nombre_valido(nombre or ""):
+            print("❌ Nombre de cuenta no válido (minúsculas, números, - o _). Ej: --cuenta hijo")
+            return 1
+    cuenta = CUENTAS.crear(nombre) if nombre else CUENTAS.principal()
+    print(f"👤 Cuenta: {cuenta.nombre}  (perfil: {cuenta.perfil})")
+
     async with async_playwright() as p:
         try:
-            ctx = await p.chromium.launch_persistent_context(navegador.PERFIL, headless=False)
+            ctx = await p.chromium.launch_persistent_context(cuenta.perfil, headless=False)
         except Exception as e:
             print("❌ No se pudo abrir el perfil del bot. ¿La app (python app.py) está corriendo?")
             print("   Ciérrala, corre este script y vuelve a abrirla.")
@@ -51,7 +66,7 @@ async def main():
                 if activa:
                     # Las cookies de sesion de Mattel se borran al cerrar la
                     # ventana: se copian mientras sigue abierta.
-                    await navegador.guardar_cookies_sesion(ctx)
+                    await navegador.guardar_cookies_sesion(ctx, cuenta.cookies)
             except Exception:
                 pass
             await asyncio.sleep(2)
@@ -59,7 +74,10 @@ async def main():
             await ctx.close()
         except Exception:
             pass
-    if activa:
+    if activa and not cuenta.es_principal:
+        print(f"✅ Sesión de '{cuenta.nombre}' guardada. Llena sus datos en {cuenta.env}")
+        print("   (tarjeta, dirección, teléfono, RFC). El bot la usa sin reiniciar.")
+    elif activa:
         print("✅ Sesión guardada. Pon HOTWHEELS_PERFIL_MATTEL=1 en .env y reinicia la app.")
     else:
         print("⚠️ No vi la sesión iniciada. Si sí entraste, puede que Mattel no la muestre;")

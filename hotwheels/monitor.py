@@ -894,6 +894,12 @@ def revisar_mercadolibre(estado):
         conocidos = vistos_todos.get(termino)
         primera_vez = conocidos is None
         conocidos = dict(conocidos or {})
+        if b.get("solo_oficial"):
+            # Solo tiendas oficiales (y si la busqueda lo dice, de una marca):
+            # evita revendedores y publicaciones falsas con la misma foto.
+            marca = (b.get("tienda") or "").lower()
+            listados = [it for it in listados if it.get("oficial")
+                        and (not marca or marca in (it.get("tienda") or "").lower())]
         for it in listados:
             tope = b.get("precio_max")
             precio = it["precio_mxn"]
@@ -913,6 +919,8 @@ def revisar_mercadolibre(estado):
             if ya_notificado(f"ml:{it['id']}:{int(precio)}"):
                 continue
             envio = " · envío gratis" if it["envio_gratis"] else ""
+            if it.get("oficial"):
+                envio += " · 🏷️ tienda oficial" + (f" {it['tienda']}" if it.get("tienda") else "")
             cuerpo = (f"<b>{titulo_aviso}</b>\n\n"
                       f"{html.escape(it['titulo'])}\n"
                       f"<b>MXN ${precio:,.0f}</b>{envio}\n"

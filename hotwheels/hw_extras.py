@@ -899,6 +899,8 @@ def listar_busquedas_ml(ruta):
             "precio_max": e.get("precio_max"),
             "activa": bool(e.get("activa", True)),
             "agregada": e.get("agregada"),
+            "solo_oficial": bool(e.get("solo_oficial")),
+            "tienda": (e.get("tienda") or "").strip(),
         })
     return salida
 
@@ -967,5 +969,9 @@ def buscar_listados_ml(termino, token=None, limite=25, condicion="new"):
             "imagen": (it.get("thumbnail") or "").replace("http://", "https://"),
             "envio_gratis": bool((it.get("shipping") or {}).get("free_shipping")),
             "condicion": it.get("condition") or "",
+            # Tienda oficial (p. ej. la de Mattel, donde salen los drops
+            # exclusivos de Mercado Libre como la C-10 Mariachi, 2026-11-10).
+            "oficial": bool(it.get("official_store_id")),
+            "tienda": (it.get("official_store_name") or "").strip(),
         })
     return [s for s in salida if s["id"]], None

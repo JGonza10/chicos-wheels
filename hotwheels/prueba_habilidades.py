@@ -136,8 +136,11 @@ tg_p = pieza("telegram", 700.0)
 n = len(compras)
 check("Comprar pide confirmacion (no compra)", tg.procesar(toque("c:%d" % tg_p)) == "confirmacion_pedida" and len(compras) == n)
 envio = [p for m, p in llamadas if m == "sendMessage"][-1]
-botones = envio["reply_markup"]["inline_keyboard"][0]
-check("la confirmacion trae Si/Cancelar", botones[0]["callback_data"] == "cc:%d:n" % tg_p and botones[1]["callback_data"] == "x:%d" % tg_p, botones)
+filas = envio["reply_markup"]["inline_keyboard"]
+botones = filas[0]
+check("la confirmacion trae Si (1), Comprar el maximo y Cancelar",
+      botones[0]["callback_data"] == "cc:%d:n" % tg_p and botones[1]["callback_data"] == "cm:%d" % tg_p
+      and filas[1][0]["callback_data"] == "x:%d" % tg_p, filas)
 check("Cancelar no hace nada", tg.procesar(toque("x:%d" % tg_p)) == "cancelada" and len(compras) == n)
 check("confirmar SI compra", tg.procesar(toque("cc:%d:n" % tg_p)) == "comprando"); esperar_bot()
 check("...con cantidad 1", compras[-1] == ("https://creations.mattel.com/products/telegram", 1), compras[-1])
@@ -153,7 +156,7 @@ tg_s = pieza("telegram-cara", 2500.0)
 tg.procesar(toque("c:%d" % tg_s))
 envio = [p for m, p in llamadas if m == "sendMessage"][-1]
 check("sin tope: la confirmacion no advierte nada, solo 'Si, comprar'",
-      "Ojo" not in envio["text"] and envio["reply_markup"]["inline_keyboard"][0][0]["text"] == "✅ Sí, comprar"
+      "Ojo" not in envio["text"] and envio["reply_markup"]["inline_keyboard"][0][0]["text"].startswith("✅ Sí, comprar")
       and envio["reply_markup"]["inline_keyboard"][0][0]["callback_data"].endswith(":n"), envio)
 n = len(compras)
 tg.procesar(toque("cc:%d:n" % tg_s)); esperar_bot()

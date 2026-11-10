@@ -23,6 +23,40 @@ Monitor + bot de compra de Mattel Creations. Antes era el proyecto `15 Bot Hot W
 - La tarea programada `HotWheels_MonitorSiempre` corre `vigilar_siempre.ps1`. Si nada escucha en el puerto 3000, o si `latido.txt` lleva más de 10 minutos sin cambiar, relanza la app.
 - En Railway el bot de compra no existe: sin `HOTWHEELS_ACTIVO`, `/bot` no se monta y el enlace no aparece.
 
+## Multicuenta y calendario de drops (2026-11-10)
+
+**Varias cuentas compran en paralelo** (`cuentas.py`). Cada persona tiene su membresía RLC, su sesión, su tarjeta y su dirección:
+
+| Cuenta | Datos | Sesión |
+|---|---|---|
+| `principal` (Gonza) | `hotwheels/.env` | `hotwheels/perfil_mattel/` |
+| otra (p. ej. `hijo`) | `hotwheels/cuentas/hijo/.env` | `hotwheels/cuentas/hijo/perfil_mattel/` |
+
+1. Alta: `python iniciar_sesion_mattel.py --cuenta hijo` (con la app cerrada). Crea la carpeta con un `.env` de plantilla y abre la ventana para que esa persona inicie sesión.
+2. Llenar su `.env` con las mismas variables `HOTWHEELS_*`. `HOTWHEELS_CUENTA_ACTIVA=0` la pausa.
+3. Cada disparo programado compra con **todas las cuentas activas a la vez**: un navegador por cuenta, cada aviso marcado `[cuenta]`.
+- Los datos se leen del `.env` al pagar, sin reiniciar. El CVV dinámico se borra solo después de pagar.
+- Mattel limita por cliente: con la misma tarjeta o dirección puede cancelar los pedidos.
+
+**Calendario de drops** (`drops.py`):
+- A los minutos 7 y 37 de cada hora, el bot busca la hora de lanzamiento ("Launches … PT") en lo vigilado a mano, en los "coming soon" y en los deseados, Alto impacto o RLC de los últimos 21 días.
+- Cada lanzamiento futuro llega una vez por Telegram con **"📅 Programar disparo" / "No"**.
+- Un drop programado sigue esta agenda:
+  - −30 min: chequeo de todas las cuentas (sesión, tarjeta, CVV, RFC, teléfono, carrito y modo de pago).
+  - −5 min: aviso "pon tu CVV".
+  - −2 min: navegador listo con la pieza.
+  - A la hora: disparo con el límite de la página, reintentando 5 min.
+
+**Otras habilidades:**
+- **Sesión:** a las 9:05 y 20:05 se revisa la sesión de Mattel de cada cuenta, sin abrir el navegador. Si venció, avisa.
+- **Captcha:** el aviso trae la foto de la pantalla.
+- **Restock:** si el disparo se agota, la pieza pasa sola a `vigilar.json`.
+- **Comprar el máximo:** botón en la confirmación de Telegram. Pide el límite de la página, no 1.
+- **Después de pagar:**
+  - el disparo programado también anota la compra en el inventario (antes no lo hacía),
+  - llega un **borrador para Facebook/Instagram** con precio sugerido: la reventa conocida, o costo × 1.8.
+- **Mercado Libre:** una búsqueda con `"solo_oficial": true` (y `"tienda": "mattel"`) avisa solo de tiendas oficiales. Necesita `MERCADOLIBRE_ACCESS_TOKEN`.
+
 ## Monitor de relevo en Railway
 
 Para que siempre haya alguien vigilando aunque la PC esté apagada.
@@ -64,6 +98,7 @@ python prueba_velocidad.py      # express, francotirador, modo drop, 429, Telegr
 python prueba_rapidez_compra.py # compra sin esperas fijas y cronómetro (Chromium real, páginas locales)
 python prueba_navegador_caliente.py # navegador caliente + sesión RLC contra una tienda Mattel falsa (DRY RUN)
 python prueba_postcompra.py     # pedido y total cobrado, seguimiento del envío y resumen semanal
+python prueba_multicuenta.py    # cuentas en paralelo, CVV, calendario de drops, restock, borrador y botones
 cd ..; python -m unittest tests.test_bot -v      # montaje, acceso y alta en el inventario
 ```
 
