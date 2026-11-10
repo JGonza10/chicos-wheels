@@ -41,18 +41,31 @@ CARD_CVV = os.environ.get("HOTWHEELS_CARD_CVV", "")
 CARD_NAME = os.environ.get("HOTWHEELS_CARD_NAME", "")
 
 
+ESPERA_CVV_SEGUNDOS = 120
+
+
 def tarjetas_configuradas():
     """La tarjeta principal (HOTWHEELS_CARD_*) y las de respaldo
     (HOTWHEELS_CARD2_* ... HOTWHEELS_CARD10_*), en ese orden. Una de respaldo
-    sin numero, vencimiento o CVV se salta. Se lee al momento de comprar:
-    cambiar el .env y reiniciar basta."""
+    sin numero, vencimiento o CVV se salta.
+
+    Se lee del .env AL MOMENTO DE PAGAR, sin reiniciar (2026-11-10): Gonza
+    usa CVV dinamico y lo pone en el .env minutos antes del drop. Lo del
+    archivo gana; si no esta ahi, se usa la variable del proceso."""
+    from dotenv import dotenv_values
+    ruta = os.path.join(_DIR, ".env")
+    try:
+        archivo = dotenv_values(ruta) if os.path.exists(ruta) else {}
+    except Exception:
+        archivo = {}
+
+    def valor(clave):
+        return ((archivo.get(clave) or "").strip() or os.environ.get(clave, "").strip())
+
     tarjetas = []
     for n in range(1, 11):
         pre = "HOTWHEELS_CARD_" if n == 1 else f"HOTWHEELS_CARD{n}_"
-        t = {k: os.environ.get(pre + k.upper(), "").strip()
-             for k in ("number", "expiry", "cvv", "name")}
-        if n == 1:
-            t = {"number": CARD_NUMBER, "expiry": CARD_EXPIRY, "cvv": CARD_CVV, "name": CARD_NAME}
+        t = {k: valor(pre + k.upper()) for k in ("number", "expiry", "cvv", "name")}
         if t["number"] and t["expiry"] and t["cvv"]:
             t["name"] = t["name"] or CARD_NAME
             t["n"] = n
@@ -654,7 +667,26 @@ async def _comprar_en(page, url, selector, reloj, dry, qty_objetivo, notificar,
         await esperar_frames(page, ("number-ltr", "expiry-ltr",
                                     "verification_value-ltr", "name-ltr"))
 
-        tarjetas = tarjetas_configuradas() or [
+        tarjetas = tarjetas_configuradas()
+        if not tarjetas and not dry:
+            # CVV dinamico: si aun no esta en el .env, se avisa y se espera
+            # a que lo pongas (se relee cada 2 s). Nunca se paga sin CVV.
+            if notificar:
+                notify(f"💳 Falta el CVV en hotwheels/.env (HOTWHEELS_CARD_CVV). Tienes "
+                       f"{ESPERA_CVV_SEGUNDOS} s: guárdalo y el bot paga solo. {url}")
+            print(f"  💳 Esperando el CVV en .env (hasta {ESPERA_CVV_SEGUNDOS} s)...")
+            for _ in range(ESPERA_CVV_SEGUNDOS // 2):
+                await page.wait_for_timeout(2000)
+                tarjetas = tarjetas_configuradas()
+                if tarjetas:
+                    break
+            if not tarjetas:
+                resultado = (f"⚠️ Producto en carrito pero NO se pagó: falta el CVV en "
+                             f"hotwheels/.env. Paga a mano en la ventana: {url}")
+                if notificar:
+                    notify(resultado)
+                return resultado
+        tarjetas = tarjetas or [
             {"number": CARD_NUMBER, "expiry": CARD_EXPIRY, "cvv": CARD_CVV, "name": CARD_NAME, "n": 1}]
         await llenar_tarjeta(page, tarjetas[0])
         reloj.marca("tarjeta")
