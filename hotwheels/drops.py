@@ -104,7 +104,8 @@ def _fila(r):
             "hechos": set(filter(None, (r[6] or "").split(","))), "creado": r[7]}
 
 
-_COLS = "id, url, titulo, cuando_utc, estado, cantidad, hechos, creado"
+# Columnas que lee _fila(), en ese orden (escritas en cada consulta: nada de
+# armar SQL pegando texto).
 
 
 def proponer(db, url, titulo, cuando_utc):
@@ -127,7 +128,7 @@ def proponer(db, url, titulo, cuando_utc):
 
 def obtener(db, drop_id):
     conn = sqlite3.connect(db)
-    r = conn.execute("SELECT %s FROM drops WHERE id = ?" % _COLS, (drop_id,)).fetchone()
+    r = conn.execute("SELECT id, url, titulo, cuando_utc, estado, cantidad, hechos, creado FROM drops WHERE id = ?", (drop_id,)).fetchone()
     conn.close()
     return _fila(r) if r else None
 
@@ -157,8 +158,8 @@ def marcar_hecho(db, drop_id, paso):
 
 def programados(db):
     conn = sqlite3.connect(db)
-    filas = conn.execute("SELECT %s FROM drops WHERE estado = 'programado' ORDER BY cuando_utc"
-                         % _COLS).fetchall()
+    filas = conn.execute("SELECT id, url, titulo, cuando_utc, estado, cantidad, hechos, creado FROM drops WHERE estado = 'programado' "
+                         "ORDER BY cuando_utc").fetchall()
     conn.close()
     return [_fila(r) for r in filas]
 
@@ -166,8 +167,8 @@ def programados(db):
 def proximos(db, limite=20):
     conn = sqlite3.connect(db)
     ahora = datetime.now(timezone.utc).isoformat()
-    filas = conn.execute("SELECT %s FROM drops WHERE cuando_utc >= ? AND estado != 'descartado' "
-                         "ORDER BY cuando_utc LIMIT ?" % _COLS, (ahora, limite)).fetchall()
+    filas = conn.execute("SELECT id, url, titulo, cuando_utc, estado, cantidad, hechos, creado FROM drops WHERE cuando_utc >= ? AND "
+                         "estado != 'descartado' ORDER BY cuando_utc LIMIT ?", (ahora, limite)).fetchall()
     conn.close()
     return [_fila(r) for r in filas]
 
